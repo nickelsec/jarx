@@ -434,9 +434,10 @@ Rules:
   rescan.
 - Earlier leak findings carry forward (masked) until the file is gone. Mode
   counts are running tallies per session id.
-- SQLite files are opened read-only and immutable
-  (`mode=ro&immutable=1`), so jarx never takes a lock or writes a WAL while
-  Codex runs.
+- SQLite files are opened in place with `mode=ro`, `PRAGMA query_only = 1`
+  and a short busy timeout. If one is locked, jarx skips it with an info
+  finding. It never copies them, since a copy would put history on disk (see
+  [design.md](design.md)).
 - JSONL and zstd files are streamed line by line. Files over 200 MB are
   skipped with an info finding.
 
@@ -455,6 +456,16 @@ jarx supports these as **observed formats**. The parsers are built from fake
 fixtures shaped like real files, tolerate version changes, are labeled
 "observed, not documented" in the code and the UI, and fall back to
 "unknown" when a field is missing. They never error out.
+
+Fixture shapes for Claude transcripts and Codex rollouts come from our own
+format notes in the boughs repo (`docs/format-claude-code.md` and
+`docs/format-codex.md`), not from guessing. Two things from those notes
+matter here: both agents replay records (Claude inside one transcript, Codex
+into a new rollout file), so mode counts dedupe by session, and Codex
+rollouts live in `sessions/YYYY/MM/DD/` with the project in
+`session_meta.cwd`. Fields those notes don't cover, like the mode fields and
+the `.zst` and sqlite files, are built from observed structure and marked as
+such in the fixture.
 
 ## Detection rules
 
@@ -669,6 +680,30 @@ Results are cached by content hash, so an unchanged artifact isn't sent twice.
 | `jarx setup llm` | set base URL, model, and key or env var name |
 | `jarx repos add\|rm\|ls` | manage extra project paths |
 | `jarx version` | print version and advisory data date |
+| `jarx scan --home <dir>` / `jarx ui --home <dir>` | treat `<dir>` as the home dir instead of the real one (see [Demo home](#demo-home)) |
+
+### Demo home
+
+`--home <dir>` points `jarx scan` and `jarx ui` at a fake home. Everything
+jarx would read from the real machine comes from inside `<dir>` instead:
+agent config dirs, project records, history, cred locations, and jarx's own
+state (snapshots, cursor, cache), so demo runs never mix with real ones. With
+`--home`, jarx doesn't read managed policy dirs, the Windows registry, macOS
+plists, the real env or the real PATH. Env vars for the env var channel come
+from `<dir>/.jarx-env` instead.
+
+The repo ships `testdata/demo/`, a fake home with planted problems:
+
+- a CLAUDE.md with hidden unicode and an HTML comment aimed at the agent
+- a skill with injection text
+- a fake `.env` (values are obviously fake, like `sk-demo-0000`)
+- a risky `.mcp.json` with an unpinned `npx` server, a token in a URL and a
+  server whose tools have poisoned descriptions (served by a small fake MCP
+  server built from the repo, so probing it is safe)
+- settings with `bypassPermissions` and a broad `Bash(*)` allow
+
+Demos, screenshots and docs always use `jarx ui --home testdata/demo`, never
+a real machine.
 
 ## Dashboard
 
@@ -797,7 +832,8 @@ v1 is done when all of these pass:
 8. **Cross-platform:** CI runs on Windows, macOS and Linux.
 
 Tests use fake fixtures only, never real config from a dev machine. All
-features follow TDD.
+features follow TDD. Every detection rule ships with its own poisoned and
+clean fixtures, written by us as the failing test before the rule exists.
 
 ## Limits
 
