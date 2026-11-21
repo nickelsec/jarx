@@ -24,6 +24,7 @@ credentials. Single Go binary with a CLI and a local dashboard.
 - Support Windows, macOS and Linux config paths. No Windows-only path logic.
 
 ## How we work
+- Read docs/prd.md and docs/design.md before starting any feature.
 - Every feature and bug fix: use the test-driven-development skill. Never
   edit a test just to make it pass.
 - Before saying anything is done: use the verification-before-completion
