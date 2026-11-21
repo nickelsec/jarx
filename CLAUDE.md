@@ -5,7 +5,11 @@ machine: instruction files, MCP servers, skills, hooks, permissions and
 credentials. Single Go binary with a CLI and a local dashboard.
 
 ## Hard rules
-- jarx never opens credential stores. It reports that they exist and where.
+- jarx never reads credential values. `.env` files are opened only to get key
+  names. Ambient CLI creds (aws, gh, gcloud, ssh, etc) get existence plus safe
+  metadata like profile names or whether an ssh key has a passphrase. The
+  agents' own login files get existence only. jarx never reads other apps'
+  OS keychain entries. It may store and read its own LLM key there.
 - Any secret jarx finds inside a config file is masked in memory and never
   reaches the LLM, logs, test output or the dashboard.
 - jarx lists MCP servers and tools but never calls them.
@@ -13,10 +17,14 @@ credentials. Single Go binary with a CLI and a local dashboard.
 - Tests use fake fixtures only, never real configs from this machine.
 - These security behaviors get tests like any other feature.
 - Write our own detection rules. Don't copy other scanners.
-- Take config paths from the official docs. Never guess.
+- Take config paths from the official docs. Never guess. History and state
+  formats (session transcripts, Codex sqlite and zstd files) may come from
+  observed structure, labeled "observed, not documented" in code and UI, and
+  must degrade to "unknown" instead of erroring.
 - Support Windows, macOS and Linux config paths. No Windows-only path logic.
 
 ## How we work
+- Read docs/prd.md and docs/design.md before starting any feature.
 - Every feature and bug fix: use the test-driven-development skill. Never
   edit a test just to make it pass.
 - Before saying anything is done: use the verification-before-completion
