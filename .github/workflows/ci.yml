@@ -155,9 +155,18 @@ jobs:
             exit 1
           fi
           # A second scan reuses the key, so the fingerprints don't change.
+          # Only the state dir line may differ: the dir exists now.
           key=$(sha256sum testdata/demo/.jarx-state/fingerprint.key)
           again=$(offline "$RUNNER_TEMP/jarx" scan --home testdata/demo)
-          if [ "$again" != "$out" ] || [ "$key" != "$(sha256sum testdata/demo/.jarx-state/fingerprint.key)" ]; then
-            echo "a second scan changed the key or printed something different"
+          if [ "$key" != "$(sha256sum testdata/demo/.jarx-state/fingerprint.key)" ]; then
+            echo "a second scan changed the fingerprint key"
+            exit 1
+          fi
+          if ! grep -q '^  state dir .*(exists)$' <<<"$again"; then
+            echo "the second scan doesn't show the state dir as existing"
+            exit 1
+          fi
+          if ! diff <(grep -v '^  state dir ' <<<"$out") <(grep -v '^  state dir ' <<<"$again"); then
+            echo "a second scan printed something different (diff above)"
             exit 1
           fi
