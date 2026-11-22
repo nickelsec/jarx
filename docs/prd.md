@@ -174,6 +174,10 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
   AGENTS.md guide, a per-file limit in the advanced config page), so jarx
   marks a file off only when the per-file reading cuts it and notes what
   the combined reading would cut. The rules always read the whole file.
+  Project files load only in a trusted project. The AGENTS.md guide doesn't
+  say so, but the Codex 0.150.0 changelog (2026-08-26) does: "Untrusted
+  projects no longer supply project-level `AGENTS.md` instructions." The
+  global file loads either way.
 - **Skills and hooks:** `.agents/skills` from the working dir up to the repo
   root, `$HOME/.agents/skills` (`HOME`, not `CODEX_HOME`),
   `/etc/codex/skills`, all documented `hooks.json` locations and inline
@@ -983,6 +987,9 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   profile a run selects with `--profile`, and which hooks you've trusted in
   `/hooks` (Codex keeps that against each hook's hash, somewhere the docs
   don't name).
+- **Which Codex version you run.** Codex before 0.150.0 loads a project's
+  AGENTS.md even when the project isn't trusted. jarx follows current
+  Codex until `analyze/versions` can tell which one is installed.
 - **Approval of external imports.** Claude asks before it loads an
   `@import` from a project file that points outside the project, and the
   docs don't say where that answer is kept. jarx lists those imports as
@@ -1034,6 +1041,8 @@ learn.chatgpt.com.
   /permission-modes, /sandboxing, /hooks, /skills, /sub-agents, /memory,
   /plugins-reference, /claude-directory, /authentication, /sessions,
   /tools-reference, /output-styles
+- Codex changelog: https://learn.chatgpt.com/docs/changelog (CLI 0.150.0,
+  read 2026-11-23)
 - Codex: https://developers.openai.com/codex/config-file/config-basic,
   /config-file/config-advanced, /config-reference, /permissions,
   /concepts/sandboxing, /agent-approvals-security, /mcp, /guides/agents-md,

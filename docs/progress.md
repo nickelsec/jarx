@@ -117,7 +117,7 @@ stale ones marked.
     Face don't document a prefix, so only the name rule finds them), MCP
     configs (phase 4), Codex config files that aren't valid TOML, plugin
     `installed_plugins.json`, the "sees" state in the credential view
-    (phase 5), and the line a secret is on
+    (phase 5), and the line a secret is on (f70cc46)
 - [ ] `analyze/poison`: hidden text and poisoned content rules
 - [ ] `analyze/perms`: effective permissions view
 - [ ] `analyze/unknown`: unknown settings report

@@ -65,7 +65,7 @@ func (Adapter) Instructions(c agent.Context, projects []model.Project) ([]model.
 			continue
 		}
 		v := s.forProject(*p)
-		r := &chainReader{v: v}
+		r := &chainReader{v: v, untrusted: agentsTrustWhy(*p)}
 		p.Instructions = append(p.Instructions, r.build(p.Path.Raw())...)
 		findings = append(findings, v.instructionFindings()...)
 	}
@@ -131,6 +131,24 @@ type chainReader struct {
 	v     *view
 	out   []model.Instruction
 	sizes []int // raw byte size of each file in out, which the cap counts
+	// untrusted is why project files don't load, or "" when they do.
+	untrusted string
+}
+
+// agentsTrustWhy says why a project's AGENTS.md files don't load, or "".
+// The Codex 0.150.0 changelog (2026-08-26): "Untrusted projects no longer
+// supply project-level AGENTS.md instructions." The AGENTS.md guide doesn't
+// say, and older Codex versions load them.
+func agentsTrustWhy(p model.Project) string {
+	for _, t := range p.Trust {
+		if t.Origin.Agent == model.AgentCodex {
+			if t.Level == model.TrustTrusted {
+				return ""
+			}
+			return "Codex 0.150.0 and later skip a project's AGENTS.md until you trust the project, and this one's trust is " + string(t.Level)
+		}
+	}
+	return "Codex 0.150.0 and later skip a project's AGENTS.md until you trust the project, and this one has no trust record"
 }
 
 // build lists the global file, then one file per dir from the project root
@@ -144,7 +162,12 @@ func (r *chainReader) build(projectDir string) []model.Instruction {
 	dirs := r.v.s.projectDirs(projectDir)
 	slices.Reverse(dirs)
 	for _, d := range dirs {
-		if w := r.dir(d, model.ScopeProject, names); w >= 0 {
+		w := r.dir(d, model.ScopeProject, names)
+		if w >= 0 && r.untrusted != "" {
+			r.out[w].Origin.InEffect, r.out[w].Origin.Why = false, r.v.s.text(r.untrusted)
+			continue // not in the chain, so it doesn't count toward the cap
+		}
+		if w >= 0 {
 			winners = append(winners, w)
 		}
 	}

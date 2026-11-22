@@ -176,13 +176,57 @@ func TestAZeroCapLoadsNothing(t *testing.T) {
 	}
 }
 
-func TestUntrustedProjectsStillLoadAgentsMD(t *testing.T) {
+func TestProjectAgentsMDWaitsForTrust(t *testing.T) {
+	// Codex 0.150.0 changelog: untrusted projects no longer supply
+	// project-level AGENTS.md instructions.
+	for name, trust := range map[string]model.TrustLevel{"untrusted": model.TrustUntrusted, "no record": ""} {
+		c := fakeHome(t, map[string]string{
+			".codex/AGENTS.md": "my defaults",
+			"p/.git/HEAD":      "ref",
+			"p/AGENTS.md":      "repo guidance",
+			"p/sub/AGENTS.md":  "more repo guidance",
+		})
+
+		is, _ := instructionsFor(t, c, "/p/sub", trust)
+
+		for _, rel := range []string{"p/AGENTS.md", "p/sub/AGENTS.md"} {
+			in := findIn(t, c, is, rel)
+			if in.Origin.InEffect || !strings.Contains(in.Origin.Why.String(), "Codex 0.150.0") || in.Text.IsZero() {
+				t.Errorf("%s: %s in effect = %v (%q), want not in effect with the version, and still read for the rules",
+					name, rel, in.Origin.InEffect, in.Origin.Why)
+			}
+		}
+		if g := findIn(t, c, is, ".codex/AGENTS.md"); !g.Origin.InEffect {
+			t.Errorf("%s: global AGENTS.md not in effect (%q), want loaded: it isn't project-level", name, g.Origin.Why)
+		}
+	}
+}
+
+func TestTrustedProjectsLoadAgentsMD(t *testing.T) {
 	c := fakeHome(t, map[string]string{"p/.git/HEAD": "ref", "p/AGENTS.md": "repo guidance"})
+
+	is, _ := instructionsFor(t, c, "/p", model.TrustTrusted)
+
+	if p := findIn(t, c, is, "p/AGENTS.md"); !p.Origin.InEffect {
+		t.Errorf("AGENTS.md in a trusted project not in effect: %q", p.Origin.Why)
+	}
+}
+
+func TestSkippedProjectFilesDontUseUpTheCap(t *testing.T) {
+	c := fakeHome(t, map[string]string{
+		".codex/AGENTS.md":   "my defaults",
+		".codex/config.toml": "project_doc_max_bytes = 20\n",
+		"p/.git/HEAD":        "ref",
+		"p/AGENTS.md":        strings.Repeat("x", 100),
+	})
 
 	is, _ := instructionsFor(t, c, "/p", model.TrustUntrusted)
 
-	if p := findIn(t, c, is, "p/AGENTS.md"); !p.Origin.InEffect {
-		t.Errorf("AGENTS.md in an untrusted project = %q, want loaded: trust only gates .codex/ layers", p.Origin.Why)
+	if g := findIn(t, c, is, ".codex/AGENTS.md"); g.Limit != 0 || !g.Note.IsZero() {
+		t.Errorf("global limit %d, note %q; want none, the skipped project file isn't in the chain", g.Limit, g.Note)
+	}
+	if p := findIn(t, c, is, "p/AGENTS.md"); p.Limit != 0 || !p.Note.IsZero() {
+		t.Errorf("skipped file limit %d, note %q; want no cap talk for a file Codex doesn't load", p.Limit, p.Note)
 	}
 }
 
