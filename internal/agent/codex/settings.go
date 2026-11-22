@@ -111,7 +111,33 @@ func OwnSandboxModeWins() finding.Rule {
 
 // Rules returns the rules the Codex adapter owns.
 func Rules() []finding.Rule {
-	return []finding.Rule{RepoDropsPermissions(), RepoWidensProfile(), LegacyManagedConfig(), LegacyProfiles(), OwnSandboxModeWins(), RepoChangesInstructions()}
+	return []finding.Rule{
+		RepoDropsPermissions(), RepoWidensProfile(), LegacyManagedConfig(), LegacyProfiles(), OwnSandboxModeWins(),
+		RepoChangesInstructions(), WorkspaceIgnored(), WorkspaceRestrictionIgnored(),
+	}
+}
+
+// WorkspaceIgnored is a [sandbox_workspace_write] table Codex ignores
+// because permission profiles are in use.
+func WorkspaceIgnored() finding.Rule {
+	return finding.Rule{
+		ID:       "JARX-CODEX-007",
+		Severity: finding.Info,
+		Title:    "[sandbox_workspace_write] does nothing, because Codex uses permission profiles here",
+		Fix:      "move what you need into the permission profile and remove the table",
+	}
+}
+
+// WorkspaceRestrictionIgnored is the same, when the table would have
+// tightened the sandbox, so someone thinks they're more protected than
+// they are.
+func WorkspaceRestrictionIgnored() finding.Rule {
+	return finding.Rule{
+		ID:       "JARX-CODEX-008",
+		Severity: finding.Medium,
+		Title:    "a [sandbox_workspace_write] restriction does nothing, because Codex uses permission profiles here",
+		Fix:      "set the restriction in the permission profile instead",
+	}
 }
 
 // systemConfigFor, requirementsFor and managedConfigFor are the documented

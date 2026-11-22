@@ -151,7 +151,7 @@ stale ones marked.
   - Not covered yet: keys inside Codex `[hooks]` (the Hooks guide, not the
     reference, lists them), hooks.json and plugin manifests, MCP config keys
     (phase 4), and Claude's deprecated keys beyond `ignorePatterns`, since
-    the index still lists the rest
+    the index still lists the rest (b49a8f4)
 - [ ] `snapshot`: masked snapshots, retention, diff in `scan` output
 
 **Run it:** `jarx scan --home testdata/demo` shows instruction files, skills,

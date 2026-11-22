@@ -125,6 +125,7 @@ func (v *view) permissions() (model.Permissions, bool) {
 	}
 	perm.Rules = v.rules(perm, legacy)
 	v.sandboxFindings(legacy)
+	v.workspaceFindings(legacy)
 	v.profileFindings()
 	return perm, len(perm.Options) > 0 || len(perm.Rules) > 0
 }
@@ -151,17 +152,31 @@ func (v *view) option(key string, legacy *layer) (model.Option, bool) {
 
 // optionWhy says why a loaded layer's value isn't the one in effect, or "".
 func (v *view) optionWhy(key, val string, legacy *layer, won bool) string {
-	switch {
-	case key == keyDefaultPerm && legacy != nil:
-		return "sandbox_mode is set in " + legacy.origin.File.Text().String() + ", so Codex uses the legacy sandbox and ignores default_permissions"
-	case key == keySandboxMode && v.s.req != nil && v.s.req.profiles != nil:
-		return "managed allowed_permission_profiles makes Codex use permission profiles instead"
-	case won:
+	if why := v.sandboxWhy(key, legacy); why != "" {
+		return why
+	}
+	if won {
 		return "overridden by a higher layer"
 	}
 	if v.s.req != nil {
 		if allowed, ok := v.s.req.allowed[key]; ok && !slices.Contains(allowed, val) {
 			return "requirements don't allow " + val + " (allowed: " + strings.Join(allowed, ", ") + "); Codex falls back to an allowed value"
+		}
+	}
+	return ""
+}
+
+// sandboxWhy says why a setting of the sandbox system Codex isn't using
+// doesn't count, or "": profiles and the older sandbox settings don't mix.
+func (v *view) sandboxWhy(key string, legacy *layer) string {
+	switch {
+	case key == keyDefaultPerm && legacy != nil:
+		return "sandbox_mode is set in " + legacy.origin.File.Text().String() + ", so Codex uses the legacy sandbox and ignores default_permissions"
+	case key == keySandboxMode && v.s.req != nil && v.s.req.profiles != nil:
+		return "managed allowed_permission_profiles makes Codex use permission profiles instead"
+	case strings.HasPrefix(key, workspaceTable+"."):
+		if src := v.profilesInUse(legacy); src != "" {
+			return "Codex uses permission profiles here (" + src + "), so it ignores [" + workspaceTable + "]"
 		}
 	}
 	return ""
@@ -226,6 +241,66 @@ func access(a string) model.RuleAction {
 		return model.RuleDeny
 	default:
 		return model.RuleRead
+	}
+}
+
+// workspaceTable holds the older sandbox's workspace-write settings.
+const workspaceTable = "sandbox_workspace_write"
+
+// profilesInUse says what makes Codex use permission profiles, or "" when it
+// uses the older sandbox. The permissions guide: only sandbox_mode (or
+// --sandbox) switches Codex to the older settings, except that managed
+// allowed_permission_profiles always means profiles. With no
+// default_permissions at all, Codex uses its older default sandbox.
+func (v *view) profilesInUse(legacy *layer) string {
+	switch {
+	case v.s.req != nil && v.s.req.profiles != nil:
+		return "managed allowed_permission_profiles"
+	case legacy != nil:
+		return ""
+	}
+	for _, l := range v.loaded() {
+		if p, ok := l.values[keyDefaultPerm]; ok {
+			return "default_permissions = " + p + " in " + l.origin.File.Text().String()
+		}
+	}
+	return ""
+}
+
+// workspaceRestricts are the [sandbox_workspace_write] keys that tighten the
+// sandbox when true. The others loosen it, so ignoring them leaves you safer.
+//
+//nolint:gochecknoglobals // fixed list, read only
+var workspaceRestricts = []string{"exclude_slash_tmp", "exclude_tmpdir_env_var"}
+
+// workspaceFindings flags a [sandbox_workspace_write] table Codex ignores
+// because permission profiles are in use: medium when it holds a setting
+// that would have tightened the sandbox, info otherwise.
+func (v *view) workspaceFindings(legacy *layer) {
+	why := v.profilesInUse(legacy)
+	if why == "" {
+		return
+	}
+	for _, l := range v.loaded() {
+		t, ok := l.raw[workspaceTable].(map[string]any)
+		if !ok || len(t) == 0 {
+			continue
+		}
+		keys := sortedKeys(t)
+		rule := WorkspaceIgnored()
+		var tight []string
+		for _, k := range workspaceRestricts {
+			if on, _ := t[k].(bool); on {
+				tight = append(tight, k+" = true")
+			}
+		}
+		ev := "[" + workspaceTable + "] in " + l.origin.File.Text().String() + " sets " + strings.Join(keys, ", ") +
+			"; Codex uses permission profiles (" + why + "), so it ignores the table"
+		if len(tight) > 0 {
+			rule = WorkspaceRestrictionIgnored()
+			ev += ", including " + strings.Join(tight, " and ")
+		}
+		v.findings = append(v.findings, rule.New(l.origin, v.s.text(ev)))
 	}
 }
 

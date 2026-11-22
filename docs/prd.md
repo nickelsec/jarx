@@ -654,6 +654,13 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
   when it's your own layers.
 - A trusted project changing a Codex permission profile another layer
   defines.
+- A `[sandbox_workspace_write]` table Codex ignores because permission
+  profiles are in use: the permissions guide says to use profiles or the
+  older sandbox settings, not both, and only `sandbox_mode` (or managed
+  `allowed_permission_profiles` the other way) decides which. Info
+  (`JARX-CODEX-007`), or medium (`JARX-CODEX-008`) when the table sets
+  `exclude_slash_tmp` or `exclude_tmpdir_env_var`, which would have tightened
+  the sandbox.
 - A legacy Codex `managed_config.toml` overriding your config and CLI flags,
   and legacy `[profiles]` tables Codex ignores (info).
 - A repository changing which instructions Codex loads, through
