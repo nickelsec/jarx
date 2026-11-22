@@ -326,17 +326,22 @@ Jobs:
   disabled linter has a written reason. golangci's gosec linter covers gosec,
   so there's no separate job. `forbidigo` and `depguard` hold the choke points.
 - **vuln:** govulncheck, run with `go run` at a pinned version.
+- **offline:** on ubuntu, `jarx scan --home testdata/demo` runs inside a
+  network namespace with no network at all, under `strace -f`. It has to
+  succeed, print the demo's projects and leave no state behind, and the job
+  fails on **any** network syscall (`socket`, `connect`, `sendto` and the
+  rest), even one that failed. The namespace alone wouldn't be enough: a
+  connection attempt fails instantly there, and if jarx quietly handled that
+  error the scan would still pass. Ubuntu blocks unprivileged user
+  namespaces, so `sudo unshare --net` makes the namespace and `sudo -u` drops
+  back to the runner user, so jarx never runs as root. A control step first
+  proves both layers work: `curl` has to fail inside the namespace, and
+  `strace` has to see `curl`'s connection attempt, so a blind audit can't
+  make the job pass. `--no-probe` and `--no-history` join the command when
+  they exist (phases 4 and 6).
 
 The Go version comes from `go.mod`, so CI and local builds match. Every action
 is pinned by SHA with the version in a comment.
-
-Added in a later phase:
-
-- **offline** (phase 2): on ubuntu, `unshare -n` runs
-  `jarx scan --home testdata/demo` and expects success. With no network
-  namespace, any network call fails the job, which proves the zero-network
-  mode. `--no-probe` and `--no-history` get added to that command when they
-  exist (phases 4 and 6).
 
 Not set up for now, since the repo is private: CodeQL, Dependabot and any
 release workflow. Bumping action SHAs is manual until then.
