@@ -10,11 +10,13 @@ Each item is one PR. Tick it in the same PR as the work, and add the PR number.
 - [x] build phases, progress checklist, CLI trimmed to scan, ui and setup
   (#3)
 - [x] CLI skeleton: move to `internal/cli`, `--version` instead of the
-  `version` subcommand, `scan` command
-- [ ] `platform`: injected `Env`, OS paths, managed dirs, `--home`
+  `version` subcommand, `scan` command (#4)
+- [x] `platform`: injected `Env`, OS facts and system roots, `--home`, `scan`
+  prints what platform resolved, `.jarx-state` ignored under testdata
 - [ ] `fsys` (read-only view, size caps, skip list) and `jarxdir` (`os.Root`
   on the jarx config dir)
-- [ ] `scan` prints what jarx resolved, first bits of `testdata/demo/`
+- [ ] `scan` adds jarx's state dir and exists checks, first bits of
+  `testdata/demo/`
 
 **Run it:** `jarx scan --home testdata/demo` prints the resolved paths and
 whether each exists.
@@ -36,7 +38,9 @@ stale ones marked.
 
 ## Phase 3: Instruction files and settings
 
-- [ ] Claude adapter: settings, precedence, trust
+- [ ] Claude adapter: settings, precedence, trust. Includes the Windows
+  registry and macOS plist reads in `platform` (first use of `golang.org/x/sys`)
+  and checking the managed paths against the official docs
 - [ ] Claude adapter: instruction files, `@` imports, memory, output styles
 - [ ] Claude adapter: skills, commands, subagents, plugins, hooks
 - [ ] Codex adapter: config, profiles, precedence, trust, requirements

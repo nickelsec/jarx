@@ -112,8 +112,8 @@ a spot in the code that makes breaking it hard.
 | Secrets never leak | Model text fields are `redact.Text`. Only the `redact` package can build one (unexported field). `report`, `ui`, `snapshot` and `llm` only take `redact.Text`, so there's no way to put a raw string on screen, on disk or on the wire. |
 | Never calls a tool | The `mcp` package has constants only for `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
 | Only the listed network calls | `netguard` is the only package allowed to build an `http.Client`, a transport or a dialer. golangci `forbidigo` bans `http.Get`, `http.DefaultClient`, `net.Dial*` and `http.Transport{` everywhere else. |
-| Never writes agent config | Adapters get a read-only `fsys` view. The only writer is `jarxdir`, which is rooted at `os.UserConfigDir()/jarx` with `os.Root`. |
-| Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, managed dirs, PATH). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`. `--home` builds a `platform.Env` with everything rooted in the fake home and no managed dirs, registry, plists, real env or real PATH. |
+| Never writes agent config | Adapters get a read-only `fsys` view. The only writer is `jarxdir`, which is rooted at jarx's state dir (`os.UserConfigDir()/jarx`, or `<home>/.jarx-state` with `--home`) with `os.Root`. |
+| Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, PATH, state dir, system roots). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`. `--home` builds a `platform.Env` with everything rooted in the fake home and no system roots, registry, plists, real env or real PATH. |
 | Only approved dependencies | golangci `depguard` lists the five approved modules plus stdlib. A new import fails lint until someone approves it. |
 
 ## Architecture
@@ -205,7 +205,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 |---|---|---|
 | `cmd/jarx` | main, wiring only | CLI |
 | `internal/cli` | subcommands with stdlib `flag` | CLI |
-| `internal/platform` | OS paths, injected env, managed dirs, registry and plist reads | Scope, cross-platform rule |
+| `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`). Registry and plist reads land here in phase 3. Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
 | `internal/fsys` | read-only file view, size caps, skip list | Walking a repo |
 | `internal/jarxdir` | `os.Root` on the jarx config dir: config, cursor, cache, fingerprint key | What jarx writes to disk |
 | `internal/redact` | `Text` type, scrubber, `REDACTED:<type>`, HMAC fingerprint | Promise 4, Secrets |
@@ -346,7 +346,7 @@ Repo skeleton, CI, lint guards, the CLI skeleton (`scan`, `--version`),
   built.
 
 **Run it:** `jarx scan --home testdata/demo` prints what jarx resolved: the
-home dir, the OS, where the env comes from, the managed policy dirs (none with
+home dir, the OS, where the env comes from, the system roots (skipped with
 `--home`) and jarx's own state dir, each with whether it exists. Without
 `--home` it does the same for the real machine, existence only.
 

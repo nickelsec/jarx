@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -116,17 +119,101 @@ func TestUnknownFlagIsAUsageError(t *testing.T) {
 	}
 }
 
-func TestScanRuns(t *testing.T) {
-	got := run("scan")
+func fakeHome(t *testing.T, jarxEnv string) string {
+	t.Helper()
+	home := t.TempDir()
+	if jarxEnv != "" {
+		if err := os.WriteFile(filepath.Join(home, ".jarx-env"), []byte(jarxEnv), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return home
+}
+
+func TestScanWithHomePrintsWhatPlatformResolved(t *testing.T) {
+	home := fakeHome(t, "A=1\nB=2\n")
+
+	got := run("scan", "--home", home)
 
 	if got.code != 0 {
-		t.Fatalf("exit code = %d, want 0", got.code)
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
 	}
-	if got.stdout != "jarx scan: nothing to scan yet\n" {
-		t.Errorf("stdout = %q, want the placeholder line", got.stdout)
+	for _, want := range []string{
+		"environment (fake home)",
+		home,
+		runtime.GOOS,
+		"2 vars from .jarx-env",
+		"0 entries",
+		filepath.Join(home, ".jarx-state"),
+		"skipped (--home)",
+	} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
+		}
 	}
 	if got.stderr != "" {
 		t.Errorf("stderr = %q, want empty", got.stderr)
+	}
+}
+
+func TestScanNeverPrintsEnvNamesOrValues(t *testing.T) {
+	home := fakeHome(t, "DEMO_TOKEN=sk-demo-0000-not-real\n")
+
+	got := run("scan", "--home", home)
+
+	for _, leak := range []string{"sk-demo-0000-not-real", "DEMO_TOKEN"} {
+		if strings.Contains(got.stdout+got.stderr, leak) {
+			t.Errorf("output contains %q:\n%s%s", leak, got.stdout, got.stderr)
+		}
+	}
+}
+
+func TestScanWithAMissingHomeIsARuntimeError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope")
+
+	got := run("scan", "--home", missing)
+
+	if got.code != 1 {
+		t.Fatalf("exit code = %d, want 1", got.code)
+	}
+	if !strings.Contains(got.stderr, "does not exist") {
+		t.Errorf("stderr = %q, want a does not exist error", got.stderr)
+	}
+	if got.stdout != "" {
+		t.Errorf("stdout = %q, want empty", got.stdout)
+	}
+}
+
+func TestScanHomeNeedsADir(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no value":    {"scan", "--home"},
+		"empty value": {"scan", "--home="},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := run(args...)
+
+			if got.code != 2 {
+				t.Fatalf("exit code = %d, want 2", got.code)
+			}
+			if !strings.Contains(got.stderr, "usage: jarx scan") {
+				t.Errorf("stderr = %q, want scan usage", got.stderr)
+			}
+		})
+	}
+}
+
+func TestScanWithoutHomeShowsThisMachine(t *testing.T) {
+	// Prints counts and paths only. No config file is read.
+	got := run("scan")
+
+	if got.code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
+	}
+	if !strings.Contains(got.stdout, "environment (this machine)") {
+		t.Errorf("stdout = %q, want the this machine heading", got.stdout)
+	}
+	if strings.Contains(got.stdout, "skipped (--home)") {
+		t.Errorf("stdout = %q, system dirs should not be skipped", got.stdout)
 	}
 }
 
