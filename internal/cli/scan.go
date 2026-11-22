@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"strings"
+	"io/fs"
+	"path/filepath"
 
+	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/platform"
 )
 
@@ -44,41 +47,83 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "jarx: %v\n", err)
 		return exitError
 	}
-	printEnv(stdout, env)
+	files, err := fsys.New(env)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "jarx: %v\n", err)
+		return exitError
+	}
+	defer func() { _ = files.Close() }()
+
+	printEnv(stdout, env, files)
 	return exitOK
 }
 
-// printEnv shows what platform resolved. It prints the env var count only,
-// never names or values.
-func printEnv(w io.Writer, env platform.Env) {
-	source, envFrom := "this machine", "from the process"
+// printEnv shows what platform resolved and whether each path exists. It
+// prints the env var count only, never names or values. It reads nothing but
+// file info and writes nothing.
+func printEnv(w io.Writer, env platform.Env, files *fsys.FS) {
+	source := "this machine"
+	envLine := plural(env.VarCount(), "var", "vars") + " from the process"
 	if env.Fake() {
-		source, envFrom = "fake home", "from .jarx-env"
+		source = "fake home"
+		envLine = plural(env.VarCount(), "var", "vars") + " from " + platform.JarxEnvName
+		if _, err := files.Stat(filepath.Join(env.Home, platform.JarxEnvName)); err != nil {
+			envLine = "no " + platform.JarxEnvName + ", empty env"
+		}
 	}
-	system := "skipped (--home)"
-	if roots, ok := env.SystemRoots(); ok {
-		system = joinNonEmpty(roots.Etc, roots.LibraryAppSupport, roots.ProgramData, roots.ProgramFiles)
+	stateStatus := pathStatus(files, env.StateDir)
+	if stateStatus == statusMissing {
+		stateStatus = "not created yet"
 	}
 
 	_, _ = fmt.Fprintf(w, "environment (%s)\n", source)
 	row := func(label, value string) { _, _ = fmt.Fprintf(w, "  %-12s %s\n", label, value) }
-	row("home", env.Home)
+	withStatus := func(path, status string) string { return path + "  (" + status + ")" }
+	row("home", withStatus(env.Home, pathStatus(files, env.Home)))
 	row("os", env.GOOS)
-	row("env", fmt.Sprintf("%d vars %s", env.VarCount(), envFrom))
-	row("PATH", fmt.Sprintf("%d entries", len(env.Path)))
-	row("state dir", env.StateDir)
-	row("system dirs", system)
+	row("env", envLine)
+	row("PATH", plural(len(env.Path), "entry", "entries"))
+	row("state dir", withStatus(env.StateDir, stateStatus))
+
+	roots, ok := env.SystemRoots()
+	if !ok {
+		row("system dirs", "skipped (--home)")
+		return
+	}
+	label, found := "system dirs", false
+	for _, dir := range []string{roots.Etc, roots.LibraryAppSupport, roots.ProgramData, roots.ProgramFiles} {
+		if dir == "" {
+			continue
+		}
+		row(label, withStatus(dir, pathStatus(files, dir)))
+		label, found = "", true
+	}
+	if !found {
+		row(label, "none found")
+	}
 }
 
-func joinNonEmpty(values ...string) string {
-	var out []string
-	for _, v := range values {
-		if v != "" {
-			out = append(out, v)
-		}
+const statusMissing = "missing"
+
+// pathStatus says whether the dir at path exists. Other errors become "can't
+// check" and the error itself isn't shown.
+func pathStatus(files *fsys.FS, path string) string {
+	info, err := files.Stat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return statusMissing
+	case err != nil:
+		return "can't check"
+	case !info.IsDir():
+		return "not a directory"
+	default:
+		return "exists"
 	}
-	if len(out) == 0 {
-		return "none found"
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
 	}
-	return strings.Join(out, ", ")
+	return fmt.Sprintf("%d %s", n, many)
 }

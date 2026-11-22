@@ -12,8 +12,8 @@ import (
 	"strings"
 )
 
-// jarxEnvName is the file in a fake home that stands in for the env.
-const jarxEnvName = ".jarx-env"
+// JarxEnvName is the file in a fake home that stands in for the env.
+const JarxEnvName = ".jarx-env"
 
 // FromHome returns an Env rooted in the fake home dir. Env vars and PATH come
 // only from <dir>/.jarx-env, jarx's state lives in <dir>/.jarx-state, and
@@ -51,12 +51,12 @@ func readJarxEnv(home string) ([]string, error) {
 	}
 	defer func() { _ = root.Close() }()
 
-	data, err := root.ReadFile(jarxEnvName)
+	data, err := root.ReadFile(JarxEnvName)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", jarxEnvName, err)
+		return nil, fmt.Errorf("reading %s: %w", JarxEnvName, err)
 	}
 
 	var environ []string
@@ -70,12 +70,12 @@ func readJarxEnv(home string) ([]string, error) {
 		key, value, ok := strings.Cut(line, "=")
 		key = strings.TrimSpace(key)
 		if !ok || key == "" {
-			return nil, fmt.Errorf("%s line %d: want KEY=VALUE", jarxEnvName, n)
+			return nil, fmt.Errorf("%s line %d: want KEY=VALUE", JarxEnvName, n)
 		}
 		environ = append(environ, key+"="+value)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("reading %s: %w", jarxEnvName, err)
+		return nil, fmt.Errorf("reading %s: %w", JarxEnvName, err)
 	}
 	return environ, nil
 }

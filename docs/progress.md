@@ -16,8 +16,8 @@ same commit as the work. The next commit adds that commit's short hash.
   prints what platform resolved, `.jarx-state` ignored under testdata (200c17d)
 - [x] `fsys` (read-only view, size caps, skip list) and `jarxdir` (`os.Root`
   on the jarx config dir), with lint rules that make them the only reader and
-  writer
-- [ ] `scan` adds jarx's state dir and exists checks, first bits of
+  writer (865ab36)
+- [x] `scan` adds jarx's state dir and exists checks, first bits of
   `testdata/demo/`
 
 **Run it:** `jarx scan --home testdata/demo` prints the resolved paths and
