@@ -8,7 +8,8 @@ Each item is one PR. Tick it in the same PR as the work, and add the PR number.
 - [x] skeleton and CI: `go.mod`, `.gitattributes`, `cmd/jarx`, workflow,
   golangci config with forbidigo and depguard (#2)
 - [x] build phases, progress checklist, CLI trimmed to scan, ui and setup
-- [ ] CLI skeleton: move to `internal/cli`, `--version` instead of the
+  (#3)
+- [x] CLI skeleton: move to `internal/cli`, `--version` instead of the
   `version` subcommand, `scan` command
 - [ ] `platform`: injected `Env`, OS paths, managed dirs, `--home`
 - [ ] `fsys` (read-only view, size caps, skip list) and `jarxdir` (`os.Root`
