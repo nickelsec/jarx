@@ -3,16 +3,20 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/platform"
+	"github.com/nickelsec/jarx/internal/redact"
+	"github.com/nickelsec/jarx/internal/report"
 )
 
 // result is what one Run call produced.
@@ -23,6 +27,13 @@ type result struct {
 }
 
 func run(args ...string) result {
+	// A scan or setup without --home reads (or writes) the real machine's
+	// state, and tests never touch real config. Refuse it here so a test
+	// can't do it by accident.
+	if len(args) > 0 && (args[0] == "scan" || args[0] == "setup") && !slices.Contains(args, "-h") && !slices.Contains(args, "--help") &&
+		!slices.ContainsFunc(args, func(a string) bool { return a == "--home" || strings.HasPrefix(a, "--home=") }) {
+		return result{code: -1, stderr: "test helper: refusing a real-machine scan, pass --home"}
+	}
 	var stdout, stderr bytes.Buffer
 	code := Run(args, &stdout, &stderr, "v1.2.3-test")
 	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
@@ -207,18 +218,38 @@ func TestScanHomeNeedsADir(t *testing.T) {
 	}
 }
 
-func TestScanWithoutHomeShowsThisMachine(t *testing.T) {
-	// Prints counts and paths only. No config file is read.
-	got := run("scan")
+// realEnvOutput prints the environment section for the real machine. It
+// calls printEnv directly instead of running scan, because a full scan
+// without --home would read the real machine's agent records, and tests
+// never touch real config. printEnv reads env and path info only.
+func realEnvOutput(t *testing.T) string {
+	t.Helper()
+	env, err := platform.Real()
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := fsys.New(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = files.Close() }()
+	s, err := redact.New(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	printEnv(report.New(&out, io.Discard, s).Out, s, env, files)
+	return out.String()
+}
 
-	if got.code != 0 {
-		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
+func TestEnvSectionShowsThisMachine(t *testing.T) {
+	out := realEnvOutput(t)
+
+	if !strings.Contains(out, "environment (this machine)") {
+		t.Errorf("stdout = %q, want the this machine heading", out)
 	}
-	if !strings.Contains(got.stdout, "environment (this machine)") {
-		t.Errorf("stdout = %q, want the this machine heading", got.stdout)
-	}
-	if strings.Contains(got.stdout, "skipped (--home)") {
-		t.Errorf("stdout = %q, system dirs should not be skipped", got.stdout)
+	if strings.Contains(out, "skipped (--home)") {
+		t.Errorf("stdout = %q, system dirs should not be skipped", out)
 	}
 }
 
@@ -236,22 +267,25 @@ func TestScanHelpPrintsScanUsageToStdout(t *testing.T) {
 	}
 }
 
-func TestScanRejectsArguments(t *testing.T) {
-	got := run("scan", "extra")
+func TestScanTakesExtraPaths(t *testing.T) {
+	home := fakeHome(t, "")
+	extra := filepath.Join(home, "extra")
+	if err := os.Mkdir(extra, 0o700); err != nil {
+		t.Fatal(err)
+	}
 
-	if got.code != 2 {
-		t.Fatalf("exit code = %d, want 2", got.code)
+	got := run("scan", "--home", home, extra)
+
+	if got.code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
 	}
-	if !strings.Contains(got.stderr, `unexpected argument "extra"`) {
-		t.Errorf("stderr = %q, want it to name the argument", got.stderr)
-	}
-	if !strings.Contains(got.stderr, "usage: jarx scan") {
-		t.Errorf("stderr = %q, want scan usage", got.stderr)
+	if !strings.Contains(got.stdout, "projects (1)\n  "+extra+"  jarx  0 files (walk)\n") {
+		t.Errorf("stdout = %q, want the extra path listed as from jarx", got.stdout)
 	}
 }
 
 func TestScanRejectsUnknownFlag(t *testing.T) {
-	got := run("scan", "--bogus")
+	got := run("scan", "--home", fakeHome(t, ""), "--bogus")
 
 	if got.code != 2 {
 		t.Fatalf("exit code = %d, want 2", got.code)
@@ -413,11 +447,8 @@ func TestScanCountsArePlural(t *testing.T) {
 	}
 }
 
-func TestScanShowsEachSystemDirWithAStatus(t *testing.T) {
-	// The real machine, paths and statuses only.
-	got := run("scan")
-
-	l := line(got.stdout, "system dirs")
+func TestEnvSectionShowsEachSystemDirWithAStatus(t *testing.T) {
+	l := line(realEnvOutput(t), "system dirs")
 	if l == "" || strings.Contains(l, "skipped") {
 		t.Fatalf("system dirs line = %q, want real system dirs", l)
 	}
@@ -438,21 +469,41 @@ func TestScanDemoHome(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
 	}
-	for _, want := range []string{"environment (fake home)", "3 vars from .jarx-env", "skipped (--home)"} {
+	abs, err := filepath.Abs(demo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proj := func(rel string) string { return filepath.Join(abs, "projects", rel) }
+	for _, want := range []string{
+		"environment (fake home)", "3 vars from .jarx-env", "skipped (--home)",
+		// The demo's records use paths like /projects/app, read inside the
+		// fake home.
+		"projects (3)\n" +
+			"  " + proj("app") + "  claude, codex (trusted)  1 file (walk)\n" +
+			"  " + proj("notes") + "  codex (untrusted)  1 file (walk)\n" +
+			"  " + proj("old") + "  claude  stale\n",
+		"findings (0)\n",
+	} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
 		}
 	}
-	// No name or value from the demo env may show up.
-	for l := range strings.SplitSeq(string(data), "\n") {
+	assertNoEnvLeak(t, string(data), got.stdout+got.stderr)
+}
+
+// assertNoEnvLeak fails if any name or value from a .jarx-env file shows up
+// in out.
+func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
+	t.Helper()
+	for l := range strings.SplitSeq(jarxEnv, "\n") {
 		l = strings.TrimSpace(l)
 		if l == "" || strings.HasPrefix(l, "#") {
 			continue
 		}
 		name, value, _ := strings.Cut(l, "=")
 		for _, leak := range []string{name, value} {
-			if strings.Contains(got.stdout+got.stderr, leak) {
-				t.Errorf("output contains %q from the demo .jarx-env:\n%s", leak, got.stdout)
+			if strings.Contains(out, leak) {
+				t.Errorf("output contains %q from the demo .jarx-env:\n%s", leak, out)
 			}
 		}
 	}

@@ -1,0 +1,140 @@
+package report
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/nickelsec/jarx/internal/finding"
+	"github.com/nickelsec/jarx/internal/model"
+	"github.com/nickelsec/jarx/internal/redact"
+)
+
+const canary = "tok_Xq7Lm2Pz9Rw4Tb8Nc1Vd" // made up for tests
+
+func setup(t *testing.T) (*Printer, *redact.Scrubber, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	s, err := redact.New([]redact.Pattern{
+		{Kind: "test_token", Re: regexp.MustCompile(`tok_[A-Za-z0-9]{16,}`)},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, errw bytes.Buffer
+	return New(&out, &errw, s), s, &out, &errw
+}
+
+func TestOutPrintfWritesMaskedTextToStdout(t *testing.T) {
+	p, s, out, errw := setup(t)
+	v, _ := s.Scrub("key " + canary)
+
+	p.Out.Printf("value: %s\n", v)
+
+	if out.String() != "value: key REDACTED:test_token\n" {
+		t.Errorf("stdout = %q, want the masked value", out.String())
+	}
+	if errw.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", errw.String())
+	}
+}
+
+func TestErrPrintfWritesToStderr(t *testing.T) {
+	p, s, out, errw := setup(t)
+	v, _ := s.Scrub("frobnicate")
+
+	p.Err.Printf("jarx: unknown command %q\n", v)
+
+	if errw.String() != "jarx: unknown command \"frobnicate\"\n" {
+		t.Errorf("stderr = %q", errw.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", out.String())
+	}
+}
+
+func TestErrorScrubsTheErrorText(t *testing.T) {
+	// A parser error can quote the offending line, secret and all.
+	p, _, _, errw := setup(t)
+	err := fmt.Errorf("reading config: %w", errors.New(`line 3: bad value "`+canary+`"`))
+
+	p.Error(err)
+
+	if strings.Contains(errw.String(), canary) {
+		t.Errorf("stderr = %q, leaks the secret from the error", errw.String())
+	}
+	if errw.String() != "jarx: reading config: line 3: bad value \"REDACTED:test_token\"\n" {
+		t.Errorf("stderr = %q, want the scrubbed error", errw.String())
+	}
+}
+
+func TestProjectsListing(t *testing.T) {
+	p, s, out, _ := setup(t)
+	path := func(raw string) model.Path { return model.NewPath(s, raw) }
+	claude := model.Origin{Agent: model.AgentClaude}
+	codex := model.Origin{Agent: model.AgentCodex}
+
+	p.Projects([]model.Project{
+		{
+			Path: path("/projects/app"), Status: model.ProjectOK,
+			Origins: []model.Origin{claude, codex},
+			Trust:   []model.Trust{{Level: model.TrustTrusted, Origin: codex}},
+			Files:   []model.Path{path("a.go"), path("b.go")},
+			Walk:    model.WalkGit,
+		},
+		{
+			Path: path("/projects/one"), Status: model.ProjectOK, Origins: []model.Origin{codex},
+			Files: []model.Path{path("README.md")}, Walk: model.WalkFallback,
+		},
+		{Path: path("/projects/old"), Status: model.ProjectStale, Origins: []model.Origin{claude, claude}},
+		{Path: path("/" + canary), Status: model.ProjectOutsideHome, Origins: []model.Origin{{Agent: model.AgentJarx}}},
+	})
+
+	want := "projects (4)\n" +
+		"  /projects/app  claude, codex (trusted)  2 files (git)\n" +
+		"  /projects/one  codex  1 file (walk)\n" +
+		"  /projects/old  claude  stale\n" +
+		"  /REDACTED:test_token  jarx  outside fake home\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestFindingsListingIsWorstFirstWithTitles(t *testing.T) {
+	p, s, out, _ := setup(t)
+	reg, err := finding.NewRegistry(finding.Rules()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := s.Scrub("not valid TOML " + canary)
+	at := func(file string, line int) model.Origin {
+		return model.Origin{File: model.NewPath(s, file), Line: line}
+	}
+	high := finding.Rule{ID: "JARX-TEST-001", Severity: finding.High, Title: "t", Fix: "f"}
+
+	p.Findings([]finding.Finding{
+		finding.UnreadableRecord().New(at("/h/.codex/config.toml", 3), ev),
+		high.New(at("/h/x", 0), redact.Text{}),
+	}, reg)
+
+	want := "findings (2)\n" +
+		"  high  JARX-TEST-001  /h/x\n" +
+		"  info  JARX-SCAN-002  /h/.codex/config.toml:3  couldn't read an agent's records: not valid TOML REDACTED:test_token\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestEmptyListings(t *testing.T) {
+	p, _, out, _ := setup(t)
+	reg, _ := finding.NewRegistry()
+
+	p.Projects(nil)
+	p.Findings(nil, reg)
+
+	if out.String() != "projects (0)\nfindings (0)\n" {
+		t.Errorf("stdout = %q", out.String())
+	}
+}

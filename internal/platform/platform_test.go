@@ -276,3 +276,35 @@ func TestRealIsTheRealMachine(t *testing.T) {
 		t.Errorf("StateDir = %q, want an absolute <config dir>/jarx", env.StateDir)
 	}
 }
+
+func TestMapPathRebasesRecordPathsIntoTheFakeHome(t *testing.T) {
+	env, err := FromHome(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := env.Home
+
+	for record, want := range map[string]string{
+		"/projects/app":                       filepath.Join(h, "projects", "app"),
+		`C:\projects\app`:                     filepath.Join(h, "projects", "app"),
+		"C:/projects/app":                     filepath.Join(h, "projects", "app"),
+		"/projects/../projects/app/":          filepath.Join(h, "projects", "app"),
+		"projects/app":                        filepath.Join(h, "projects", "app"),
+		filepath.Join(h, "already", "inside"): filepath.Join(h, "already", "inside"),
+		"/../../escape":                       filepath.Join(h, "escape"),
+		"../../escape":                        filepath.Join(h, "escape"),
+	} {
+		if got := env.MapPath(record); got != want {
+			t.Errorf("MapPath(%q) = %q, want %q", record, got, want)
+		}
+	}
+}
+
+func TestMapPathLeavesRealPathsAlone(t *testing.T) {
+	env := newEnv(runtime.GOOS, "/home/u", "/state", nil, true, false)
+	abs := filepath.Join(t.TempDir(), "repo")
+
+	if got := env.MapPath(abs); got != abs {
+		t.Errorf("MapPath(%q) = %q, want it unchanged", abs, got)
+	}
+}

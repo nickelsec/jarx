@@ -1,0 +1,8 @@
+# Fake Codex config for the jarx demo home. Paths are read inside the fake
+# home, so /projects/app means testdata/demo/projects/app.
+
+[projects."/projects/app"]
+trust_level = "trusted"
+
+[projects."/projects/notes"]
+trust_level = "untrusted"

@@ -85,3 +85,59 @@ jobs:
           cache-dependency-path: go.mod
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+
+  # Proves the zero-network promise. jarx scan on the demo home runs inside a
+  # network namespace with no network at all, under strace. The job fails on
+  # any network syscall, even one that failed, because a connection attempt
+  # that jarx quietly handled would otherwise still pass. --no-probe and
+  # --no-history join the command when they exist (phases 4 and 6).
+  offline:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NET_SYSCALLS: socket,socketpair,connect,bind,listen,accept,accept4,sendto,sendmsg,sendmmsg
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.mod
+      - name: build
+        run: go build -o "$RUNNER_TEMP/jarx" ./cmd/jarx
+      - name: install strace
+        run: command -v strace || (sudo apt-get update -qq && sudo apt-get install -y -qq strace)
+      # Ubuntu blocks unprivileged user namespaces, so sudo makes the network
+      # namespace and sudo -u drops straight back to the runner user. jarx
+      # never runs as root.
+      - name: control, no network and the syscall audit can see attempts
+        run: |
+          offline() { sudo unshare --net -- sudo -u "$(id -un)" -- "$@"; }
+          if offline curl -sS --max-time 5 https://example.com -o /dev/null; then
+            echo "network still works inside the namespace, so the offline check would prove nothing"
+            exit 1
+          fi
+          offline strace -f -qq -o "$RUNNER_TEMP/control.trace" -e trace="$NET_SYSCALLS" \
+            curl -sS --max-time 5 https://example.com -o /dev/null || true
+          if ! grep -qE "^[0-9]+ +(${NET_SYSCALLS//,/|})\(" "$RUNNER_TEMP/control.trace"; then
+            echo "strace didn't see curl's connection attempt, so the audit would miss jarx's too"
+            exit 1
+          fi
+          echo "ok: no network, and the audit sees a connection attempt"
+      - name: jarx scan --home testdata/demo, offline, with no network syscalls
+        run: |
+          offline() { sudo unshare --net -- sudo -u "$(id -un)" -- "$@"; }
+          out=$(offline strace -f -qq -o "$RUNNER_TEMP/jarx.trace" -e trace="$NET_SYSCALLS" \
+            "$RUNNER_TEMP/jarx" scan --home testdata/demo)
+          echo "$out"
+          grep -q '^projects (3)$' <<<"$out"
+          if grep -E "^[0-9]+ +(${NET_SYSCALLS//,/|})\(" "$RUNNER_TEMP/jarx.trace"; then
+            echo "jarx made the network syscalls above during an offline scan"
+            exit 1
+          fi
+          if [ -e testdata/demo/.jarx-state ]; then
+            echo "the demo scan wrote state, but it should write nothing"
+            exit 1
+          fi

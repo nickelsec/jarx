@@ -171,22 +171,39 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
 
 ## Project discovery
 
-- From the agents' own records: the `projects` map in `~/.claude.json`, folder
-  names under `~/.claude/projects/`, Codex `[projects]` trust entries and
-  session cwds.
+- From the agents' own records: the paths in the `projects` map of
+  `~/.claude.json` (moved by `CLAUDE_CONFIG_DIR`), Codex `[projects]` trust
+  entries in `$CODEX_HOME/config.toml`, and session cwds.
+- The folder names under `~/.claude/projects/` aren't used as paths. The docs
+  don't describe how they're named, and the observed naming (path separators
+  become dashes) can't be turned back into a path without guessing. Session
+  history (phase 6) reads the real `cwd` from the transcripts in those folders
+  instead, as an observed format.
+- Extra paths given to `jarx scan [path...]` are scanned for that run only.
 - Plus paths the user adds with `jarx setup repo add` or the dashboard.
 - jarx doesn't crawl the whole disk.
 - A recorded project that no longer exists on disk shows as **stale**, not as
-  an error.
+  an error. Under `--home`, a recorded path outside the fake home shows as
+  **outside fake home** and is never read.
+- `~/.claude.json` holds history, so it can be large. jarx streams it, keeps
+  only the keys of `projects`, and drops every value as it goes, so things
+  like an MCP server's env token are never kept.
+- A record file jarx can't parse is an info finding that names the file and
+  line. It never quotes the content, since a parser error can echo a secret.
 
 ### Walking a repo
 
-Inside a project, jarx lists files with `git ls-files` (tracked plus
-untracked, not ignored) so it sees what the agent sees in a normal repo. If
-the folder isn't a git repo or git isn't installed, it falls back to its own
-walk. Both use a skip list (`node_modules`, `.git`, `vendor`, build output
-dirs, very large files). Instruction files in parent folders above the repo
-root are collected separately, since Claude loads them too.
+Inside a project, jarx lists files with a hardened `git ls-files` (tracked
+plus untracked, not ignored) so it sees what the agent sees in a normal repo.
+The repo's own git config can't make git run anything or list another folder
+(see [design.md](design.md)). If the folder isn't a git repo, git refuses, or
+git isn't installed, it falls back to its own walk. Under `--home` it always
+uses its own walk. Both use a skip list (`node_modules`, `.git`, `vendor`,
+build output dirs) that still keeps agent files inside those dirs. jarx lists
+up to 200,000 files per project, and a project with more gets an info
+finding instead of being cut off silently. Instruction files in parent
+folders above the repo root are collected separately, since Claude loads
+them too.
 
 ## MCP probing
 
@@ -214,7 +231,9 @@ A server is probed only if the agent would start it:
 
 ### What gets skipped
 
-- Remote servers on plain `http://` URLs.
+- Remote servers on plain `http://` URLs. Plain `http://` to a loopback
+  address (`127.0.0.0/8`, `::1`, or a name that resolves to one) is allowed,
+  since that traffic never leaves the machine.
 - OAuth servers (`auth = oauth|chatgpt`, or Claude servers set up for OAuth).
 - Servers that use `headersHelper` or `http_headers_helper`, since running the
   helper means running a command. These show as **"requires auth"**.
@@ -276,7 +295,7 @@ Every server ends up with exactly one status:
 | failed to start | the process exited or the command wasn't found |
 | timed out | no answer within 15s |
 | not started | the agent wouldn't start it (disabled, not approved, untrusted project, `--no-probe`) |
-| insecure transport | plain `http://` remote URL, skipped |
+| insecure transport | plain `http://` URL that isn't loopback, skipped |
 | requires auth | OAuth, a headers helper, or a `401`/`403` with no creds sent |
 | credential rejected | a `401`/`403` after sending the configured static creds |
 | blocked | a redirect, or a link-local or metadata address |
@@ -689,14 +708,14 @@ Flags:
 
 | Flag | On | What it does |
 |---|---|---|
-| `--home <dir>` | `scan`, `ui` | treat `<dir>` as the home dir instead of the real one (see [Demo home](#demo-home)) |
+| `--home <dir>` | `scan`, `ui`, `setup` | treat `<dir>` as the home dir instead of the real one (see [Demo home](#demo-home)) |
 | `--no-probe` | `scan` | skip MCP probing |
 | `--no-history` | `scan` | skip session history |
 | `--llm` | `scan` | run the LLM review after showing the preview |
 
 ### Demo home
 
-`--home <dir>` points `jarx scan` and `jarx ui` at a fake home. Everything
+`--home <dir>` points `jarx scan`, `jarx ui` and `jarx setup` at a fake home. Everything
 jarx would read from the real machine comes from inside `<dir>` instead:
 agent config dirs, project records, history, cred locations, and jarx's own
 state (snapshots, cursor, cache), so demo runs never mix with real ones.
@@ -704,7 +723,9 @@ jarx's state goes in `<dir>/.jarx-state/`, which the repo's `.gitignore`
 ignores under `testdata/`, so demo runs never dirty the repo. With
 `--home`, jarx doesn't read managed policy dirs, the Windows registry, macOS
 plists, the real env or the real PATH. Env vars for the env var channel come
-from `<dir>/.jarx-env` instead.
+from `<dir>/.jarx-env` instead. Absolute paths inside the fake home's agent
+records are read relative to `<dir>`, so `/projects/app` in the demo's
+`.claude.json` means `<dir>/projects/app` on any machine.
 
 The repo ships `testdata/demo/`, a fake home with planted problems:
 
@@ -752,11 +773,16 @@ This is the full list. Anything not here is a bug.
 
 Rules for every outbound call jarx makes itself:
 
-- Plain `http://` remote MCP URLs are never called.
+- Plain `http://` is only ever used for loopback. Every other `http://` URL
+  is never called. The loopback check runs on every connection, after DNS, so
+  a name that later resolves somewhere else is still refused.
 - No redirects.
 - Link-local and cloud metadata addresses are blocked at dial time.
 - No proxy. Probe traffic connects directly, so the dial-time check sees the
   real address.
+- A hostile server can't stall jarx or fill its memory: a response body is
+  capped at 10 MiB, headers at 64 KiB, and a whole request at 20s. jarx never
+  asks for compressed responses, so nothing inflates behind the cap.
 - There's no telemetry, update check, advisory download, vendor list download
   or crash reporting.
 
@@ -767,8 +793,14 @@ With `--no-probe` and no `--llm`, jarx makes zero network calls.
 Everything lives under `os.UserConfigDir()/jarx/` (or `<home>/.jarx-state/`
 with `--home`):
 
-- `config` with LLM base URL, model, key env var name (not the key) and extra
-  repo paths
+- `config.json` with the extra repo paths from `jarx setup repo add`, and
+  later the LLM base URL, model and key env var name (never the key). It has
+  a version number; a config from a newer jarx is refused, not guessed at.
+  Reading it never creates the state dir, so a scan that saves nothing writes
+  nothing.
+- `fingerprint.key`, the random per-install key behind secret fingerprints.
+  It's made the first time a secret is found, and a damaged one is reported,
+  never replaced.
 - `snapshots/` with the last 20 masked snapshots
 - the history cursor (no content)
 - the LLM cache (hash to result)

@@ -64,17 +64,43 @@ https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
 
 ### Hardened git for repo walks
 
-A repo's own `.git/config` can point at commands (`core.fsmonitor`, diff
-drivers). A clone doesn't carry config, but a repo that arrived as an archive
-can. So jarx runs exactly:
+A repo's own `.git/config` can run commands or change what gets listed. A
+clone doesn't carry config, but a repo that arrived as an archive can, and
+`include.path` can pull in more. On git 2.39, a plain `ls-files` in a hostile
+repo really does run `core.fsmonitor` and really does follow `core.worktree`
+to list another dir. So jarx runs exactly:
 
 ```
-git -c core.fsmonitor=false -c core.untrackedCache=false \
+git --no-pager --work-tree=<repo> \
+    -c core.fsmonitor=false -c core.useBuiltinFSMonitor=false \
+    -c core.untrackedCache=false -c core.hooksPath=<devnull> \
+    -c core.excludesFile=<devnull> -c safe.bareRepository=explicit \
     ls-files -z --cached --others --exclude-standard
 ```
 
-with `GIT_OPTIONAL_LOCKS=0` and a scrubbed env. It never touches
-`safe.directory`. If git refuses or isn't installed, jarx uses its own walk.
+Command line `-c` beats everything in the repo's config, including what
+`include.path` pulls in. The env is built from scratch: PATH from
+`platform.Env`, `GIT_OPTIONAL_LOCKS=0`, `GIT_CONFIG_NOSYSTEM=1`,
+`GIT_CONFIG_GLOBAL=<devnull>`, `GIT_TERMINAL_PROMPT=0`,
+`GIT_CEILING_DIRECTORIES=<repo's parent>` (so a dir that isn't a repo can't
+use a parent repo's config) and `LC_ALL=C`, plus `SystemRoot` on Windows.
+Nothing else from jarx's own env comes along. Stderr is thrown away. There's
+a 10s timeout and a 64 MiB output cap, and every path git prints has to be a
+plain relative path inside the repo or the whole output is dropped.
+
+`ls-files` without `-m`, `-s` or `--eol` never reads file content, so
+filter, diff and textconv drivers don't run. The pager, hooks and untracked
+cache flags are defense in depth: git 2.39 doesn't run them here, but other
+versions or paths might.
+
+What's left: `include.path` still makes git read the files it names. That's
+a read, not a run, and nothing it pulls in can override the `-c` flags.
+
+jarx never touches `safe.directory`. If git refuses, isn't on PATH, or the
+dir isn't a repo, jarx uses its own walk through fsys. Under `--home` it
+never runs git at all, so the demo and the tests never start a binary from a
+fake PATH. Tests prove each real defense with throwaway repos whose config
+writes a marker file if it ever runs.
 
 ### MCP client covers four protocol revisions
 
@@ -109,9 +135,11 @@ a spot in the code that makes breaking it hard.
 
 | Promise | How the code makes breaking it hard |
 |---|---|
-| Secrets never leak | Model text fields are `redact.Text`. Only the `redact` package can build one (unexported field). `report`, `ui`, `snapshot` and `llm` only take `redact.Text`, so there's no way to put a raw string on screen, on disk or on the wire. |
+| Secrets never leak | Model text fields are `redact.Text`. Only the `redact` package can build one (unexported field). `report`, `ui`, `snapshot` and `llm` only take `redact.Text`, so there's no way to put a raw string on screen, on disk or on the wire. Anything that matches a secret pattern is always masked. Entropy only flags a match as a likely placeholder, it never decides whether to mask, because showing a real secret is far worse than hiding a fake one. A reflection test walks every type reachable from `model.Inventory` and fails on a raw string anywhere: fields (exported or not), named string types, pointers, slices, arrays, map keys and values, `[]byte`, `[]rune`, interfaces, funcs, chans, embedded and generic types, and structs from other packages that aren't allowlisted. The test has one fixture per hiding spot, so a gap in the walker fails too. `model.Path` keeps the raw path only for fsys reads, and prints and encodes as the masked path for every fmt verb and in JSON. |
+| Nothing raw reaches the terminal or a log | Only `report` writes output. `forbidigo` bans `fmt.Print*`, `fmt.Fprint*`, `os.Stdout`, `os.Stderr`, `print`, `println`, `log` and `log/slog` everywhere else (`cmd/jarx` may use `os.Stdout` and `os.Stderr` only to hand them to `report`). `report` takes values only as `redact.Text`, and its format string has an unexported type, so a string variable won't compile as the format. `report.Error` scrubs error text, since a parser error can quote the line it failed on. The limit: a package handed an `io.Writer` could still call `Write` on it, but only `cmd/jarx` can reach the real stdout and stderr, so that needs a new parameter that review would catch. |
 | Never calls a tool | The `mcp` package has constants only for `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
-| Only the listed network calls | `netguard` is the only package allowed to build an `http.Client`, a transport or a dialer. golangci `forbidigo` bans `http.Get`, `http.DefaultClient`, `net.Dial*` and `http.Transport{` everywhere else. |
+| Only the listed network calls | `netguard` is the only package allowed to make a network connection. golangci `forbidigo` bans `http.Get`, `http.Client`, `http.Transport`, `http.DefaultClient`, `net.Dial*`, `net.Dialer`, `tls.Dial*`, `tls.Client`, DNS lookups (`net.Lookup*`, `net.Resolver`), `net/smtp` and `net/rpc` everywhere else. Inside netguard, every connection is checked in the dialer's `Control` hook, after DNS and right before connect, on the exact IP being connected, so DNS rebinding and reconnects can't get past it. A literal IP host is also checked before dialing, because Go rewrites `0.0.0.0`, `::` and an empty host into a dial to the local machine before `Control` sees it. The tests run with a fake DNS server and a test-only rule that refuses any non-loopback connection, so a broken guard fails its tests instead of reaching a real address. |
+| Only discover runs a process | `forbidigo` bans `exec.Command`, `exec.CommandContext`, `exec.LookPath` (it reads the real PATH), `os.StartProcess` and `syscall.Exec`/`ForkExec` outside `discover`, which only runs hardened git. `proc` joins it in phase 4. git is found through `platform.Env`'s PATH, never under `--home`. |
 | Never writes agent config | `fsys` has no write methods. The only writer is `jarxdir`, which is rooted at jarx's state dir (`os.UserConfigDir()/jarx`, or `<home>/.jarx-state` with `--home`) with `os.Root`. `forbidigo` bans `os.WriteFile`, `os.Create`, `os.Mkdir*`, `os.Remove*`, `os.Rename` and friends everywhere else (tests may write fixtures). |
 | Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, PATH, state dir, system roots). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`, and bans `os.Open`, `os.ReadFile`, `os.Stat`, `os.OpenRoot`, `filepath.Walk*` and friends outside `fsys`, `jarxdir` and `platform`. Under `--home`, `fsys` confines every read to the fake home with `os.Root`, so a fixture that points at a real path, a `..` trick or a symlink can't reach the real machine. `--home` builds a `platform.Env` with no system roots, registry, plists, real env or real PATH. |
 | Only approved dependencies | golangci `depguard` lists the five approved modules plus stdlib. A new import fails lint until someone approves it. |
@@ -207,12 +235,12 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/cli` | subcommands with stdlib `flag` | CLI |
 | `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`). Registry and plist reads land here in phase 3. Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
 | `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. | Walking a repo |
-| `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache and fingerprint key | What jarx writes to disk |
-| `internal/redact` | `Text` type, scrubber, `REDACTED:<type>`, HMAC fingerprint | Promise 4, Secrets |
-| `internal/model` | agent-neutral inventory, `Origin`, `Unknown` | Architecture |
-| `internal/finding` | Finding, severity, rule registry with IDs | Detection rules |
-| `internal/discover` | project records, hardened git walk, stale detection | Project discovery |
-| `internal/agent` | adapter interface, shared parsers (jsonc, frontmatter, `@` imports) | Architecture |
+| `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
+| `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. The secret patterns themselves arrive with `catalog` in phase 3. | Promise 4, Secrets |
+| `internal/model` | agent-neutral inventory, `Origin`, `Path`, `Setting[T]` (one layer per scope, highest first, with each layer marked in effect or not and why; adapters decide, the model only holds the result), `Project`, `Unknown`. Grows per phase. | Architecture |
+| `internal/finding` | Finding, severity, rules as plain values with IDs like `JARX-MCP-001`, a `Registry` built by `scan` from every analyzer's rules (no global registry), worst-first sort, and `JARX-SCAN-001` for files fsys skipped as too large | Detection rules |
+| `internal/discover` | merges every adapter's project records with extra paths, sets each project's status (ok, stale, outside fake home, not absolute, can't check), reports fsys skips as findings, and walks each repo with hardened git or the fallback walk | Project discovery |
+| `internal/agent` | the adapter interface (`Agent`, `Projects`) and the shared `Context` (env, fsys, scrubber). Shared parsers (jsonc, frontmatter, `@` imports) land here in phase 3. | Architecture |
 | `internal/agent/claude` | Claude paths, precedence, trust, MCP approval, modes | Scope: Claude Code |
 | `internal/agent/codex` | Codex paths, profiles, legacy `sandbox_mode` switch, requirements | Scope: Codex CLI |
 | `internal/catalog` | embedded data: builtin tools, vendors, advisories, secret patterns, each with an "as of" stamp | Built-in tools catalog, Vendor badge, Advisory data |
@@ -221,7 +249,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/analyze/poison` | text rules over every text the agent reads | Detection rules |
 | `internal/analyze/perms` | effective permissions with origin and in-effect reason | Effective permissions view |
 | `internal/analyze/reach` | per-channel verdicts, observed modes, credential view | Reachability verdicts, Credential view |
-| `internal/netguard` | the one HTTP client: dial-time IP block, no redirects, no proxy | Network calls |
+| `internal/netguard` | the one HTTP client. Blocks link-local, cloud metadata (including AWS over IPv6 and Alibaba's `100.100.100.200`), unspecified addresses and every IPv6 form that wraps a blocked IPv4 (mapped, compatible, NAT64, 6to4; Teredo and local-use NAT64 outright). Separate dial paths by scheme: https goes through the block then TLS, plain http also has to reach loopback. No proxy, no redirects, a 10 MiB body cap, 64 KiB headers, a 20s ceiling, no compression. | Network calls |
 | `internal/proc` | `proc_windows.go` job objects, `proc_unix.go` process groups, baseline env | How a stdio server is started |
 | `internal/mcp` | list-only client: stdio, streamable HTTP, legacy SSE, paging | The MCP client |
 | `internal/probe` | which servers, env expansion rules, concurrency, status | MCP probing, Server status |
@@ -232,7 +260,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/history` | cursor, jsonl, zstd and read-only sqlite readers (observed formats) | Session history |
 | `internal/analyze/versions` | installs, PATH winner, advisory match, catalog age warning | Agent installs and versions |
 | `internal/analyze/unknown` | the unknown settings report | Unknown settings report |
-| `internal/report` | terminal output | CLI |
+| `internal/report` | the only output writer: `Out` and `Err` streams that take a literal format and `redact.Text` values, and an `Error` that scrubs error text. Grows into the terminal report in phase 2. | CLI |
 | `internal/ui` | server, middleware (host, token, CSRF, CSP), templates, embedded static files | Dashboard |
 | `internal/keystore` | go-keyring for jarx's own entry, or an env var name | Optional LLM review |
 | `internal/llm` | OpenAI-compatible client over netguard, preview, schema check and retry, quote check, cache | Optional LLM review |
@@ -298,17 +326,22 @@ Jobs:
   disabled linter has a written reason. golangci's gosec linter covers gosec,
   so there's no separate job. `forbidigo` and `depguard` hold the choke points.
 - **vuln:** govulncheck, run with `go run` at a pinned version.
+- **offline:** on ubuntu, `jarx scan --home testdata/demo` runs inside a
+  network namespace with no network at all, under `strace -f`. It has to
+  succeed, print the demo's projects and leave no state behind, and the job
+  fails on **any** network syscall (`socket`, `connect`, `sendto` and the
+  rest), even one that failed. The namespace alone wouldn't be enough: a
+  connection attempt fails instantly there, and if jarx quietly handled that
+  error the scan would still pass. Ubuntu blocks unprivileged user
+  namespaces, so `sudo unshare --net` makes the namespace and `sudo -u` drops
+  back to the runner user, so jarx never runs as root. A control step first
+  proves both layers work: `curl` has to fail inside the namespace, and
+  `strace` has to see `curl`'s connection attempt, so a blind audit can't
+  make the job pass. `--no-probe` and `--no-history` join the command when
+  they exist (phases 4 and 6).
 
 The Go version comes from `go.mod`, so CI and local builds match. Every action
 is pinned by SHA with the version in a comment.
-
-Added in a later phase:
-
-- **offline** (phase 2): on ubuntu, `unshare -n` runs
-  `jarx scan --home testdata/demo` and expects success. With no network
-  namespace, any network call fails the job, which proves the zero-network
-  mode. `--no-probe` and `--no-history` get added to that command when they
-  exist (phases 4 and 6).
 
 Not set up for now, since the repo is private: CodeQL, Dependabot and any
 release workflow. Bumping action SHAs is manual until then.

@@ -25,16 +25,27 @@ whether each exists.
 
 ## Phase 2: Core engine
 
-- [ ] `redact`: `Text` type, scrubber, `REDACTED:<type>`, fingerprint, start
-  of the no-leak suite
-- [ ] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry.
-  Turn `fsys` skips into "skipped, too large" info findings
-- [ ] `netguard`: the one HTTP client, dial-time IP block, no redirects, no
-  proxy
-- [ ] `discover` and `report`: project records from both adapters, hardened
-  git walk, stale detection, terminal output
-- [ ] `jarx setup` and `setup repo add|rm`
-- [ ] offline CI job
+- [x] `redact`: `Text` type, scrubber, `REDACTED:<type>`, fingerprint, start
+  of the no-leak suite. Also a minimal `report` as the only output writer,
+  with lint rules banning output everywhere else, and `cli` moved onto it
+  (d0ca3da)
+- [x] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry.
+  Turn `fsys` skips into "skipped, too large" info findings. Also `Setting[T]`
+  for values set in more than one scope, and the no-raw-string model test
+  (f2508f2)
+- [x] `netguard`: the one HTTP client, dial-time IP block, no redirects, no
+  proxy. Also loopback-only plain http checked per connection, response size
+  and time caps, and lint bans on TLS, DNS, smtp and rpc outside netguard
+  (f86f249)
+- [x] `discover` and `report` (a): project records from both adapters, stale
+  and outside-home statuses, the project and findings listing in `report`,
+  `scan [path...]`, and demo records in `testdata/demo/` (723897b)
+- [x] `discover` (b): the hardened git walk and the fallback walk, file
+  counts, and the `exec:` lint rule (86e06a5)
+- [x] `jarx setup` and `setup repo add|rm`, with `--home`, and saved repos
+  in every scan (451ba14)
+- [x] offline CI job, with a control step that proves the namespace has no
+  network (1b48b2f)
 
 **Run it:** `jarx scan --home testdata/demo` lists every known project with
 stale ones marked.
@@ -92,7 +103,8 @@ per-channel verdicts and the egress panel.
 
 ## Phase 6: History
 
-- [ ] history cursor and Claude transcripts
+- [ ] history cursor and Claude transcripts, including the real `cwd` behind
+  each `~/.claude/projects/` folder
 - [ ] Codex rollouts (zstd) and sqlite
 - [ ] observed modes into reach, "sees" state, session cwds into discover,
   `--no-history`

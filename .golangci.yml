@@ -65,6 +65,28 @@ linters:
         - pattern: ^net\.(Dial|DialTimeout|DialTCP|DialUDP|DialIP|DialUnix|Dialer)$
           pkg: ^net$
           msg: "network: only internal/netguard may dial"
+        - pattern: ^tls\.(Dial|DialWithDialer|Dialer|Client)$
+          pkg: ^crypto/tls$
+          msg: "network: only internal/netguard may open TLS connections"
+        # A DNS lookup is a network call too.
+        - pattern: ^net\.(Lookup[A-Za-z]*|Resolver|DefaultResolver)$
+          pkg: ^net$
+          msg: "network: only internal/netguard may do DNS lookups"
+        - pattern: ^(smtp|rpc|jsonrpc)\..*$
+          pkg: ^net/(smtp|rpc|rpc/jsonrpc)$
+          msg: "network: only internal/netguard may make network calls"
+        # Only internal/discover may run a process (hardened git), plus
+        # internal/proc from phase 4. exec.LookPath reads the real PATH, so it's
+        # banned too; git is found through platform.Env instead.
+        - pattern: ^exec\.(Command|CommandContext|LookPath)$
+          pkg: ^os/exec$
+          msg: "exec: only internal/discover may run commands"
+        - pattern: ^os\.StartProcess$
+          pkg: ^os$
+          msg: "exec: only internal/discover may run commands"
+        - pattern: ^syscall\.(Exec|ForkExec|StartProcess)$
+          pkg: ^syscall$
+          msg: "exec: only internal/discover may run commands"
         # Only internal/platform may read the real env and user dirs, so tests
         # and --home never touch the real machine.
         - pattern: ^os\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir|UserConfigDir|UserCacheDir)$
@@ -90,6 +112,22 @@ linters:
         - pattern: ^ioutil\..*$
           pkg: ^io/ioutil$
           msg: "io: io/ioutil is deprecated, and its file calls skip fsys and jarxdir"
+        # Only internal/report writes output, and it only takes redact.Text, so
+        # a raw string can't reach the terminal or a log.
+        - pattern: ^fmt\.(Print|Printf|Println|Fprint|Fprintf|Fprintln)$
+          pkg: ^fmt$
+          msg: "output: write output through internal/report"
+        - pattern: ^os\.(Stdout|Stderr)$
+          pkg: ^os$
+          msg: "output: only cmd/jarx may use os.Stdout and os.Stderr, to hand them to report"
+        - pattern: ^(print|println)$
+          msg: "output: write output through internal/report"
+        - pattern: ^log\..*$
+          pkg: ^log$
+          msg: "output: logging goes through internal/report"
+        - pattern: ^slog\..*$
+          pkg: ^log/slog$
+          msg: "output: logging goes through internal/report"
 
   exclusions:
     rules:
@@ -113,8 +151,20 @@ linters:
         linters:
           - forbidigo
         text: "write:"
+      - path: ^internal/report/
+        linters:
+          - forbidigo
+        text: "output:"
+      - path: ^cmd/jarx/
+        linters:
+          - forbidigo
+        text: "output: only cmd/jarx may use os.Stdout"
+      - path: ^internal/discover/
+        linters:
+          - forbidigo
+        text: "exec:"
       # Tests build fixtures in t.TempDir() and check what got written.
       - path: _test\.go$
         linters:
           - forbidigo
-        text: "(read|write):"
+        text: "(read|write|exec):"
