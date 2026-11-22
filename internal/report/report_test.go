@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nickelsec/jarx/internal/finding"
+	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/redact"
 )
 
@@ -65,5 +67,67 @@ func TestErrorScrubsTheErrorText(t *testing.T) {
 	}
 	if errw.String() != "jarx: reading config: line 3: bad value \"REDACTED:test_token\"\n" {
 		t.Errorf("stderr = %q, want the scrubbed error", errw.String())
+	}
+}
+
+func TestProjectsListing(t *testing.T) {
+	p, s, out, _ := setup(t)
+	path := func(raw string) model.Path { return model.NewPath(s, raw) }
+	claude := model.Origin{Agent: model.AgentClaude}
+	codex := model.Origin{Agent: model.AgentCodex}
+
+	p.Projects([]model.Project{
+		{
+			Path: path("/projects/app"), Status: model.ProjectOK,
+			Origins: []model.Origin{claude, codex},
+			Trust:   []model.Trust{{Level: model.TrustTrusted, Origin: codex}},
+		},
+		{Path: path("/projects/old"), Status: model.ProjectStale, Origins: []model.Origin{claude, claude}},
+		{Path: path("/" + canary), Status: model.ProjectOutsideHome, Origins: []model.Origin{{Agent: model.AgentJarx}}},
+	})
+
+	want := "projects (3)\n" +
+		"  /projects/app  claude, codex (trusted)\n" +
+		"  /projects/old  claude  stale\n" +
+		"  /REDACTED:test_token  jarx  outside fake home\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestFindingsListingIsWorstFirstWithTitles(t *testing.T) {
+	p, s, out, _ := setup(t)
+	reg, err := finding.NewRegistry(finding.Rules()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := s.Scrub("not valid TOML " + canary)
+	at := func(file string, line int) model.Origin {
+		return model.Origin{File: model.NewPath(s, file), Line: line}
+	}
+	high := finding.Rule{ID: "JARX-TEST-001", Severity: finding.High, Title: "t", Fix: "f"}
+
+	p.Findings([]finding.Finding{
+		finding.UnreadableRecord().New(at("/h/.codex/config.toml", 3), ev),
+		high.New(at("/h/x", 0), redact.Text{}),
+	}, reg)
+
+	want := "findings (2)\n" +
+		"  high  JARX-TEST-001  /h/x\n" +
+		"  info  JARX-SCAN-002  /h/.codex/config.toml:3  couldn't read an agent's records: not valid TOML REDACTED:test_token\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestEmptyListings(t *testing.T) {
+	p, _, out, _ := setup(t)
+	reg, _ := finding.NewRegistry()
+
+	p.Projects(nil)
+	p.Findings(nil, reg)
+
+	if out.String() != "projects (0)\nfindings (0)\n" {
+		t.Errorf("stdout = %q", out.String())
 	}
 }

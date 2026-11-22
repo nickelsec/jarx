@@ -236,17 +236,20 @@ func TestScanHelpPrintsScanUsageToStdout(t *testing.T) {
 	}
 }
 
-func TestScanRejectsArguments(t *testing.T) {
-	got := run("scan", "extra")
+func TestScanTakesExtraPaths(t *testing.T) {
+	home := fakeHome(t, "")
+	extra := filepath.Join(home, "extra")
+	if err := os.Mkdir(extra, 0o700); err != nil {
+		t.Fatal(err)
+	}
 
-	if got.code != 2 {
-		t.Fatalf("exit code = %d, want 2", got.code)
+	got := run("scan", "--home", home, extra)
+
+	if got.code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
 	}
-	if !strings.Contains(got.stderr, `unexpected argument "extra"`) {
-		t.Errorf("stderr = %q, want it to name the argument", got.stderr)
-	}
-	if !strings.Contains(got.stderr, "usage: jarx scan") {
-		t.Errorf("stderr = %q, want scan usage", got.stderr)
+	if !strings.Contains(got.stdout, "projects (1)\n  "+extra+"  jarx\n") {
+		t.Errorf("stdout = %q, want the extra path listed as from jarx", got.stdout)
 	}
 }
 
@@ -438,21 +441,41 @@ func TestScanDemoHome(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
 	}
-	for _, want := range []string{"environment (fake home)", "3 vars from .jarx-env", "skipped (--home)"} {
+	abs, err := filepath.Abs(demo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proj := func(rel string) string { return filepath.Join(abs, "projects", rel) }
+	for _, want := range []string{
+		"environment (fake home)", "3 vars from .jarx-env", "skipped (--home)",
+		// The demo's records use paths like /projects/app, read inside the
+		// fake home.
+		"projects (3)\n" +
+			"  " + proj("app") + "  claude, codex (trusted)\n" +
+			"  " + proj("notes") + "  codex (untrusted)\n" +
+			"  " + proj("old") + "  claude  stale\n",
+		"findings (0)\n",
+	} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
 		}
 	}
-	// No name or value from the demo env may show up.
-	for l := range strings.SplitSeq(string(data), "\n") {
+	assertNoEnvLeak(t, string(data), got.stdout+got.stderr)
+}
+
+// assertNoEnvLeak fails if any name or value from a .jarx-env file shows up
+// in out.
+func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
+	t.Helper()
+	for l := range strings.SplitSeq(jarxEnv, "\n") {
 		l = strings.TrimSpace(l)
 		if l == "" || strings.HasPrefix(l, "#") {
 			continue
 		}
 		name, value, _ := strings.Cut(l, "=")
 		for _, leak := range []string{name, value} {
-			if strings.Contains(got.stdout+got.stderr, leak) {
-				t.Errorf("output contains %q from the demo .jarx-env:\n%s", leak, got.stdout)
+			if strings.Contains(out, leak) {
+				t.Errorf("output contains %q from the demo .jarx-env:\n%s", leak, out)
 			}
 		}
 	}

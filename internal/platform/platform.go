@@ -8,6 +8,8 @@
 package platform
 
 import (
+	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -93,13 +95,6 @@ func (e Env) SystemRoots() (Roots, bool) {
 	}
 }
 
-func (e Env) normalize(name string) string {
-	if e.GOOS == goosWindows {
-		return strings.ToUpper(name)
-	}
-	return name
-}
-
 // splitPath splits a PATH value with goos's separator and drops empty
 // entries.
 func splitPath(goos, path string) []string {
@@ -114,4 +109,31 @@ func splitPath(goos, path string) []string {
 		}
 	}
 	return out
+}
+
+// MapPath turns a path from an agent's own records into one jarx can read.
+// On the real machine it's the path itself. Under --home, a record path is
+// read relative to the fake home: "/projects/app" and `C:\projectspp`
+// both become <home>/projects/app. That lets the demo's records work on any
+// machine and keeps every read inside the fake home. ".." can't climb out.
+func (e Env) MapPath(p string) string {
+	if !e.fake {
+		return filepath.Clean(p)
+	}
+	if clean := filepath.Clean(p); clean == e.Home || strings.HasPrefix(clean, e.Home+string(filepath.Separator)) {
+		return clean
+	}
+	// Drop a drive letter, then treat the rest as slash-separated and rooted.
+	if len(p) >= 2 && p[1] == ':' && (p[0]|0x20 >= 'a' && p[0]|0x20 <= 'z') {
+		p = p[2:]
+	}
+	rel := path.Clean("/" + strings.ReplaceAll(p, "\\", "/"))
+	return filepath.Join(e.Home, filepath.FromSlash(rel))
+}
+
+func (e Env) normalize(name string) string {
+	if e.GOOS == goosWindows {
+		return strings.ToUpper(name)
+	}
+	return name
 }

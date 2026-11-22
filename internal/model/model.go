@@ -89,11 +89,40 @@ func (s Setting[T]) InEffect() []Layer[T] {
 	return out
 }
 
+// ProjectStatus says whether jarx could look at a project dir.
+type ProjectStatus string
+
+// Project statuses.
+const (
+	ProjectOK          ProjectStatus = "ok"
+	ProjectStale       ProjectStatus = "stale"             // recorded, but missing or not a dir
+	ProjectOutsideHome ProjectStatus = "outside fake home" // under --home, points outside it; never read
+	ProjectInvalid     ProjectStatus = "not an absolute path"
+	ProjectUnreadable  ProjectStatus = "can't check"
+)
+
+// TrustLevel is an agent's trust decision for a project.
+type TrustLevel string
+
+// Trust levels.
+const (
+	TrustTrusted   TrustLevel = "trusted"
+	TrustUntrusted TrustLevel = "untrusted"
+	TrustUnknown   TrustLevel = "unknown" // set, but to a value jarx doesn't know
+)
+
+// Trust is one agent's recorded trust decision.
+type Trust struct {
+	Level  TrustLevel
+	Origin Origin
+}
+
 // Project is a project dir an agent knows about.
 type Project struct {
 	Path    Path
 	Origins []Origin // every record that mentions it
-	Stale   bool     // recorded but no longer on disk
+	Status  ProjectStatus
+	Trust   []Trust
 }
 
 // Unknown is a config key the adapter doesn't recognize.

@@ -3,20 +3,27 @@ package cli
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strconv"
 
+	"github.com/nickelsec/jarx/internal/agent"
+	"github.com/nickelsec/jarx/internal/agent/claude"
+	"github.com/nickelsec/jarx/internal/agent/codex"
+	"github.com/nickelsec/jarx/internal/discover"
+	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
 )
 
-const scanUsage = `usage: jarx scan [--home <dir>]
+const scanUsage = `usage: jarx scan [--home <dir>] [path...]
 
 Scans what Claude Code and Codex can see and reach on this machine.
+
+Extra paths are scanned along with the projects the agents know about, for
+this run only.
 
 flags:
   --home <dir>  use <dir> as the home dir instead of the real one
@@ -30,9 +37,6 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	home := fs.String("home", "", "")
 	if code, ok := parse(p, plain, fs, args, scanHelp); !ok {
 		return code
-	}
-	if fs.NArg() > 0 {
-		return usageError(p, scanHelp, scrubbed(plain, fmt.Sprintf("unexpected argument %q", fs.Arg(0))))
 	}
 	homeSet := false
 	fs.Visit(func(f *flag.Flag) { homeSet = homeSet || f.Name == "home" })
@@ -64,7 +68,21 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		p.Error(err)
 		return exitError
 	}
+	rules, err := finding.NewRegistry(finding.Rules()...)
+	if err != nil {
+		p.Error(err)
+		return exitError
+	}
+
 	printEnv(p.Out, scrub, env, files)
+	res := discover.Run(
+		agent.Context{Env: env, Files: files, Scrub: scrub},
+		[]agent.Adapter{claude.Adapter{}, codex.Adapter{}},
+		fs.Args(),
+	)
+	p.Out.Printf("\n")
+	p.Projects(res.Projects)
+	p.Findings(res.Findings, rules)
 	return exitOK
 }
 

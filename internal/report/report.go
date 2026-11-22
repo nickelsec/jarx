@@ -10,7 +10,12 @@ package report
 import (
 	"fmt"
 	"io"
+	"slices"
+	"strconv"
+	"strings"
 
+	"github.com/nickelsec/jarx/internal/finding"
+	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/redact"
 )
 
@@ -51,4 +56,69 @@ func New(out, errw io.Writer, scrub *redact.Scrubber) *Printer {
 func (p *Printer) Error(err error) {
 	text, _ := p.scrub.Scrub(err.Error())
 	p.Err.Printf("jarx: %s\n", text)
+}
+
+// Projects lists every project with the agents that know it and, unless it's
+// fine, its status.
+func (p *Printer) Projects(ps []model.Project) {
+	p.Out.Printf("projects (%s)\n", p.text(strconv.Itoa(len(ps))))
+	for _, proj := range ps {
+		status := ""
+		if proj.Status != model.ProjectOK {
+			status = "  " + string(proj.Status)
+		}
+		p.Out.Printf("  %s  %s%s\n", proj.Path.Text(), p.text(agents(proj)), p.text(status))
+	}
+}
+
+// agents names each agent once, in the order its records came, with its
+// trust decision when there is one.
+func agents(proj model.Project) string {
+	trust := map[model.Agent]model.TrustLevel{}
+	for _, t := range proj.Trust {
+		trust[t.Origin.Agent] = t.Level
+	}
+	var names []string
+	seen := map[model.Agent]bool{}
+	for _, o := range proj.Origins {
+		if seen[o.Agent] {
+			continue
+		}
+		seen[o.Agent] = true
+		name := string(o.Agent)
+		if level, ok := trust[o.Agent]; ok {
+			name += " (" + string(level) + ")"
+		}
+		names = append(names, name)
+	}
+	return strings.Join(names, ", ")
+}
+
+// Findings lists findings worst first, with the rule's title from rules.
+func (p *Printer) Findings(fs []finding.Finding, rules *finding.Registry) {
+	sorted := slices.Clone(fs)
+	finding.Sort(sorted)
+	p.Out.Printf("findings (%s)\n", p.text(strconv.Itoa(len(sorted))))
+	for _, f := range sorted {
+		where := f.Origin.File.Text().String()
+		if f.Origin.Line > 0 {
+			where += ":" + strconv.Itoa(f.Origin.Line)
+		}
+		detail := ""
+		if rule, ok := rules.Lookup(f.RuleID); ok {
+			detail = "  " + rule.Title
+			if !f.Evidence.IsZero() {
+				detail += ": " + f.Evidence.String()
+			}
+		}
+		p.Out.Printf("  %s  %s  %s%s\n", p.text(f.Severity.String()), p.text(f.RuleID), p.text(where), p.text(detail))
+	}
+}
+
+// text wraps one of jarx's own values (an agent name, a status, a rule ID, a
+// count) as Text, through the scrubber like everything else. It's
+// unexported, so other packages still can't turn a string into output.
+func (p *Printer) text(s string) redact.Text {
+	t, _ := p.scrub.Scrub(s)
+	return t
 }

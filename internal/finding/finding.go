@@ -120,9 +120,20 @@ func SkippedTooLarge() Rule {
 	}
 }
 
+// UnreadableRecord is jarx's own rule for an agent record file it couldn't
+// parse. The evidence names the file and position, never the content.
+func UnreadableRecord() Rule {
+	return Rule{
+		ID:       "JARX-SCAN-002",
+		Severity: Info,
+		Title:    "couldn't read an agent's records",
+		Fix:      "check that the file is valid; jarx only reads it and never changes it",
+	}
+}
+
 // Rules returns the rules the finding package itself owns.
 func Rules() []Rule {
-	return []Rule{SkippedTooLarge()}
+	return []Rule{SkippedTooLarge(), UnreadableRecord()}
 }
 
 // FromSkips turns every file fsys refused into an info finding.

@@ -22,7 +22,10 @@ func leafTypes() []reflect.Type {
 
 // enumTypes are named string types whose values are our own constants.
 func enumTypes() []reflect.Type {
-	return []reflect.Type{reflect.TypeFor[Agent](), reflect.TypeFor[Scope]()}
+	return []reflect.Type{
+		reflect.TypeFor[Agent](), reflect.TypeFor[Scope](),
+		reflect.TypeFor[ProjectStatus](), reflect.TypeFor[TrustLevel](),
+	}
 }
 
 const modelPkg = "github.com/nickelsec/jarx/internal/model"

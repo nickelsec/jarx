@@ -171,13 +171,25 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
 
 ## Project discovery
 
-- From the agents' own records: the `projects` map in `~/.claude.json`, folder
-  names under `~/.claude/projects/`, Codex `[projects]` trust entries and
-  session cwds.
+- From the agents' own records: the paths in the `projects` map of
+  `~/.claude.json` (moved by `CLAUDE_CONFIG_DIR`), Codex `[projects]` trust
+  entries in `$CODEX_HOME/config.toml`, and session cwds.
+- The folder names under `~/.claude/projects/` aren't used as paths. The docs
+  don't describe how they're named, and the observed naming (path separators
+  become dashes) can't be turned back into a path without guessing. Session
+  history (phase 6) reads the real `cwd` from the transcripts in those folders
+  instead, as an observed format.
+- Extra paths given to `jarx scan [path...]` are scanned for that run only.
 - Plus paths the user adds with `jarx setup repo add` or the dashboard.
 - jarx doesn't crawl the whole disk.
 - A recorded project that no longer exists on disk shows as **stale**, not as
-  an error.
+  an error. Under `--home`, a recorded path outside the fake home shows as
+  **outside fake home** and is never read.
+- `~/.claude.json` holds history, so it can be large. jarx streams it, keeps
+  only the keys of `projects`, and drops every value as it goes, so things
+  like an MCP server's env token are never kept.
+- A record file jarx can't parse is an info finding that names the file and
+  line. It never quotes the content, since a parser error can echo a secret.
 
 ### Walking a repo
 
@@ -706,7 +718,9 @@ jarx's state goes in `<dir>/.jarx-state/`, which the repo's `.gitignore`
 ignores under `testdata/`, so demo runs never dirty the repo. With
 `--home`, jarx doesn't read managed policy dirs, the Windows registry, macOS
 plists, the real env or the real PATH. Env vars for the env var channel come
-from `<dir>/.jarx-env` instead.
+from `<dir>/.jarx-env` instead. Absolute paths inside the fake home's agent
+records are read relative to `<dir>`, so `/projects/app` in the demo's
+`.claude.json` means `<dir>/projects/app` on any machine.
 
 The repo ships `testdata/demo/`, a fake home with planted problems:
 

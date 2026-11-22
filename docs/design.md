@@ -212,8 +212,8 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. The secret patterns themselves arrive with `catalog` in phase 3. | Promise 4, Secrets |
 | `internal/model` | agent-neutral inventory, `Origin`, `Path`, `Setting[T]` (one layer per scope, highest first, with each layer marked in effect or not and why; adapters decide, the model only holds the result), `Project`, `Unknown`. Grows per phase. | Architecture |
 | `internal/finding` | Finding, severity, rules as plain values with IDs like `JARX-MCP-001`, a `Registry` built by `scan` from every analyzer's rules (no global registry), worst-first sort, and `JARX-SCAN-001` for files fsys skipped as too large | Detection rules |
-| `internal/discover` | project records, hardened git walk, stale detection | Project discovery |
-| `internal/agent` | adapter interface, shared parsers (jsonc, frontmatter, `@` imports) | Architecture |
+| `internal/discover` | merges every adapter's project records with extra paths, sets each project's status (ok, stale, outside fake home, not absolute, can't check), reports fsys skips as findings, and walks each repo with hardened git or the fallback walk | Project discovery |
+| `internal/agent` | the adapter interface (`Agent`, `Projects`) and the shared `Context` (env, fsys, scrubber). Shared parsers (jsonc, frontmatter, `@` imports) land here in phase 3. | Architecture |
 | `internal/agent/claude` | Claude paths, precedence, trust, MCP approval, modes | Scope: Claude Code |
 | `internal/agent/codex` | Codex paths, profiles, legacy `sandbox_mode` switch, requirements | Scope: Codex CLI |
 | `internal/catalog` | embedded data: builtin tools, vendors, advisories, secret patterns, each with an "as of" stamp | Built-in tools catalog, Vendor badge, Advisory data |

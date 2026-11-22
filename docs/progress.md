@@ -36,8 +36,12 @@ whether each exists.
 - [x] `netguard`: the one HTTP client, dial-time IP block, no redirects, no
   proxy. Also loopback-only plain http checked per connection, response size
   and time caps, and lint bans on TLS, DNS, smtp and rpc outside netguard
-- [ ] `discover` and `report`: project records from both adapters, hardened
-  git walk, stale detection, the project listing in `report`
+  (f86f249)
+- [x] `discover` and `report` (a): project records from both adapters, stale
+  and outside-home statuses, the project and findings listing in `report`,
+  `scan [path...]`, and demo records in `testdata/demo/`
+- [ ] `discover` (b): the hardened git walk and the fallback walk, file
+  counts, and the `exec:` lint rule
 - [ ] `jarx setup` and `setup repo add|rm`
 - [ ] offline CI job
 
@@ -97,7 +101,8 @@ per-channel verdicts and the egress panel.
 
 ## Phase 6: History
 
-- [ ] history cursor and Claude transcripts
+- [ ] history cursor and Claude transcripts, including the real `cwd` behind
+  each `~/.claude/projects/` folder
 - [ ] Codex rollouts (zstd) and sqlite
 - [ ] observed modes into reach, "sees" state, session cwds into discover,
   `--no-history`
