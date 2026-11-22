@@ -149,8 +149,18 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
   files `$CODEX_HOME/<name>.config.toml`, `/etc/codex/config.toml`, managed
   `requirements.toml` (`/etc/codex/` or `%ProgramData%\OpenAI\Codex\`), legacy
   `managed_config.toml`.
-- **Precedence:** CLI > project > profile > user > cloud-managed > system >
-  defaults. Trust comes from `[projects."<path>"] trust_level`.
+- **Precedence:** legacy `managed_config.toml` (applied at startup, above
+  even CLI flags) > CLI > project > profile > user > cloud-managed > system >
+  defaults. Trust comes from `[projects."<path>"] trust_level`. Project files
+  load from the project root marker (`.git` by default, or
+  `project_root_markers`) down to the working dir, closest first, and only in
+  trusted projects. A profile file applies only with `--profile <name>`, and
+  `[profiles]` tables or a `profile` key in `config.toml` are ignored.
+  `requirements.toml` constrains values instead of setting them.
+- **Silent overrides to watch:** `sandbox_mode` in any loaded layer makes
+  Codex ignore `default_permissions` (unless managed
+  `allowed_permission_profiles` is set), and permission profiles merge by
+  name, so a trusted project can change your profile without restating it.
 - **MCP:** `[mcp_servers.<id>]` with `enabled`, `enabled_tools`,
   `disabled_tools`, stdio and streamable HTTP fields, and the admin allowlist
   in `requirements.toml`.
@@ -576,7 +586,13 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
   `approval_policy = never`.
 - `enableAllProjectMcpServers`, Codex per-tool `approval_mode = approve`.
 - Allow rules covering credential paths.
-- Codex `sandbox_mode` silently overriding permission profiles.
+- Codex `sandbox_mode` silently overriding permission profiles: high when a
+  project file does it (a repository turning off your deny rules), medium
+  when it's your own layers.
+- A trusted project changing a Codex permission profile another layer
+  defines.
+- A legacy Codex `managed_config.toml` overriding your config and CLI flags,
+  and legacy `[profiles]` tables Codex ignores (info).
 
 ### Repo-level red flags
 
@@ -934,6 +950,9 @@ Things jarx can't see, stated plainly in the README and the dashboard:
 - **Plugins and skills that aren't on disk as records.** `--plugin-dir`,
   `--plugin-url` and SDK plugins (`@inline`), plugins and skills synced from
   claude.ai, and marketplaces jarx would have to fetch aren't listed.
+- **Codex settings jarx can't see.** Cloud-managed `config.toml` defaults and
+  cloud requirements, macOS managed preferences (`com.openai.codex`), and
+  the profile a run selects with `--profile`.
 - **Approval of external imports.** Claude asks before it loads an
   `@import` from a project file that points outside the project, and the
   docs don't say where that answer is kept. jarx lists those imports as
@@ -963,8 +982,10 @@ Things jarx can't see, stated plainly in the README and the dashboard:
 - The exact meaning of Codex MCP `approval_mode` values (`auto`, `prompt`,
   `writes`, `approve`). Confirm against the config reference before the mode
   rule ships.
-- Whether Codex has an env var channel like Claude's (for example a shell env
-  policy setting). Take it from the docs, or leave it out.
+- Codex's env var channel is `shell_environment_policy`, from the advanced
+  config docs. `ignore_default_excludes` defaults to `true`, so variables
+  named like `KEY`, `SECRET` or `TOKEN` reach spawned commands unless it's
+  set to `false`. jarx records it now; the verdict comes with phase 5.
 - The Codex sessions path and the shapes of the sqlite and zstd files, as
   observed formats.
 - The HTML comment rule. Claude strips block-level HTML comments from

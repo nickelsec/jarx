@@ -83,8 +83,20 @@ stale ones marked.
     output styles, `extraKnownMarketplaces`, `allowedHttpHookUrls`,
     `strictPluginOnlyCustomization`, project subagent hooks waiting for
     trust, skill `paths` and supporting files, skills in parent dirs up to
-    the repo root, and command subfolders
-- [ ] Codex adapter: config, profiles, precedence, trust, requirements
+    the repo root, and command subfolders (7e18571)
+- [x] Codex adapter: config, profiles, precedence, trust, requirements. Also
+  the generic `Options` and read and write rules in the model, and five
+  findings for settings that quietly override others: a repository's
+  `sandbox_mode` turning off your permission profile (high), your own
+  `sandbox_mode` doing the same (medium), a repository changing your
+  permission profile (medium), and a legacy `managed_config.toml` and legacy
+  profiles (info)
+  - Not covered yet: Codex unknown keys (no key table yet), the project
+    ignored keys once options need them (phase 5 egress), managed
+    `deny_read` and the `[[remote_sandbox_config]]` host overrides,
+    `managed_config.toml` fields that turn into requirements, granular
+    approval policies beyond their name, `extends` chains, and the
+    `untrusted` approval policy's fallback
 - [ ] Codex adapter: instruction files, skills, hooks
 - [ ] `catalog` secret patterns and `analyze/secrets`
 - [ ] `analyze/poison`: hidden text and poisoned content rules

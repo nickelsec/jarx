@@ -268,6 +268,11 @@ func (p *Printer) permissions(perm model.Permissions) {
 	for _, l := range perm.DefaultMode.Layers {
 		row("mode", l.Value, l.Origin)
 	}
+	for _, o := range perm.Options {
+		for _, l := range o.Setting.Layers {
+			p.Out.Printf("      %s = %s  %s%s\n", o.Key, l.Value, p.text(string(l.Origin.Scope)), p.text(notInEffect(l.Origin)))
+		}
+	}
 	for _, r := range perm.Rules {
 		row(string(r.Action), r.Rule, r.Origin)
 	}

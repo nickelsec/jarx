@@ -287,3 +287,35 @@ func TestProjectsListingShowsExtensions(t *testing.T) {
 		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
 	}
 }
+
+func TestPermissionsListingShowsOptions(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	at := func(scope model.Scope) model.Origin {
+		return model.Origin{Agent: model.AgentCodex, Scope: scope, InEffect: true}
+	}
+	off := at(model.ScopeUser)
+	off.InEffect, off.Why = false, text("sandbox_mode is set in .codex/config.toml, so Codex ignores default_permissions")
+
+	p.Projects([]model.Project{{
+		Path: model.NewPath(s, "/projects/app"), Status: model.ProjectOK, Origins: []model.Origin{{Agent: model.AgentCodex}},
+		Permissions: []model.Permissions{{
+			Agent: model.AgentCodex,
+			Options: []model.Option{
+				{Key: text("sandbox_mode"), Setting: model.Setting[redact.Text]{Layers: []model.Layer[redact.Text]{{Value: text("danger-full-access"), Origin: at(model.ScopeProject)}}}},
+				{Key: text("default_permissions"), Setting: model.Setting[redact.Text]{Layers: []model.Layer[redact.Text]{{Value: text("locked"), Origin: off}}}},
+			},
+			Rules: []model.PermissionRule{{Action: model.RuleDeny, Rule: text("locked ~/.ssh"), Origin: off}},
+		}},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  codex\n" +
+		"    codex permissions\n" +
+		"      sandbox_mode = danger-full-access  project\n" +
+		"      default_permissions = locked  user  not in effect: sandbox_mode is set in .codex/config.toml, so Codex ignores default_permissions\n" +
+		"      deny   locked ~/.ssh  user  not in effect: sandbox_mode is set in .codex/config.toml, so Codex ignores default_permissions\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}

@@ -280,6 +280,8 @@ const (
 	RuleAllow RuleAction = "allow"
 	RuleAsk   RuleAction = "ask"
 	RuleDeny  RuleAction = "deny"
+	RuleRead  RuleAction = "read"  // a filesystem grant to read, like Codex's permission profiles
+	RuleWrite RuleAction = "write" // a filesystem grant to read and write
 )
 
 // PermissionRule is one rule from one file, like Bash(git *) or
@@ -297,6 +299,15 @@ type Permissions struct {
 	DefaultMode           Setting[redact.Text]
 	Rules                 []PermissionRule
 	AdditionalDirectories []Layer[redact.Text]
+	// Options are named settings that shape permissions, each with every
+	// layer that sets it, like Codex's approval_policy or sandbox_mode.
+	Options []Option
+}
+
+// Option is one named setting and its layers.
+type Option struct {
+	Key     redact.Text
+	Setting Setting[redact.Text]
 }
 
 // Unknown is a config key the adapter doesn't recognize.

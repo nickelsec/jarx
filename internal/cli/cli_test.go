@@ -473,44 +473,7 @@ func TestScanDemoHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proj := func(rel string) string { return filepath.Join(abs, "projects", rel) }
-	userClaudeMD := filepath.Join(abs, ".claude", "CLAUDE.md")
-	for _, want := range []string{
-		"environment (fake home)", "3 vars from .jarx-env", "skipped (--home)",
-		// The demo's records use paths like /projects/app, read inside the
-		// fake home.
-		"projects (3)\n" +
-			"  " + proj("app") + "  claude (trusted), codex (trusted)  7 files (walk)\n" +
-			"    claude permissions\n" +
-			"      mode   bypassPermissions  user\n" +
-			"      allow  Bash(*)  project\n" +
-			"      deny   Read(./.env)  project\n" +
-			"    claude instructions\n" +
-			"      instructions  " + userClaudeMD + "  user, at launch\n" +
-			"      instructions  CLAUDE.md  project, at launch\n" +
-			"      import  docs/setup.md  project, at launch, via CLAUDE.md\n" +
-			"      import  .env  project, at launch, via CLAUDE.md, credential file, not read\n" +
-			"    claude hooks\n" +
-			"      PostToolUse (Edit|Write)  command  ${CLAUDE_PROJECT_DIR}/.claude/hooks/format.sh  project, script .claude/hooks/format.sh\n" +
-			"    claude skills\n" +
-			"      skill  release  .claude/skills/release/SKILL.md  project, when invoked, pre-approves Bash(git *), runs 1 shell command\n" +
-			"  " + proj("notes") + "  codex (untrusted)  1 file (walk)\n" +
-			"    claude permissions\n" +
-			"      mode   bypassPermissions  user\n" +
-			"    claude instructions\n" +
-			"      instructions  " + userClaudeMD + "  user, at launch\n" +
-			"  " + proj("old") + "  claude (unknown)  stale\n",
-		"unknown settings (0)\n",
-		"instructions not tied to a project (0)\n",
-		"findings (3)\n" +
-			"  high  JARX-CLAUDE-002  " + proj(filepath.Join("app", ".env")) +
-			"  an instruction file pulls a credential file into Claude's context: an @import in " +
-			proj(filepath.Join("app", "CLAUDE.md")) + " points at a credential file; jarx didn't read it\n" +
-			"  medium  JARX-CLAUDE-003  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +
-			"  a skill runs shell commands before Claude sees it: release runs 1 shell command when invoked\n" +
-			"  medium  JARX-CLAUDE-004  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +
-			"  a repository skill grants tools or adds hooks without the trust check: release pre-approves Bash(git *)\n",
-	} {
+	for _, want := range demoWant(abs) {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
 		}
@@ -547,9 +510,64 @@ func TestScanRegistryHasEveryOwnersRules(t *testing.T) {
 		t.Fatalf("scanRules() error = %v", err)
 	}
 
-	for _, id := range []string{"JARX-SCAN-001", "JARX-CLAUDE-001"} {
+	for _, id := range []string{"JARX-SCAN-001", "JARX-CLAUDE-001", "JARX-CODEX-001"} {
 		if _, ok := rules.Lookup(id); !ok {
 			t.Errorf("registry is missing %s", id)
 		}
+	}
+}
+
+// demoWant is what the demo scan has to print, with paths under abs.
+func demoWant(abs string) []string {
+	proj := func(rel string) string { return filepath.Join(abs, "projects", rel) }
+	userClaudeMD := filepath.Join(abs, ".claude", "CLAUDE.md")
+	appCodex := proj(filepath.Join("app", ".codex", "config.toml"))
+	codexOff := "  not in effect: sandbox_mode is set in " + appCodex
+	userCodexProfile := "      default_permissions = locked  user\n" +
+		"      deny   locked **/*.env  user\n" +
+		"      deny   locked ~/.ssh  user\n"
+	return []string{
+		"environment (fake home)", "3 vars from .jarx-env", "skipped (--home)",
+		// The demo's records use paths like /projects/app, read inside the
+		// fake home.
+		"projects (3)\n" +
+			"  " + proj("app") + "  claude (trusted), codex (trusted)  8 files (walk)\n" +
+			"    claude permissions\n" +
+			"      mode   bypassPermissions  user\n" +
+			"      allow  Bash(*)  project\n" +
+			"      deny   Read(./.env)  project\n" +
+			"    codex permissions\n" +
+			"      sandbox_mode = danger-full-access  project\n" +
+			"      default_permissions = locked  user" + codexOff + ", so Codex uses the legacy sandbox and ignores default_permissions\n" +
+			"      deny   locked **/*.env  user" + codexOff + ", so Codex ignores permission profiles\n" +
+			"      deny   locked ~/.ssh  user" + codexOff + ", so Codex ignores permission profiles\n" +
+			"    claude instructions\n" +
+			"      instructions  " + userClaudeMD + "  user, at launch\n" +
+			"      instructions  CLAUDE.md  project, at launch\n" +
+			"      import  docs/setup.md  project, at launch, via CLAUDE.md\n" +
+			"      import  .env  project, at launch, via CLAUDE.md, credential file, not read\n" +
+			"    claude hooks\n" +
+			"      PostToolUse (Edit|Write)  command  ${CLAUDE_PROJECT_DIR}/.claude/hooks/format.sh  project, script .claude/hooks/format.sh\n" +
+			"    claude skills\n" +
+			"      skill  release  .claude/skills/release/SKILL.md  project, when invoked, pre-approves Bash(git *), runs 1 shell command\n" +
+			"  " + proj("notes") + "  codex (untrusted)  1 file (walk)\n" +
+			"    claude permissions\n" +
+			"      mode   bypassPermissions  user\n" +
+			"    codex permissions\n" + userCodexProfile +
+			"    claude instructions\n" +
+			"      instructions  " + userClaudeMD + "  user, at launch\n" +
+			"  " + proj("old") + "  claude (unknown)  stale\n",
+		"unknown settings (0)\n",
+		"instructions not tied to a project (0)\n",
+		"findings (4)\n" +
+			"  high  JARX-CLAUDE-002  " + proj(filepath.Join("app", ".env")) +
+			"  an instruction file pulls a credential file into Claude's context: an @import in " +
+			proj(filepath.Join("app", "CLAUDE.md")) + " points at a credential file; jarx didn't read it\n" +
+			"  high  JARX-CODEX-001  " + appCodex + "  a repository's sandbox_mode turns off your permission profile: " +
+			appCodex + " sets sandbox_mode = danger-full-access, so Codex ignores default_permissions = locked from user settings\n" +
+			"  medium  JARX-CLAUDE-003  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +
+			"  a skill runs shell commands before Claude sees it: release runs 1 shell command when invoked\n" +
+			"  medium  JARX-CLAUDE-004  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +
+			"  a repository skill grants tools or adds hooks without the trust check: release pre-approves Bash(git *)\n",
 	}
 }

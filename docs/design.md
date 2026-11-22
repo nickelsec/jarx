@@ -220,6 +220,37 @@ https://code.claude.com/docs/en/sub-agents,
 https://code.claude.com/docs/en/plugins/loading,
 https://code.claude.com/docs/en/plugins-reference
 
+### Codex settings that quietly override others
+
+From the Codex config, permissions and managed configuration docs (read
+2026-11-22). jarx keeps every layer with its origin and marks the ones that
+lose, so an override shows up as a "not in effect" row with the reason:
+
+- **`sandbox_mode` wins over `default_permissions`.** If any loaded layer
+  sets `sandbox_mode`, including a trusted project's `.codex/config.toml`,
+  Codex uses the legacy sandbox and every rule in the permission profile
+  stops applying. A managed `allowed_permission_profiles` is the only thing
+  that reverses it. When a project layer does it to a profile set elsewhere,
+  that's `JARX-CODEX-001` (high): a repository quietly turning off your deny
+  rules is the same class of risk as `JARX-CLAUDE-002`. Your own layers
+  doing it is `JARX-CODEX-005` (medium).
+- **Permission profiles merge by name**, path by path, highest layer first,
+  so a trusted project can replace one entry in your profile.
+  `JARX-CODEX-002` flags a project that touches a profile another layer
+  defines.
+- **Legacy `managed_config.toml`** sits above `config.toml` and CLI flags at
+  startup (`/etc/codex/` on Unix, the Codex home on Windows).
+- **Profiles** apply only with `--profile`, which jarx can't see, so profile
+  files are listed as not in effect with that reason.
+- **Requirements** don't win quietly: a disallowed value falls back to an
+  allowed one and Codex tells the user. jarx marks the value not in effect
+  with the allowed list.
+
+Sources: https://developers.openai.com/codex/config-file/config-basic,
+https://developers.openai.com/codex/config-file/config-advanced,
+https://developers.openai.com/codex/permissions,
+https://developers.openai.com/codex/enterprise/managed-configuration
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request

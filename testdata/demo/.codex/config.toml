@@ -1,8 +1,18 @@
 # Fake Codex config for the jarx demo home. Paths are read inside the fake
 # home, so /projects/app means testdata/demo/projects/app.
 
+# A permission profile that keeps keys and env files out of reach.
+default_permissions = "locked"
+
 [projects."/projects/app"]
 trust_level = "trusted"
 
 [projects."/projects/notes"]
 trust_level = "untrusted"
+
+[permissions.locked]
+extends = ":workspace"
+
+[permissions.locked.filesystem]
+"~/.ssh" = "deny"
+"**/*.env" = "deny"
