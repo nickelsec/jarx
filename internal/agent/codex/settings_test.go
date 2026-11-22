@@ -378,3 +378,15 @@ func TestEachConfigFileIsKeptScrubbedForTheSecretsScan(t *testing.T) {
 		t.Errorf("configs = %+v, want user, project and requirements", ps[0].Configs)
 	}
 }
+
+func TestProfileRulesKeepTheirPath(t *testing.T) {
+	c := fakeHome(t, map[string]string{
+		".codex/config.toml": "default_permissions = \"dev\"\n\n[permissions.dev.filesystem]\n\"~/.aws\" = \"read\"\n",
+	})
+
+	perm, _ := settingsFor(t, c, model.TrustTrusted)
+
+	if len(perm.Rules) != 1 || perm.Rules[0].Target.String() != "~/.aws" {
+		t.Errorf("rules = %+v, want one with target ~/.aws", perm.Rules)
+	}
+}

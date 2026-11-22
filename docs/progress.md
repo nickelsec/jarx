@@ -130,7 +130,18 @@ stale ones marked.
     shadowing (phase 4), Codex memories, look-alike characters, phrases in
     languages other than English, and comments that only show when the
     agent opens a CLAUDE.md with its Read tool (dfa8ee5)
-- [ ] `analyze/perms`: effective permissions view
+- [x] `analyze/perms`: effective permissions view. Claude's sandbox and
+  `enableAllProjectMcpServers` in the view, allows a deny or ask rule
+  overrides marked not in effect, `PermissionRule.Target`, credmeta's sample
+  credential paths, the embedded command table, and ten findings: bypass
+  mode, no Codex sandbox, never asking, every command, grants that cover
+  credential files, all project MCP servers, a retired approval policy, and
+  allows that run any code, the repo's code, or a tool with an escape
+  - Not covered yet: Codex per-tool `approval_mode` (phase 4), Codex
+    execution-policy rules files, how two different Bash patterns overlap,
+    `blockReadsOutsideWorkingDirectories` and the other `permissions.*`
+    switches, sandbox network settings (phase 5 egress), and programs not in
+    the command table
 - [ ] `analyze/unknown`: unknown settings report
 - [ ] `snapshot`: masked snapshots, retention, diff in `scan` output
 

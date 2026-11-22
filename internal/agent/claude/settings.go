@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/nickelsec/jarx/internal/agent"
 	"github.com/nickelsec/jarx/internal/finding"
@@ -53,7 +54,8 @@ type layer struct {
 	modeOff     redact.Text // set when only this layer's defaultMode is ignored
 	rules       []model.PermissionRule
 	dirs        []redact.Text
-	locks       []lock // disableBypassPermissionsMode and disableAutoMode
+	locks       []lock   // disableBypassPermissionsMode and disableAutoMode
+	options     []option // sandbox switches and enableAllProjectMcpServers
 
 	// broken means the file exists but couldn't be read or parsed. A broken
 	// managed document still counts as present.
@@ -221,6 +223,7 @@ func permissions(c agent.Context, p model.Project, layers []*layer, managedOnly 
 		}
 	}
 	m.settleModes()
+	m.settleSandbox()
 	ok := len(m.perm.DefaultMode.Layers) > 0 || len(m.perm.Rules) > 0 || len(m.perm.AdditionalDirectories) > 0 ||
 		len(m.perm.Options) > 0
 	return m.perm, ok
@@ -250,6 +253,9 @@ func (m *merger) add(l *layer) {
 	for _, lk := range l.locks {
 		m.addLock(l, lk)
 	}
+	for _, opt := range l.options {
+		m.addOption(l, opt)
+	}
 }
 
 // addLock shows a mode lock as an option and counts it when it applies. A
@@ -266,16 +272,7 @@ func (m *merger) addLock(l *layer, lk lock) {
 	if o.InEffect && lk.raw == lockOn && m.locked[lk.key] == "" {
 		m.locked[lk.key] = o.File.Text().String()
 	}
-	for i := range m.perm.Options {
-		if m.perm.Options[i].Key.String() == lk.key {
-			m.perm.Options[i].Setting.Layers = append(m.perm.Options[i].Setting.Layers, model.Layer[redact.Text]{Value: lk.value, Origin: o})
-			return
-		}
-	}
-	m.perm.Options = append(m.perm.Options, model.Option{
-		Key:     m.why(lk.key),
-		Setting: model.Setting[redact.Text]{Layers: []model.Layer[redact.Text]{{Value: lk.value, Origin: o}}},
-	})
+	m.optionLayer(lk.key, model.Layer[redact.Text]{Value: lk.value, Origin: o})
 }
 
 // modeOrigin is where l's defaultMode came from, out of effect when Claude
@@ -300,8 +297,8 @@ func (m *merger) rule(r model.PermissionRule) model.PermissionRule {
 		r.Origin.Why = m.why("allowManagedPermissionRulesOnly is on in managed settings, so Claude ignores rules from " +
 			string(r.Origin.Scope) + " files")
 	}
-	if r.Action == model.RuleAllow {
-		r.Origin = m.gate(r.Origin)
+	if r.Action == model.RuleAllow || r.Action == model.RuleRead || r.Action == model.RuleWrite {
+		r.Origin = m.gate(r.Origin) // a sandbox read or write grant waits like an allow
 	}
 	return r
 }
@@ -451,7 +448,7 @@ func (r *layerReader) permission(sub string, raw json.RawMessage) {
 	switch sub {
 	case "allow", "ask", "deny":
 		for _, rule := range r.strings(full, raw) {
-			r.l.rules = append(r.l.rules, model.PermissionRule{Action: model.RuleAction(sub), Rule: rule, Origin: o})
+			r.l.rules = append(r.l.rules, model.PermissionRule{Action: model.RuleAction(sub), Rule: rule, Target: r.scrub(ruleArg(rule.String())), Origin: o})
 		}
 	case "additionalDirectories":
 		r.l.dirs = append(r.l.dirs, r.strings(full, raw)...)
@@ -473,9 +470,23 @@ func (r *layerReader) permission(sub string, raw json.RawMessage) {
 func (r *layerReader) allowedKey(key string, raw json.RawMessage) {
 	r.instructionKey(key, raw)
 	r.extensionKey(key, raw)
-	if key == lockAuto {
+	switch key {
+	case lockAuto:
 		r.lock(key, raw) // also accepted at the top level
+	case "sandbox":
+		r.sandbox(raw)
+	case keyAllProjectMCP:
+		r.optionValue(key, raw)
 	}
+}
+
+// ruleArg is the pattern inside Tool(...), or "" for a bare tool rule.
+func ruleArg(rule string) string {
+	i := strings.IndexByte(rule, '(')
+	if i < 0 || !strings.HasSuffix(rule, ")") {
+		return ""
+	}
+	return rule[i+1 : len(rule)-1]
 }
 
 // lock reads a mode lock. Any string is kept, and only "disable" locks.

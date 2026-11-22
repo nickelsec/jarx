@@ -208,7 +208,9 @@ func (v *view) rules(perm model.Permissions, legacy *layer) []model.PermissionRu
 				if why != "" {
 					o.InEffect, o.Why = false, v.s.text(why)
 				}
-				out = append(out, model.PermissionRule{Action: access(l.profiles[name][path]), Rule: v.s.text(name + " " + path), Origin: o})
+				out = append(out, model.PermissionRule{
+					Action: access(l.profiles[name][path]), Rule: v.s.text(name + " " + path), Target: v.s.text(path), Origin: o,
+				})
 			}
 		}
 	}

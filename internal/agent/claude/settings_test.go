@@ -346,3 +346,22 @@ func TestEachSettingsFileIsKeptScrubbedForTheSecretsScan(t *testing.T) {
 		t.Errorf("configs = %+v, want the user and project files", ps[0].Configs)
 	}
 }
+
+func TestRulesKeepWhatTheyApplyTo(t *testing.T) {
+	c := fakeHome(t, map[string]string{
+		".claude/settings.json": `{"permissions": {"allow": ["Read(~/.aws/**)", "Bash", "Bash(npm run:*)", "mcp__github__get_issue"]}}`,
+	})
+
+	perm, _, _ := settingsFor(t, c, model.TrustTrusted)
+
+	for rule, want := range map[string]string{
+		"Read(~/.aws/**)":        "~/.aws/**",
+		"Bash":                   "",
+		"Bash(npm run:*)":        "npm run:*",
+		"mcp__github__get_issue": "",
+	} {
+		if got := findRule(t, perm, rule, model.ScopeUser).Target.String(); got != want {
+			t.Errorf("%s target = %q, want %q", rule, got, want)
+		}
+	}
+}

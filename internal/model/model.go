@@ -309,6 +309,10 @@ const (
 type PermissionRule struct {
 	Action RuleAction
 	Rule   redact.Text
+	// Target is what the rule applies to: the pattern inside a Claude rule's
+	// parens (a path, a command or a domain), or a Codex profile's path. It's
+	// empty for a rule that covers a whole tool, like Bash.
+	Target redact.Text
 	Origin Origin
 }
 

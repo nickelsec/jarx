@@ -621,10 +621,34 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 
 ### Permissions and auto-approval
 
-- `bypassPermissions`, `Bash(*)`, `danger-full-access`,
-  `approval_policy = never`.
-- `enableAllProjectMcpServers`, Codex per-tool `approval_mode = approve`.
-- Allow rules covering credential paths.
+- `JARX-PERMS-001` (high): Claude's default mode is `bypassPermissions`.
+- `JARX-PERMS-002` (high): Codex runs with no sandbox, through
+  `sandbox_mode = "danger-full-access"` or
+  `default_permissions = ":danger-full-access"`.
+- `JARX-PERMS-003` (medium): Codex `approval_policy = "never"`.
+- `JARX-PERMS-004` (high): a Claude allow for every command: `Bash`,
+  `Bash(*)` (the docs say they're the same), or the PowerShell forms.
+- `JARX-PERMS-005` (high): a grant that covers a credential file: a Claude
+  `Read` or `Edit` allow, an `additionalDirectories` entry, a sandbox
+  `allowRead` or `allowWrite` path, or a Codex profile `read` or `write`
+  path. The credential paths are credmeta's, the same list the read guard
+  uses.
+- `JARX-PERMS-006` (medium): `enableAllProjectMcpServers` is on. Codex
+  per-tool `approval_mode = approve` comes with phase 4.
+- `JARX-PERMS-007` (info): Codex `approval_policy = "untrusted"` (retired,
+  and the docs say it can stop Codex from starting) or `"on-failure"`
+  (deprecated).
+- `JARX-PERMS-008` (high): an allow that looks narrow but runs any code: an
+  interpreter, shell or wrapper with open args (`Bash(python *)`,
+  `Bash(sh -c *)`, `Bash(env *)`, `Bash(sudo *)`, `Bash(npx *)`), or a package
+  manager open after its name (`Bash(npm *)` covers `npm exec`).
+- `JARX-PERMS-009` (medium): an allow that runs code the repo defines, so
+  whoever can push to the repo decides what runs: `Bash(npm run *)`,
+  `Bash(make *)`, `Bash(pytest *)`, `Bash(cargo test *)`, `Bash(./scripts/*)`.
+- `JARX-PERMS-010` (medium): an allow for a tool with a way to run any
+  command, like `Bash(git *)` (`git -c` and aliases).
+- Skill and command `allowed-tools` count as allows for 004, 005 and 008 to
+  010. Only grants in effect count.
 - Codex `sandbox_mode` silently overriding permission profiles: high when a
   project file does it (a repository turning off your deny rules), medium
   when it's your own layers.
@@ -719,6 +743,12 @@ Per project, jarx shows every permission rule that applies, after merging:
 - whether it's in effect, and if not, why (for example "project allow waits
   for trust", "ignored from project files", "overridden by legacy
   `sandbox_mode`")
+- Claude's sandbox: `sandbox.enabled` and its switches as options, and the
+  `sandbox.filesystem` path lists as rules. They're in effect only while the
+  sandbox runs, which the docs say isn't on native Windows.
+- An allow that a deny or ask rule covers is not in effect, since Claude
+  checks deny, then ask, then allow. jarx counts a rule for the whole tool
+  or the same rule; it doesn't work out how two different patterns overlap.
 
 ## Where your agent talks to
 
@@ -1021,6 +1051,12 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   reaches the agent, including in an AGENTS.md that Claude reads. A stripped
   comment still shows when the agent opens the file with its Read tool;
   jarx doesn't flag those.
+- **Codex's command allowlist.** Codex's execution-policy rules files can
+  pre-approve commands. jarx doesn't read them yet.
+- **Commands beyond the table.** `JARX-PERMS-008` to 010 come from an
+  embedded table of interpreters, runners and tools. A program that isn't
+  in it, or a less common way to run code (like GNU `sed`'s `e` command),
+  isn't flagged.
 - **Claude mode locks the docs leave open.** jarx doesn't count a lock from
   an untrusted project's files, since the docs don't say whether Claude reads
   it before trust and counting one it ignores would hide a live bypass. And

@@ -12,6 +12,7 @@ import (
 	"github.com/nickelsec/jarx/internal/agent"
 	"github.com/nickelsec/jarx/internal/agent/claude"
 	"github.com/nickelsec/jarx/internal/agent/codex"
+	"github.com/nickelsec/jarx/internal/analyze/perms"
 	"github.com/nickelsec/jarx/internal/analyze/poison"
 	"github.com/nickelsec/jarx/internal/analyze/secrets"
 	"github.com/nickelsec/jarx/internal/catalog"
@@ -71,6 +72,12 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		[]agent.Adapter{claude.Adapter{}, codex.Adapter{}, discover.Saved(configPath(env), cfg.Repos)},
 		fs.Args(),
 	)
+	perms.Settle(scrub, res.Projects)
+	permFindings, err := perms.Analyze(scrub, env, res.Projects)
+	if err != nil {
+		p.Error(err)
+		return exitError
+	}
 	p.Out.Printf("\n")
 	p.Projects(res.Projects)
 	p.Unknown(res.Unknown)
@@ -79,6 +86,7 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		res.Findings,
 		secrets.Analyze(scrub, res.Projects, res.Instructions),
 		poison.Analyze(scrub, res.Projects, res.Instructions),
+		permFindings,
 	), rules)
 	return exitOK
 }
@@ -201,7 +209,7 @@ func plural(n int, one, many string) string {
 // scanRules is every rule a scan can report: finding's own and each
 // adapter's.
 func scanRules() (*finding.Registry, error) {
-	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules())
+	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules())
 	r, err := finding.NewRegistry(all...)
 	if err != nil {
 		return nil, fmt.Errorf("building the rule registry: %w", err)

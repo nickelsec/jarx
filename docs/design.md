@@ -296,6 +296,33 @@ hit there is the high hidden-text rule.
 
 Source: https://code.claude.com/docs/en/memory
 
+### Allows that run more than they look like
+
+An allow rule's command pattern goes through `catalog/commands.tsv`. Each
+row is a program, an optional subcommand, a class (runs any code, runs the
+repo's code, or has an escape) and the why, in our own words.
+
+- Claude splits compound commands and strips wrappers like `timeout` and
+  `nice` before matching, and its prefix rules can't approve `watch` or
+  `find -exec`. So those aren't in the table. `npx`, `docker exec` and
+  `xargs` with flags aren't stripped, so they are.
+- A trailing `:*` reads like ` *`. The program loses its dir, `.exe` and
+  version suffix, so `/usr/bin/python3.12` is `python`. A relative path is a
+  file in the repo.
+- A listed subcommand matches open or exact (`npm run *`, `npm test`). A
+  program's own row matches only with open args right after it, or flags
+  then open args (`python -c *`). Task runners like `make` match however
+  they're called, since every target is the repo's. An interpreter with a
+  script path (`python scripts/build.py *`) runs a repo file.
+- `git` is its own class: `git -c` and aliases can run any command, but it's
+  the most common allow there is, so it's medium, not high.
+
+Claude path rules resolve the way the permissions docs say: `//path` from
+the root, `~/path` from home, `/path` from the settings source (`~/.claude`
+for user settings, the project otherwise), anything else from the working
+dir. A path with no glob covers everything under it. Each grant is tested
+against credmeta's sample credential paths.
+
 ### Placeholders are info, not unmasked
 
 A pattern match is always masked. Whether it looks like a placeholder only
@@ -440,7 +467,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/agent` | the adapter interface (`Agent`, `Projects`), the optional `SettingsReader`, `InstructionReader` and `ExtensionReader` that discover calls, and the shared `Context` (env, fsys, scrubber). Shared parsers (frontmatter keys and raw blocks, tool lists, `@` imports) land here in phase 3. Claude settings are strict JSON, so there is no jsonc parser. | Architecture |
 | `internal/agent/claude` | Claude paths, precedence, trust, MCP approval, modes | Scope: Claude Code |
 | `internal/agent/codex` | Codex paths, profiles, legacy `sandbox_mode` switch, requirements | Scope: Codex CLI |
-| `internal/catalog` | embedded data: builtin tools, vendors, advisories, secret patterns, each with an "as of" stamp | Built-in tools catalog, Vendor badge, Advisory data |
+| `internal/catalog` | embedded data: builtin tools, vendors, advisories, secret patterns, the command table, each with an "as of" stamp | Built-in tools catalog, Vendor badge, Advisory data |
 | `internal/credmeta` | cred locations and safe metadata parsers (aws config, ssh header, gh hosts, `.env` keys). `Location` lands in phase 3 because `fsys` needs it to refuse credential reads; the parsers come in phase 5. It never imports `fsys`. | Credentials |
 | `internal/analyze/secrets` | findings from what the scrubber masked: seen, plain text or placeholder | Secrets |
 | `internal/analyze/poison` | text rules over every text the agent reads | Detection rules |
