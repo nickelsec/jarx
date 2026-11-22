@@ -129,7 +129,7 @@ stale ones marked.
   - Not covered yet: MCP text (phase 4), lying annotations and tool
     shadowing (phase 4), Codex memories, look-alike characters, phrases in
     languages other than English, and comments that only show when the
-    agent opens a CLAUDE.md with its Read tool
+    agent opens a CLAUDE.md with its Read tool (dfa8ee5)
 - [ ] `analyze/perms`: effective permissions view
 - [ ] `analyze/unknown`: unknown settings report
 - [ ] `snapshot`: masked snapshots, retention, diff in `scan` output

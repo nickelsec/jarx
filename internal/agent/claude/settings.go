@@ -27,6 +27,23 @@ import (
 // The adapter reads settings.
 var _ agent.SettingsReader = Adapter{}
 
+// The mode locks. The settings reference says both work from any scope and
+// take "disable"; across sources the strictest value wins.
+const (
+	lockBypass = "disableBypassPermissionsMode"
+	lockAuto   = "disableAutoMode"
+	lockOn     = "disable"
+	modeBypass = "bypassPermissions"
+	modeAuto   = "auto"
+)
+
+// lock is one mode lock as a file sets it.
+type lock struct {
+	key   string
+	value redact.Text
+	raw   string
+}
+
 // layer is what jarx keeps from one settings file. Every string is already
 // scrubbed.
 type layer struct {
@@ -36,6 +53,7 @@ type layer struct {
 	modeOff     redact.Text // set when only this layer's defaultMode is ignored
 	rules       []model.PermissionRule
 	dirs        []redact.Text
+	locks       []lock // disableBypassPermissionsMode and disableAutoMode
 
 	// broken means the file exists but couldn't be read or parsed. A broken
 	// managed document still counts as present.
@@ -195,6 +213,7 @@ func permissions(c agent.Context, p model.Project, layers []*layer, managedOnly 
 		home:        configHome(c.Env, p.Path.Raw()),
 		managedOnly: managedOnly,
 		perm:        model.Permissions{Agent: model.AgentClaude},
+		locked:      map[string]string{},
 	}
 	for _, l := range layers {
 		if l != nil {
@@ -202,7 +221,8 @@ func permissions(c agent.Context, p model.Project, layers []*layer, managedOnly 
 		}
 	}
 	m.settleModes()
-	ok := len(m.perm.DefaultMode.Layers) > 0 || len(m.perm.Rules) > 0 || len(m.perm.AdditionalDirectories) > 0
+	ok := len(m.perm.DefaultMode.Layers) > 0 || len(m.perm.Rules) > 0 || len(m.perm.AdditionalDirectories) > 0 ||
+		len(m.perm.Options) > 0
 	return m.perm, ok
 }
 
@@ -213,6 +233,7 @@ type merger struct {
 	home        bool   // the project is the config home
 	managedOnly bool   // allowManagedPermissionRulesOnly is on
 	perm        model.Permissions
+	locked      map[string]string // lock key to the first file that sets it to "disable"
 }
 
 func (m *merger) add(l *layer) {
@@ -226,6 +247,35 @@ func (m *merger) add(l *layer) {
 		m.perm.AdditionalDirectories = append(m.perm.AdditionalDirectories,
 			model.Layer[redact.Text]{Value: d, Origin: m.gate(l.origin)})
 	}
+	for _, lk := range l.locks {
+		m.addLock(l, lk)
+	}
+}
+
+// addLock shows a mode lock as an option and counts it when it applies. A
+// lock in a repo file of a folder that isn't trusted isn't counted: the docs
+// don't say whether Claude reads it before trust, and counting one Claude
+// ignores would hide a live bypass.
+func (m *merger) addLock(l *layer, lk lock) {
+	o := l.origin
+	if o.InEffect && m.waits != "" && repoFile(o.Scope) {
+		o.InEffect = false
+		o.Why = m.why("not counted: the folder isn't trusted, and the docs don't say whether Claude reads " +
+			lk.key + " before trust")
+	}
+	if o.InEffect && lk.raw == lockOn && m.locked[lk.key] == "" {
+		m.locked[lk.key] = o.File.Text().String()
+	}
+	for i := range m.perm.Options {
+		if m.perm.Options[i].Key.String() == lk.key {
+			m.perm.Options[i].Setting.Layers = append(m.perm.Options[i].Setting.Layers, model.Layer[redact.Text]{Value: lk.value, Origin: o})
+			return
+		}
+	}
+	m.perm.Options = append(m.perm.Options, model.Option{
+		Key:     m.why(lk.key),
+		Setting: model.Setting[redact.Text]{Layers: []model.Layer[redact.Text]{{Value: lk.value, Origin: o}}},
+	})
 }
 
 // modeOrigin is where l's defaultMode came from, out of effect when Claude
@@ -269,15 +319,37 @@ func (m *merger) gate(o model.Origin) model.Origin {
 }
 
 // settleModes leaves only the highest in-effect defaultMode layer in effect.
+// When a lock stops that mode, it's off too, and lower layers don't take
+// over: for auto the docs say the session starts in default, and for bypass
+// they don't say, so jarx shows no mode in effect.
 func (m *merger) settleModes() {
 	won := false
 	for i := range m.perm.DefaultMode.Layers {
-		o := &m.perm.DefaultMode.Layers[i].Origin
+		l := &m.perm.DefaultMode.Layers[i]
+		o := &l.Origin
 		if o.InEffect && won {
 			o.InEffect, o.Why = false, m.why("overridden by a higher scope")
 		}
-		won = won || o.InEffect
+		stopped := false
+		if o.InEffect {
+			if why := m.lockedOut(l.Value.String()); why != "" {
+				o.InEffect, o.Why, stopped = false, m.why(why), true
+			}
+		}
+		won = won || o.InEffect || stopped
 	}
+}
+
+// lockedOut says why a lock stops mode, or "".
+func (m *merger) lockedOut(mode string) string {
+	switch {
+	case mode == modeBypass && m.locked[lockBypass] != "":
+		return lockBypass + " is set to disable in " + m.locked[lockBypass] +
+			", so Claude won't enter bypassPermissions; the docs don't say which mode it starts in then"
+	case mode == modeAuto && m.locked[lockAuto] != "":
+		return lockAuto + " is set to disable in " + m.locked[lockAuto] + ", so Claude starts in default instead"
+	}
+	return ""
 }
 
 func (m *merger) why(s string) redact.Text {
@@ -288,7 +360,7 @@ func (m *merger) why(s string) redact.Text {
 func repoFile(s model.Scope) bool { return s == model.ScopeProject || s == model.ScopeLocal }
 
 // bypassLike is a defaultMode Claude won't take from project or local files.
-func bypassLike(mode string) bool { return mode == "auto" || mode == "bypassPermissions" }
+func bypassLike(mode string) bool { return mode == modeAuto || mode == modeBypass }
 
 // readLayer reads one settings file. A missing file is nil with no findings.
 // A file that exists but can't be read is a broken layer: too large ones are
@@ -348,8 +420,7 @@ func (r *layerReader) topKey(key string, raw json.RawMessage) {
 		r.managedKey(key, raw)
 	}
 	if allowed {
-		r.instructionKey(key, raw)
-		r.extensionKey(key, raw)
+		r.allowedKey(key, raw)
 	}
 	if key != "permissions" {
 		return // read by later items, or not needed yet
@@ -384,6 +455,8 @@ func (r *layerReader) permission(sub string, raw json.RawMessage) {
 		}
 	case "additionalDirectories":
 		r.l.dirs = append(r.l.dirs, r.strings(full, raw)...)
+	case lockBypass, lockAuto:
+		r.lock(sub, raw)
 	case "defaultMode":
 		var mode string
 		if err := json.Unmarshal(raw, &mode); err != nil {
@@ -393,6 +466,26 @@ func (r *layerReader) permission(sub string, raw json.RawMessage) {
 		t := r.scrub(mode)
 		r.l.defaultMode = &t
 	}
+}
+
+// allowedKey reads a top-level key this file may set, for the readers that
+// need it.
+func (r *layerReader) allowedKey(key string, raw json.RawMessage) {
+	r.instructionKey(key, raw)
+	r.extensionKey(key, raw)
+	if key == lockAuto {
+		r.lock(key, raw) // also accepted at the top level
+	}
+}
+
+// lock reads a mode lock. Any string is kept, and only "disable" locks.
+func (r *layerReader) lock(key string, raw json.RawMessage) {
+	var v string
+	if err := json.Unmarshal(raw, &v); err != nil {
+		r.problem(key + " isn't a string, skipped")
+		return
+	}
+	r.l.locks = append(r.l.locks, lock{key: key, value: r.scrub(v), raw: v})
 }
 
 // strings decodes a JSON list of strings, scrubbing each. Entries that

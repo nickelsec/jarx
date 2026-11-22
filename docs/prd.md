@@ -112,6 +112,11 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
   away. Trust is `projects["<path>"].hasTrustDialogAccepted` in
   `~/.claude.json`, keyed on the git repo root. A missing or odd value is
   "unknown".
+- **Mode locks:** `permissions.disableBypassPermissionsMode` and
+  `disableAutoMode` (also accepted as `permissions.disableAutoMode`) work
+  from any file, take `"disable"`, and the strictest value wins. A locked
+  `bypassPermissions` or `auto` default mode isn't in effect. For auto the
+  docs say the session starts in `default`; lower layers don't take over.
 - **MCP:** local and user scope in `~/.claude.json`, project `.mcp.json`,
   plugin `.mcp.json` or `plugin.json`, managed `managed-mcp.json`, and the
   `mcpServers` frontmatter in agent and subagent files (`.claude/agents/`,
@@ -1016,6 +1021,11 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   reaches the agent, including in an AGENTS.md that Claude reads. A stripped
   comment still shows when the agent opens the file with its Read tool;
   jarx doesn't flag those.
+- **Claude mode locks the docs leave open.** jarx doesn't count a lock from
+  an untrusted project's files, since the docs don't say whether Claude reads
+  it before trust and counting one it ignores would hide a live bypass. And
+  when bypass is locked, the docs don't say which mode a session starts in,
+  so jarx shows no default mode in effect.
 - **Which Codex version you run.** Codex before 0.150.0 loads a project's
   AGENTS.md even when the project isn't trusted. jarx follows current
   Codex until `analyze/versions` can tell which one is installed.

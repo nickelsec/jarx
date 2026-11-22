@@ -1,6 +1,8 @@
 # Claude Code settings keys and the files each may be set in.
 # From the Settings index at code.claude.com/docs/en/settings-reference,
 # as of 2026-11-22. Columns: key, scope (as the docs write it).
+# permissions.disableAutoMode isn't in the index; the disableAutoMode
+# section says it's "also accepted under permissions".
 advisorModel	Any file
 agent	Any file
 agentPushNotifEnabled	Any file
@@ -136,6 +138,7 @@ permissions.defaultMode	Any file
 permissions.deny	Any file
 permissions.denyInsteadOfPrompting	User or managed
 permissions.disableBypassPermissionsMode	Any file
+permissions.disableAutoMode	Any file
 plansDirectory	Any file
 pluginConfigs	User or managed
 pluginSuggestionMarketplaces	Managed
