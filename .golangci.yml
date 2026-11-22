@@ -73,6 +73,23 @@ linters:
         - pattern: ^syscall\.(Getenv|Environ)$
           pkg: ^syscall$
           msg: "platform: read env through internal/platform"
+        # Only internal/jarxdir may write files, and only inside jarx's state
+        # dir. jarx never writes agent config. Tests may write fixtures.
+        - pattern: ^os\.(WriteFile|Create|CreateTemp|OpenFile|Mkdir|MkdirAll|MkdirTemp|Remove|RemoveAll|Rename|Chmod|Chown|Lchown|Chtimes|Symlink|Link|Truncate)$
+          pkg: ^os$
+          msg: "write: only internal/jarxdir may write files"
+        # Reads go through internal/fsys, which confines --home to the fake
+        # home. Banning os.OpenRoot here also keeps os.Root's write methods
+        # out of other packages.
+        - pattern: ^os\.(Open|ReadFile|ReadDir|Stat|Lstat|Readlink|DirFS|OpenRoot|OpenInRoot)$
+          pkg: ^os$
+          msg: "read: read files through internal/fsys"
+        - pattern: ^filepath\.(Walk|WalkDir)$
+          pkg: ^path/filepath$
+          msg: "read: walk files through internal/fsys"
+        - pattern: ^ioutil\..*$
+          pkg: ^io/ioutil$
+          msg: "io: io/ioutil is deprecated, and its file calls skip fsys and jarxdir"
 
   exclusions:
     rules:
@@ -88,3 +105,16 @@ linters:
         linters:
           - forbidigo
         text: "platform:"
+      - path: ^internal/(fsys|jarxdir|platform)/
+        linters:
+          - forbidigo
+        text: "read:"
+      - path: ^internal/jarxdir/
+        linters:
+          - forbidigo
+        text: "write:"
+      # Tests build fixtures in t.TempDir() and check what got written.
+      - path: _test\.go$
+        linters:
+          - forbidigo
+        text: "(read|write):"

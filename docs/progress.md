@@ -14,8 +14,9 @@ same commit as the work. The next commit adds that commit's short hash.
   `version` subcommand, `scan` command (a0613b1)
 - [x] `platform`: injected `Env`, OS facts and system roots, `--home`, `scan`
   prints what platform resolved, `.jarx-state` ignored under testdata (200c17d)
-- [ ] `fsys` (read-only view, size caps, skip list) and `jarxdir` (`os.Root`
-  on the jarx config dir)
+- [x] `fsys` (read-only view, size caps, skip list) and `jarxdir` (`os.Root`
+  on the jarx config dir), with lint rules that make them the only reader and
+  writer
 - [ ] `scan` adds jarx's state dir and exists checks, first bits of
   `testdata/demo/`
 
@@ -26,7 +27,8 @@ whether each exists.
 
 - [ ] `redact`: `Text` type, scrubber, `REDACTED:<type>`, fingerprint, start
   of the no-leak suite
-- [ ] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry
+- [ ] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry.
+  Turn `fsys` skips into "skipped, too large" info findings
 - [ ] `netguard`: the one HTTP client, dial-time IP block, no redirects, no
   proxy
 - [ ] `discover` and `report`: project records from both adapters, hardened

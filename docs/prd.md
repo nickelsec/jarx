@@ -880,6 +880,9 @@ Things jarx can't see, stated plainly in the README and the dashboard:
 - Cross-artifact LLM review.
 - Release binaries.
 - More agents.
+- Agent files shipped inside dependencies. npm packages can ship their own
+  `CLAUDE.md` or `AGENTS.md` inside `node_modules`, which is a supply chain
+  angle worth checking.
 
 ## Open items to check during implementation
 
