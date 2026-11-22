@@ -138,3 +138,62 @@ func TestEmptyListings(t *testing.T) {
 		t.Errorf("stdout = %q", out.String())
 	}
 }
+
+func TestProjectsListingShowsPermissions(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	at := func(scope model.Scope) model.Origin {
+		return model.Origin{Agent: model.AgentClaude, Scope: scope, InEffect: true}
+	}
+	held := at(model.ScopeProject)
+	held.InEffect, held.Why = false, text("project allow waits for trust: the folder isn't trusted")
+	ignored := at(model.ScopeProject)
+	ignored.InEffect, ignored.Why = false, text("defaultMode auto is ignored from project files")
+
+	p.Projects([]model.Project{{
+		Path: model.NewPath(s, "/projects/app"), Status: model.ProjectOK,
+		Origins: []model.Origin{{Agent: model.AgentClaude}},
+		Permissions: []model.Permissions{{
+			Agent: model.AgentClaude,
+			DefaultMode: model.Setting[redact.Text]{Layers: []model.Layer[redact.Text]{
+				{Value: text("auto"), Origin: ignored},
+				{Value: text("plan"), Origin: at(model.ScopeUser)},
+			}},
+			Rules: []model.PermissionRule{
+				{Action: model.RuleAllow, Rule: text("Bash(*)"), Origin: held},
+				{Action: model.RuleDeny, Rule: text("Read(" + canary + ")"), Origin: at(model.ScopeUser)},
+			},
+			AdditionalDirectories: []model.Layer[redact.Text]{{Value: text("../shared"), Origin: at(model.ScopeLocal)}},
+		}},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  claude\n" +
+		"    claude permissions\n" +
+		"      mode   auto  project  not in effect: defaultMode auto is ignored from project files\n" +
+		"      mode   plan  user\n" +
+		"      allow  Bash(*)  project  not in effect: project allow waits for trust: the folder isn't trusted\n" +
+		"      deny   Read(REDACTED:test_token)  user\n" +
+		"      dir    ../shared  local\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestUnknownSettingsListing(t *testing.T) {
+	p, s, out, _ := setup(t)
+	key := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	origin := model.Origin{Agent: model.AgentClaude, Scope: model.ScopeProject, File: model.NewPath(s, "/projects/app/.claude/settings.json")}
+
+	p.Unknown([]model.Unknown{
+		{Key: key("notARealSetting"), Origin: origin},
+		{Key: key(canary), Origin: origin},
+	})
+
+	want := "unknown settings (2)\n" +
+		"  notARealSetting  claude project  /projects/app/.claude/settings.json\n" +
+		"  REDACTED:test_token  claude project  /projects/app/.claude/settings.json\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}

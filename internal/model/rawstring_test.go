@@ -25,6 +25,7 @@ func enumTypes() []reflect.Type {
 	return []reflect.Type{
 		reflect.TypeFor[Agent](), reflect.TypeFor[Scope](),
 		reflect.TypeFor[ProjectStatus](), reflect.TypeFor[TrustLevel](), reflect.TypeFor[WalkMethod](),
+		reflect.TypeFor[RuleAction](),
 	}
 }
 

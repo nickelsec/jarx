@@ -3,8 +3,10 @@ package cli
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"github.com/nickelsec/jarx/internal/agent"
@@ -54,7 +56,7 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		p.Error(err)
 		return exitError
 	}
-	rules, err := finding.NewRegistry(finding.Rules()...)
+	rules, err := scanRules()
 	if err != nil {
 		p.Error(err)
 		return exitError
@@ -68,6 +70,7 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	)
 	p.Out.Printf("\n")
 	p.Projects(res.Projects)
+	p.Unknown(res.Unknown)
 	p.Findings(res.Findings, rules)
 	return exitOK
 }
@@ -180,4 +183,15 @@ func plural(n int, one, many string) string {
 		return "1 " + one
 	}
 	return strconv.Itoa(n) + " " + many
+}
+
+// scanRules is every rule a scan can report: finding's own and each
+// adapter's.
+func scanRules() (*finding.Registry, error) {
+	all := slices.Concat(finding.Rules(), claude.Rules())
+	r, err := finding.NewRegistry(all...)
+	if err != nil {
+		return nil, fmt.Errorf("building the rule registry: %w", err)
+	}
+	return r, nil
 }

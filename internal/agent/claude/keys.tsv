@@ -1,0 +1,253 @@
+# Claude Code settings keys and the files each may be set in.
+# From the Settings index at code.claude.com/docs/en/settings-reference,
+# as of 2026-11-22. Columns: key, scope (as the docs write it).
+advisorModel	Any file
+agent	Any file
+agentPushNotifEnabled	Any file
+allowAllClaudeAiMcps	Managed
+allowClaudeInChromeWithManagedMcp	Managed
+allowManagedHooksOnly	Managed
+allowManagedMcpServersOnly	Managed
+allowManagedPermissionRulesOnly	Managed
+allowedChannelPlugins	Managed
+allowedHttpHookUrls	Any file
+allowedMcpServers	Any file
+allowedProviders	Managed
+alwaysThinkingEnabled	Any file
+apiKeyHelper	Any file
+appendPlugins	User or managed
+askUserQuestionTimeout	User or managed
+attribution	Any file
+attribution.commit	Any file
+attribution.pr	Any file
+attribution.sessionUrl	Any file
+autoCompactEnabled	Any file
+autoCompactWindow	Any file
+autoConnectIde	Global config
+autoContinueAtUsageLimit	User or managed
+autoInstallIdeExtension	Global config
+autoMemoryDirectory	Any file
+autoMemoryEnabled	Any file
+autoMode	User or managed
+autoMode.classifyAllShell	User or managed
+autoScrollEnabled	Any file
+autoUpdatesChannel	Any file
+availableModels	Any file
+availableModelsMatch	Managed
+awaySummaryEnabled	Any file
+awsAuthRefresh	Any file
+awsCredentialExport	Any file
+axScreenReader	User or managed
+bashEditDiffEnabled	User or managed
+bashOutputMaxChars	Any file
+blockedMarketplaces	Managed
+browserExternalPageTools	Managed
+channelsEnabled	Managed
+claudeInChromeDefaultEnabled	Global config
+claudeMd	Managed
+claudeMdExcludes	Any file
+cleanupPeriodDays	Any file
+companyAnnouncements	Any file
+copyFullResponse	Global config
+copyOnSelect	Global config
+crossSessionInbound	Any file
+defaultShell	Any file
+defaultToAgentsView	Global config
+deniedMcpServers	Any file
+deniedModels	Managed
+desktopSessionCleanupPeriodDays	User or managed
+dialogExpiry	User or managed
+diffTool	Global config
+disableAgentView	Any file
+disableAllHooks	Any file
+disableArtifact	Any file
+disableAutoMode	Any file
+disableBrowserExternalNavigation	Managed
+disableBundledSkills	Any file
+disableClaudeAiConnectors	Any file
+disableCommandPluginSources	Managed
+disableDeepLinkRegistration	Any file
+disableDesktopLocalSessions	Managed
+disableMobileSimulatorTools	Managed
+disableRemoteControl	Any file
+disableRemotePreviewScripts	Managed
+disableSideloadFlags	Managed
+disableSkillShellExecution	Any file
+disableWorkflows	Any file
+disabledMcpjsonServers	Any file
+editorMode	Any file
+effortLevel	Any file
+emojiCompletionEnabled	Any file
+enableAllProjectMcpServers	Any file
+enableArtifact	Any file
+enableWorkflows	Any file
+enabledMcpjsonServers	Any file
+enabledPlugins	Any file
+enforceAnthropicSignIn	Managed
+enforceAvailableModels	Any file
+env	Any file
+externalEditorContext	Global config
+extraKnownMarketplaces	Any file
+fallbackModel	Any file
+fastMode	Any file
+fastModePerSessionOptIn	Any file
+feedbackDrafts	User or managed
+feedbackSurveyRate	Any file
+fileCheckpointingEnabled	Any file
+fileSuggestion	Any file
+footerLinksRegexes	User or managed
+forceLoginGatewayUrl	User or managed
+forceLoginMethod	Any file
+forceLoginOrgUUID	Any file
+forceRemoteSettingsRefresh	Managed
+gatewayInternalNetworks	Managed
+gcpAuthRefresh	Any file
+hooks	Any file
+httpHookAllowedEnvVars	Any file
+idleCompaction	Any file
+includeCoAuthoredBy	Any file
+includeGitInstructions	Any file
+inputNeededNotifEnabled	Any file
+isolatePeerMachines	Any file
+keybindingFlavor	Any file
+language	Any file
+leftArrowOpensAgents	Global config
+managedMcpServers	Managed
+managedSourcesBehavior	Managed
+maxEffortLevel	Any file
+maxProseWidth	Any file
+minimumVersion	Any file
+model	Any file
+modelOverrides	Any file
+modelPicker	User or managed
+modelPricing	Managed
+modelSettings	Any file
+otelHeadersHelper	Any file
+outputStyle	Any file
+parentSettingsBehavior	Managed
+permissionExplainerEnabled	Global config
+permissions	Any file
+permissions.additionalDirectories	Any file
+permissions.allow	Any file
+permissions.ask	Any file
+permissions.blockReadsOutsideWorkingDirectories	Any file
+permissions.blockWritesOutsideWorkingDirectories	Any file
+permissions.defaultMode	Any file
+permissions.deny	Any file
+permissions.denyInsteadOfPrompting	User or managed
+permissions.disableBypassPermissionsMode	Any file
+plansDirectory	Any file
+pluginConfigs	User or managed
+pluginSuggestionMarketplaces	Managed
+pluginTrustMessage	Managed
+policyHelper	Managed
+policyHelper.path	Managed
+policyHelper.refreshIntervalMs	Managed
+policyHelper.timeoutMs	Managed
+prStatusFooterEnabled	Global config
+prUrlTemplate	Any file
+preferredNotifChannel	Any file
+prefersReducedMotion	Any file
+prependPlugins	User or managed
+processWrapper	User or managed
+promptCacheTtl	Any file
+promptSuggestionEnabled	Any file
+remote.defaultEnvironmentId	Any file
+remoteControlAtStartup	Any file
+requiredMaximumVersion	Managed
+requiredMinimumVersion	Managed
+respectGitignore	Any file
+respondToBashCommands	Any file
+sandbox	Any file
+sandbox.allowAppleEvents	User or managed
+sandbox.allowNestedUserNamespaces	User or managed
+sandbox.allowUnsandboxedCommands	Any file
+sandbox.autoAllowBashIfSandboxed	Any file
+sandbox.bwrapPath	Managed
+sandbox.credentials	Any file
+sandbox.credentials.allowPlaintextInject	User or managed
+sandbox.credentials.awsPairs	User or managed
+sandbox.credentials.envVars	Any file
+sandbox.credentials.files	Any file
+sandbox.credentials.sigv4	User or managed
+sandbox.enableWeakerNestedSandbox	Any file
+sandbox.enableWeakerNetworkIsolation	Any file
+sandbox.enabled	Any file
+sandbox.excludedCommands	Any file
+sandbox.failIfUnavailable	Any file
+sandbox.filesystem	Any file
+sandbox.filesystem.allowManagedReadPathsOnly	Managed
+sandbox.filesystem.allowRead	Any file
+sandbox.filesystem.allowWrite	Any file
+sandbox.filesystem.denyRead	Any file
+sandbox.filesystem.denyWrite	Any file
+sandbox.filesystem.disabled	User or managed
+sandbox.ignoreViolations	Any file
+sandbox.network	Any file
+sandbox.network.allowAllUnixSockets	Any file
+sandbox.network.allowLocalBinding	Any file
+sandbox.network.allowMachLookup	Any file
+sandbox.network.allowManagedDomainsOnly	Managed
+sandbox.network.allowUnixSockets	Any file
+sandbox.network.allowedDomains	Any file
+sandbox.network.deniedDomains	Any file
+sandbox.network.httpProxyPort	Any file
+sandbox.network.socksProxyPort	Any file
+sandbox.network.strictAllowlist	User or managed
+sandbox.network.tlsTerminate	User or managed
+sandbox.ripgrep	User or managed
+sandbox.socatPath	Managed
+showClearContextOnPlanAccept	Any file
+showThinkingSummaries	Any file
+showTurnDuration	Any file
+skillListingBudgetFraction	Any file
+skillListingMaxDescChars	Any file
+skillOverrides	Any file
+skipAutoPermissionPrompt	User or managed
+skipDangerousModePermissionPrompt	User, local, or managed
+skipWebFetchPreflight	Any file
+spellcheck	User or managed
+spinnerTipsEnabled	Any file
+spinnerTipsOverride	Any file
+spinnerVerbs	Any file
+sshConfigs	User or managed
+sshHostAllowlist	Managed
+sshHostCommands	User or managed
+statusLine	Any file
+strictKnownMarketplaces	Managed
+strictPluginOnlyCustomization	Managed
+strictPluginOnlyCustomization.agents	Managed
+strictPluginOnlyCustomization.hooks	Managed
+strictPluginOnlyCustomization.mcp	Managed
+strictPluginOnlyCustomization.skills	Managed
+subagentPromptCacheTtl	Any file
+switchModelsOnFlag	Any file
+syncClaudeAiPlugins	User, local, or managed
+syncClaudeAiSkills	User, local, or managed
+syntaxHighlightingDisabled	Any file
+taskOutputMaxChars	Any file
+teammateDefaultModel	Global config
+teammateMode	Any file
+terminalProgressBarEnabled	Any file
+terminalTitleFromRename	Any file
+theme	Any file
+timeFormat	Any file
+timeZone	Any file
+tui	Any file
+ultracode	Any file
+useAutoModeDuringPlan	User, local, or managed
+verbose	Any file
+viewMode	Any file
+vimInsertModeRemaps	User or managed
+voice	Any file
+voiceEnabled	Any file
+wheelScrollAccelerationEnabled	Any file
+workflowKeywordTriggerEnabled	Any file
+workflowSizeGuideline	Any file
+worktree	Any file
+worktree.baseRef	Any file
+worktree.bgIsolation	Any file
+worktree.location	User
+worktree.sparsePaths	Any file
+worktree.symlinkDirectories	Any file
+wslInheritsWindowsSettings	Managed

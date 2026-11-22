@@ -52,9 +52,14 @@ stale ones marked.
 
 ## Phase 3: Instruction files and settings
 
-- [ ] Claude adapter: settings, precedence, trust. Includes the Windows
+- [x] Claude adapter: settings, precedence, trust. Includes the Windows
   registry reads in `platform` (first use of `golang.org/x/sys`), the settings
   index scope table, and checking the managed paths against the official docs
+  - Not covered yet: the local settings file at the repo root when Claude
+    starts in a subfolder, local files tracked in git (they wait for trust),
+    "can't be set from this file" for keys outside `permissions`, and the
+    keys Claude reads from every admin source (they come with the items
+    that read those keys)
 - [ ] Claude adapter: instruction files, `@` imports, memory, output styles
 - [ ] Claude adapter: skills, commands, subagents, plugins, hooks
 - [ ] Codex adapter: config, profiles, precedence, trust, requirements

@@ -479,9 +479,16 @@ func TestScanDemoHome(t *testing.T) {
 		// The demo's records use paths like /projects/app, read inside the
 		// fake home.
 		"projects (3)\n" +
-			"  " + proj("app") + "  claude, codex (trusted)  1 file (walk)\n" +
+			"  " + proj("app") + "  claude (trusted), codex (trusted)  2 files (walk)\n" +
+			"    claude permissions\n" +
+			"      mode   bypassPermissions  user\n" +
+			"      allow  Bash(*)  project\n" +
+			"      deny   Read(./.env)  project\n" +
 			"  " + proj("notes") + "  codex (untrusted)  1 file (walk)\n" +
-			"  " + proj("old") + "  claude  stale\n",
+			"    claude permissions\n" +
+			"      mode   bypassPermissions  user\n" +
+			"  " + proj("old") + "  claude (unknown)  stale\n",
+		"unknown settings (0)\n",
 		"findings (0)\n",
 	} {
 		if !strings.Contains(got.stdout, want) {
@@ -505,6 +512,19 @@ func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
 			if strings.Contains(out, leak) {
 				t.Errorf("output contains %q from the demo .jarx-env:\n%s", leak, out)
 			}
+		}
+	}
+}
+
+func TestScanRegistryHasEveryOwnersRules(t *testing.T) {
+	rules, err := scanRules()
+	if err != nil {
+		t.Fatalf("scanRules() error = %v", err)
+	}
+
+	for _, id := range []string{"JARX-SCAN-001", "JARX-CLAUDE-001"} {
+		if _, ok := rules.Lookup(id); !ok {
+			t.Errorf("registry is missing %s", id)
 		}
 	}
 }

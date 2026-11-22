@@ -71,6 +71,18 @@ func (p *Printer) Projects(ps []model.Project) {
 			detail = "  " + plural(len(proj.Files), "file", "files") + " (" + string(proj.Walk) + ")"
 		}
 		p.Out.Printf("  %s  %s%s\n", proj.Path.Text(), p.text(agents(proj)), p.text(detail))
+		for _, perm := range proj.Permissions {
+			p.permissions(perm)
+		}
+	}
+}
+
+// Unknown lists settings keys an adapter didn't recognize, with the file
+// each came from.
+func (p *Printer) Unknown(us []model.Unknown) {
+	p.Out.Printf("unknown settings (%s)\n", p.text(strconv.Itoa(len(us))))
+	for _, u := range us {
+		p.Out.Printf("  %s  %s %s  %s\n", u.Key, p.text(string(u.Origin.Agent)), p.text(string(u.Origin.Scope)), u.Origin.File.Text())
 	}
 }
 
@@ -122,6 +134,28 @@ func (p *Printer) Findings(fs []finding.Finding, rules *finding.Registry) {
 			}
 		}
 		p.Out.Printf("  %s  %s  %s%s\n", p.text(f.Severity.String()), p.text(f.RuleID), p.text(where), p.text(detail))
+	}
+}
+
+// permissions lists one agent's modes, rules and extra dirs for a project,
+// each with its scope and, when it doesn't apply, why.
+func (p *Printer) permissions(perm model.Permissions) {
+	p.Out.Printf("    %s permissions\n", p.text(string(perm.Agent)))
+	row := func(kind string, value redact.Text, o model.Origin) {
+		why := ""
+		if !o.InEffect {
+			why = "  not in effect: " + o.Why.String()
+		}
+		p.Out.Printf("      %-5s  %s  %s%s\n", p.text(kind), value, p.text(string(o.Scope)), p.text(why))
+	}
+	for _, l := range perm.DefaultMode.Layers {
+		row("mode", l.Value, l.Origin)
+	}
+	for _, r := range perm.Rules {
+		row(string(r.Action), r.Rule, r.Origin)
+	}
+	for _, d := range perm.AdditionalDirectories {
+		row("dir", d.Value, d.Origin)
 	}
 }
 

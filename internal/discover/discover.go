@@ -24,12 +24,14 @@ const goosWindows = "windows"
 // Result is what discover found.
 type Result struct {
 	Projects []model.Project
+	Unknown  []model.Unknown
 	Findings []finding.Finding
 }
 
 // Run asks every adapter for its projects, adds the extra paths, merges
-// records of the same dir and sets each project's status. Files fsys refused
-// to read show up as findings.
+// records of the same dir and sets each project's status. Then every adapter
+// that reads settings reads them for the ok projects. Files fsys refused to
+// read show up as findings, so this comes last.
 func Run(c agent.Context, adapters []agent.Adapter, extra []string) Result {
 	var all []model.Project
 	var findings []finding.Finding
@@ -56,8 +58,16 @@ func Run(c agent.Context, adapters []agent.Adapter, extra []string) Result {
 			findings = append(findings, walkProject(c, p, maxFiles)...)
 		}
 	}
+	var unknown []model.Unknown
+	for _, a := range adapters {
+		if sr, ok := a.(agent.SettingsReader); ok {
+			u, fs := sr.Settings(c, projects)
+			unknown = append(unknown, u...)
+			findings = append(findings, fs...)
+		}
+	}
 	findings = append(findings, finding.FromSkips(c.Scrub, c.Files.Skips())...)
-	return Result{Projects: projects, Findings: findings}
+	return Result{Projects: projects, Unknown: unknown, Findings: findings}
 }
 
 // walkProject lists p's files. A walk cut off at limit is a finding, so it's

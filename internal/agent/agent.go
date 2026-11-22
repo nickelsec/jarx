@@ -25,3 +25,10 @@ type Adapter interface {
 	// left for discover to fill in.
 	Projects(c Context) ([]model.Project, []finding.Finding)
 }
+
+// SettingsReader is an adapter that reads settings. Settings stores each
+// project's result on it (only projects with status ok are read) and returns
+// the keys it didn't recognize, once per file.
+type SettingsReader interface {
+	Settings(c Context, projects []model.Project) ([]model.Unknown, []finding.Finding)
+}

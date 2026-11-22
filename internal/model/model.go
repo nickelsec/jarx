@@ -134,6 +134,36 @@ type Project struct {
 	Trust   []Trust
 	Files   []Path     // what the agent can see in it, after the skip list
 	Walk    WalkMethod // "" when the project wasn't walked
+	// Permissions holds each agent's permission settings as they apply in
+	// this project, one entry per agent that has any.
+	Permissions []Permissions
+}
+
+// RuleAction is what a permission rule does.
+type RuleAction string
+
+// Rule actions.
+const (
+	RuleAllow RuleAction = "allow"
+	RuleAsk   RuleAction = "ask"
+	RuleDeny  RuleAction = "deny"
+)
+
+// PermissionRule is one rule from one file, like Bash(git *) or
+// Read(./.env). Whether it's in effect, and why not, is on its Origin.
+type PermissionRule struct {
+	Action RuleAction
+	Rule   redact.Text
+	Origin Origin
+}
+
+// Permissions is one agent's permission settings for a project. Layers and
+// rules keep every file they came from, in effect or not.
+type Permissions struct {
+	Agent                 Agent
+	DefaultMode           Setting[redact.Text]
+	Rules                 []PermissionRule
+	AdditionalDirectories []Layer[redact.Text]
 }
 
 // Unknown is a config key the adapter doesn't recognize.
