@@ -96,8 +96,16 @@ stale ones marked.
     `deny_read` and the `[[remote_sandbox_config]]` host overrides,
     `managed_config.toml` fields that turn into requirements, granular
     approval policies beyond their name, `extends` chains, and the
-    `untrusted` approval policy's fallback
-- [ ] Codex adapter: instruction files, skills, hooks
+    `untrusted` approval policy's fallback (ac09450)
+- [x] Codex adapter: instruction files, skills, hooks. Also the
+  `project_doc_max_bytes` handling for its two documented readings, a note
+  and a byte limit on instructions and a note on hooks in the model, Codex
+  hooks in the no-execution canary, and a finding for a repository changing
+  which instructions Codex loads
+  - Not covered yet: Codex plugins and their hooks and skills, Codex
+    memories, skill metadata beyond the name (`agents/openai.yaml`),
+    `[skills.bundled]`, worktrees reading hooks from the main checkout,
+    `--dangerously-bypass-hook-trust`, and `command_windows` in managed hooks
 - [ ] `catalog` secret patterns and `analyze/secrets`
 - [ ] `analyze/poison`: hidden text and poisoned content rules
 - [ ] `analyze/perms`: effective permissions view

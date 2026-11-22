@@ -111,7 +111,7 @@ func OwnSandboxModeWins() finding.Rule {
 
 // Rules returns the rules the Codex adapter owns.
 func Rules() []finding.Rule {
-	return []finding.Rule{RepoDropsPermissions(), RepoWidensProfile(), LegacyManagedConfig(), LegacyProfiles(), OwnSandboxModeWins()}
+	return []finding.Rule{RepoDropsPermissions(), RepoWidensProfile(), LegacyManagedConfig(), LegacyProfiles(), OwnSandboxModeWins(), RepoChangesInstructions()}
 }
 
 // systemConfigFor, requirementsFor and managedConfigFor are the documented
@@ -191,6 +191,7 @@ type requirements struct {
 	origin   model.Origin
 	allowed  map[string][]string // option key to allowed values
 	profiles map[string]bool     // allowed_permission_profiles
+	raw      map[string]any      // the decoded file, for hooks and features
 }
 
 // The adapter reads settings.
@@ -395,7 +396,7 @@ func (s *settings) readRequirements(path string) *requirements {
 	if l == nil {
 		return nil
 	}
-	r := &requirements{origin: l.origin, allowed: map[string][]string{}}
+	r := &requirements{origin: l.origin, allowed: map[string][]string{}, raw: l.raw}
 	for key, req := range map[string]string{
 		"approval_policy": "allowed_approval_policies", keySandboxMode: "allowed_sandbox_modes", keyWebSearch: "allowed_web_search_modes",
 	} {

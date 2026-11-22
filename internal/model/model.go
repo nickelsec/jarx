@@ -166,7 +166,10 @@ type Hook struct {
 	Script     Path
 	ScriptRead ReadStatus
 	ScriptText redact.Text
-	Origin     Origin
+	// Note says something about whether it runs that jarx can't settle, like
+	// a per-hook trust the agent keeps where jarx can't see.
+	Note   redact.Text
+	Origin Origin
 }
 
 // SkillKind is what kind of skill-like thing a Skill is.
@@ -269,7 +272,14 @@ type Instruction struct {
 	// many hops that took. Both are zero for files the agent finds itself.
 	ImportedBy Path
 	Depth      int
-	Origin     Origin
+	// Limit is how many bytes the agent reads from the file, when it reads
+	// less than all of it (0 means all). Text always holds the whole file,
+	// so the rules see what's past the limit too.
+	Limit int
+	// Note says something about loading that jarx can't settle, like a cap
+	// the docs describe two ways.
+	Note   redact.Text
+	Origin Origin
 }
 
 // RuleAction is what a permission rule does.

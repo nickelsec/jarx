@@ -65,7 +65,7 @@ func (p *Printer) hooks(a model.Agent, root string, hs []model.Hook) {
 				detail += " (" + string(h.ScriptRead) + ")"
 			}
 		}
-		p.Out.Printf("      %s  %s  %s  %s\n", p.text(event), h.Type, h.Run, p.text(detail+notInEffect(h.Origin)))
+		p.Out.Printf("      %s  %s  %s  %s\n", p.text(event), h.Type, h.Run, p.text(detail+notInEffect(h.Origin)+note(h.Note)))
 	}
 }
 

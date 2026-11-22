@@ -229,11 +229,22 @@ func instructionDetail(in model.Instruction, root string) string {
 	if in.Read != model.ReadOK {
 		parts = append(parts, string(in.Read))
 	}
+	if in.Limit > 0 {
+		parts = append(parts, "first "+strconv.Itoa(in.Limit)+" bytes")
+	}
 	detail := strings.Join(parts, ", ")
 	if !in.Origin.InEffect {
 		detail += "  not in effect: " + in.Origin.Why.String()
 	}
-	return detail
+	return detail + note(in.Note)
+}
+
+// note renders a note that jarx can't settle, or "".
+func note(n redact.Text) string {
+	if n.IsZero() {
+		return ""
+	}
+	return "  note: " + n.String()
 }
 
 // shortPath shows path relative to root when it's inside it.

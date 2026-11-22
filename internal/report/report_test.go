@@ -319,3 +319,26 @@ func TestPermissionsListingShowsOptions(t *testing.T) {
 		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
 	}
 }
+
+func TestListingsShowLimitsAndNotes(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	at := model.Origin{Agent: model.AgentCodex, Scope: model.ScopeProject, InEffect: true}
+
+	p.Projects([]model.Project{{
+		Path: model.NewPath(s, "/projects/app"), Status: model.ProjectOK, Origins: []model.Origin{{Agent: model.AgentCodex}},
+		Instructions: []model.Instruction{{Kind: model.InstructionFile, Path: model.NewPath(s, "/projects/app/AGENTS.md"),
+			Load: model.LoadLaunch, Read: model.ReadOK, Limit: 100, Note: text("cut under the combined reading"), Origin: at}},
+		Hooks: []model.Hook{{Event: text("Stop"), Type: text("command"), Run: text("notify"), Note: text("waits for review in /hooks"), Origin: at}},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  codex\n" +
+		"    codex instructions\n" +
+		"      instructions  AGENTS.md  project, at launch, first 100 bytes  note: cut under the combined reading\n" +
+		"    codex hooks\n" +
+		"      Stop  command  notify  project  note: waits for review in /hooks\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}

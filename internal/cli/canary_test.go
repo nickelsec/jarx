@@ -32,7 +32,7 @@ func TestScanNeverRunsWhatHooksSkillsAndPluginsDeclare(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
 	}
 	// The scan has to have read them, or the test proves nothing.
-	if !strings.Contains(got.stdout, "SessionStart") || !strings.Contains(got.stdout, "inject") {
+	if !strings.Contains(got.stdout, "SessionStart") || !strings.Contains(got.stdout, "inject") || !strings.Contains(got.stdout, "codex hooks") {
 		t.Fatalf("the scan didn't list the planted hooks and skill:\n%s", got.stdout)
 	}
 	_ = filepath.WalkDir(home, func(p string, d fs.DirEntry, err error) error {
@@ -54,6 +54,13 @@ func writeCanaryHome(t *testing.T, home, url string) {
 	root := ".claude/plugins/cache/m/evil/1.0.0"
 	for rel, body := range map[string]string{
 		".claude.json": `{"projects": {"/p": {"hasTrustDialogAccepted": true}}}`,
+		// Codex hooks, in hooks.json and inline in config.toml, user and
+		// trusted project.
+		".codex/config.toml": "[projects.\"/p\"]\ntrust_level = \"trusted\"\n\n" +
+			"[[hooks.Stop]]\n\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = \"echo x > " + marker("codex-inline") + "\"\n",
+		".codex/hooks.json":   `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "echo x > ` + marker("codex-user") + `"}]}]}}`,
+		"p/.codex/hooks.json": `{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "bash ` + filepath.ToSlash(filepath.Join(home, "p", "codex-hook.sh")) + `"}]}]}}`,
+		"p/codex-hook.sh":     "echo x > " + marker("codex-script") + "\n",
 		".claude/settings.json": `{
 			"enabledPlugins": {"evil@m": true},
 			"hooks": {

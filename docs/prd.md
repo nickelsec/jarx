@@ -169,10 +169,16 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
   `[permissions.<name>]` profiles, per-tool MCP `approval_mode`.
 - **Instruction files:** global and project `AGENTS.override.md`,
   `AGENTS.md`, `project_doc_fallback_filenames`, the `project_doc_max_bytes`
-  cap.
-- **Skills and hooks:** `.agents/skills`, `$HOME/.agents/skills`,
+  cap. One file per dir, the first non-empty one, from the project root
+  down. The docs describe the cap two ways (a combined budget in the
+  AGENTS.md guide, a per-file limit in the advanced config page), so jarx
+  marks a file off only when the per-file reading cuts it and notes what
+  the combined reading would cut. The rules always read the whole file.
+- **Skills and hooks:** `.agents/skills` from the working dir up to the repo
+  root, `$HOME/.agents/skills` (`HOME`, not `CODEX_HOME`),
   `/etc/codex/skills`, all documented `hooks.json` locations and inline
-  `[hooks]`.
+  `[hooks]`. Codex runs a non-managed hook only after you review and trust
+  it in `/hooks`; jarx notes that it can't see whether you did.
 - **Agent login:** `$CODEX_HOME/auth.json` existence only, plus the
   `cli_auth_credentials_store` setting.
 
@@ -593,6 +599,8 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
   defines.
 - A legacy Codex `managed_config.toml` overriding your config and CLI flags,
   and legacy `[profiles]` tables Codex ignores (info).
+- A repository changing which instructions Codex loads, through
+  `project_doc_max_bytes` or `project_doc_fallback_filenames`.
 
 ### Repo-level red flags
 
@@ -951,8 +959,10 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   `--plugin-url` and SDK plugins (`@inline`), plugins and skills synced from
   claude.ai, and marketplaces jarx would have to fetch aren't listed.
 - **Codex settings jarx can't see.** Cloud-managed `config.toml` defaults and
-  cloud requirements, macOS managed preferences (`com.openai.codex`), and
-  the profile a run selects with `--profile`.
+  cloud requirements, macOS managed preferences (`com.openai.codex`), the
+  profile a run selects with `--profile`, and which hooks you've trusted in
+  `/hooks` (Codex keeps that against each hook's hash, somewhere the docs
+  don't name).
 - **Approval of external imports.** Claude asks before it loads an
   `@import` from a project file that points outside the project, and the
   docs don't say where that answer is kept. jarx lists those imports as

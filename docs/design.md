@@ -251,6 +251,29 @@ https://developers.openai.com/codex/config-file/config-advanced,
 https://developers.openai.com/codex/permissions,
 https://developers.openai.com/codex/enterprise/managed-configuration
 
+### Codex's instruction cap is described two ways
+
+The AGENTS.md guide says Codex "stops adding files once the combined size
+reaches" `project_doc_max_bytes` (32 KiB by default). The advanced config
+page says it's "how much to read from each `AGENTS.md` file". jarx doesn't
+pick one:
+
+- A file is marked not in effect only when the per-file reading cuts it,
+  since that reading cuts the least. Saying the agent doesn't see something
+  it might see is the worse mistake.
+- The byte limit Codex reads under the per-file reading goes on the
+  instruction, and a note says what the combined reading would cut, counting
+  raw bytes (a masked secret changes the text's length) in chain order:
+  the global file, then the project root down.
+- The rules always get the whole file. Text past the cap isn't in the first
+  prompt, but it's on disk and the agent can read it with a tool.
+- A repository can set the cap and the fallback filenames in its own
+  `.codex/config.toml`, so `JARX-CODEX-006` flags a trusted project that
+  does.
+
+Source: https://developers.openai.com/codex/guides/agents-md,
+https://developers.openai.com/codex/config-file/config-advanced
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
