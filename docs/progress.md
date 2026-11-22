@@ -45,7 +45,7 @@ whether each exists.
 - [x] `jarx setup` and `setup repo add|rm`, with `--home`, and saved repos
   in every scan (451ba14)
 - [x] offline CI job, with a control step that proves the namespace has no
-  network
+  network (1b48b2f)
 
 **Run it:** `jarx scan --home testdata/demo` lists every known project with
 stale ones marked.
