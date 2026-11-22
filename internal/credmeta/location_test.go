@@ -29,6 +29,8 @@ func TestCredentialLocations(t *testing.T) {
 		h("proj/config/.env.production"): "env_file",
 		h(".ssh/id_ed25519"):             "ssh",
 		h(".ssh/config"):                 "ssh",
+		h(".SSH/config"):                 "ssh", // same dir on Windows and macOS
+		h("proj/.ENV"):                   "env_file",
 		h("proj/deploy/id_rsa"):          "private_key",
 		h("proj/certs/server.pem"):       "private_key",
 		h("proj/certs/server.KEY"):       "private_key",

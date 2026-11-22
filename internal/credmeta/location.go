@@ -60,14 +60,12 @@ func Location(env platform.Env, path string) (string, bool) {
 	return "", false
 }
 
-// normalize cleans p, and lowercases it on Windows, where case doesn't
-// matter.
-func normalize(env platform.Env, p string) string {
-	p = filepath.Clean(p)
-	if env.GOOS == "windows" {
-		p = strings.ToLower(p)
-	}
-	return p
+// normalize cleans p and lowercases it on every OS. Windows and the default
+// macOS file system ignore case, so ~/.SSH is ~/.ssh there, and a key named
+// server.KEY is a key anywhere. On Linux this can match a file that isn't a
+// credential; refusing to read one of those is the safe mistake.
+func normalize(_ platform.Env, p string) string {
+	return strings.ToLower(filepath.Clean(p))
 }
 
 // loginFile matches the agents' own login files.

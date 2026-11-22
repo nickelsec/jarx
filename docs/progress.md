@@ -65,7 +65,7 @@ stale ones marked.
   Also the read guards an `@` import made necessary: `fsys` refuses
   credential files (even behind a symlink), network paths and non-regular
   files, `credmeta.Location` starts early for that, and `report` escapes
-  control and bidi characters
+  control and bidi characters (1c1c423)
   - Not covered yet: `claudeMdExcludes`, symlinked rules that point outside
     the project (Claude treats them like external imports), output styles in
     `.claude/output-styles/` between the working dir and the repo root,
