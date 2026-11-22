@@ -474,28 +474,45 @@ func TestScanDemoHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	proj := func(rel string) string { return filepath.Join(abs, "projects", rel) }
+	userClaudeMD := filepath.Join(abs, ".claude", "CLAUDE.md")
 	for _, want := range []string{
 		"environment (fake home)", "3 vars from .jarx-env", "skipped (--home)",
 		// The demo's records use paths like /projects/app, read inside the
 		// fake home.
 		"projects (3)\n" +
-			"  " + proj("app") + "  claude (trusted), codex (trusted)  2 files (walk)\n" +
+			"  " + proj("app") + "  claude (trusted), codex (trusted)  5 files (walk)\n" +
 			"    claude permissions\n" +
 			"      mode   bypassPermissions  user\n" +
 			"      allow  Bash(*)  project\n" +
 			"      deny   Read(./.env)  project\n" +
+			"    claude instructions\n" +
+			"      instructions  " + userClaudeMD + "  user, at launch\n" +
+			"      instructions  CLAUDE.md  project, at launch\n" +
+			"      import  docs/setup.md  project, at launch, via CLAUDE.md\n" +
+			"      import  .env  project, at launch, via CLAUDE.md, credential file, not read\n" +
 			"  " + proj("notes") + "  codex (untrusted)  1 file (walk)\n" +
 			"    claude permissions\n" +
 			"      mode   bypassPermissions  user\n" +
+			"    claude instructions\n" +
+			"      instructions  " + userClaudeMD + "  user, at launch\n" +
 			"  " + proj("old") + "  claude (unknown)  stale\n",
 		"unknown settings (0)\n",
-		"findings (0)\n",
+		"instructions not tied to a project (0)\n",
+		"findings (1)\n" +
+			"  high  JARX-CLAUDE-002  " + proj(filepath.Join("app", ".env")) +
+			"  an instruction file pulls a credential file into Claude's context: an @import in " +
+			proj(filepath.Join("app", "CLAUDE.md")) + " points at a credential file; jarx didn't read it\n",
 	} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
 		}
 	}
 	assertNoEnvLeak(t, string(data), got.stdout+got.stderr)
+	// The demo's fake .env is imported by its CLAUDE.md. Nothing in it may
+	// show up: jarx never reads it.
+	if strings.Contains(got.stdout+got.stderr, "sk-demo-0000") {
+		t.Errorf("output contains the demo .env's value:\n%s", got.stdout)
+	}
 }
 
 // assertNoEnvLeak fails if any name or value from a .jarx-env file shows up

@@ -250,3 +250,26 @@ func TestRunReportsOversizedSettingsFiles(t *testing.T) {
 		t.Errorf("findings = %+v, want one %s for the oversized settings", r.Findings, finding.SkippedTooLarge().ID)
 	}
 }
+
+func TestRunReadsInstructionsForEachOKProject(t *testing.T) {
+	c := fakeContext(t)
+	app := mkdir(t, filepath.Join(c.Env.Home, "app"))
+	mem := mkdir(t, filepath.Join(c.Env.Home, ".claude", "projects", "x", "memory"))
+	for path, body := range map[string]string{
+		filepath.Join(app, "CLAUDE.md"): "be nice",
+		filepath.Join(mem, "MEMORY.md"): "index",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r := Run(c, []agent.Adapter{claude.Adapter{}}, []string{app})
+
+	if len(r.Projects) != 1 || len(r.Projects[0].Instructions) != 1 || r.Projects[0].Instructions[0].Text.String() != "be nice" {
+		t.Fatalf("projects = %+v, want app with its CLAUDE.md", r.Projects)
+	}
+	if len(r.Instructions) != 1 || r.Instructions[0].Kind != model.InstructionMemory {
+		t.Errorf("global instructions = %+v, want the memory index", r.Instructions)
+	}
+}

@@ -32,3 +32,10 @@ type Adapter interface {
 type SettingsReader interface {
 	Settings(c Context, projects []model.Project) ([]model.Unknown, []finding.Finding)
 }
+
+// InstructionReader is an adapter that reads instruction texts. It stores
+// each ok project's on the project and returns the ones it can't tie to a
+// project.
+type InstructionReader interface {
+	Instructions(c Context, projects []model.Project) ([]model.Instruction, []finding.Finding)
+}

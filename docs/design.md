@@ -156,6 +156,40 @@ https://code.claude.com/docs/en/settings-reference,
 https://code.claude.com/docs/en/managed-settings,
 https://code.claude.com/docs/en/permissions
 
+### What an @import can point at
+
+A CLAUDE.md `@import` is a path someone else wrote, and Claude follows it up
+to four hops, absolute or relative. So jarx treats every import target, and
+every symlink on the way to one, as untrusted. Checks live in `fsys`, so no
+reader can skip them:
+
+- **Credential files.** `fsys` asks `credmeta.Location` about the path and
+  about where its symlinks lead, and refuses content reads of either with
+  `ErrCredential`. Stat still works, for existence checks. An instruction
+  that pulls in a credential is listed as "credential file, not read" and
+  raised as `JARX-CLAUDE-002`, because Claude would load the secret even
+  though jarx won't.
+- **Network paths.** UNC paths (`\\host\share`, `\\?\UNC\...`), the `\\.\`
+  device namespace, and `/net` and `/Network` on unix are refused from the
+  text alone. A symlink is resolved one component at a time and its target
+  is checked as text before anything looks it up, so a link to a share
+  can't make jarx contact it (on Windows, a lookup can send the share your
+  NTLM hash). `\\wsl$` is allowed, as the docs say it isn't a network path.
+- **Things that aren't files.** `ReadFile` and `Open` stat first and refuse
+  anything that isn't a regular file, so a FIFO can't block a scan and a
+  device can't be read forever.
+- **Loops and fan-out.** Imports stop at Claude's four hops, a file is listed
+  once per project however often it's imported, and one file can name at
+  most 500 imports.
+- **Escaping the fake home.** Absolute import paths go through `MapPath`,
+  and `os.Root` keeps every read and link under `--home` inside it.
+- **The terminal.** A file name or file text is printed by `report`, which
+  escapes C0 and C1 controls, DEL and the Unicode bidi controls, so a hostile
+  name can't recolor, move the cursor, fake a new line or flip the text.
+
+Sources: https://code.claude.com/docs/en/memory#import-additional-files,
+https://code.claude.com/docs/en/memory#share-rules-across-projects-with-symlinks
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
@@ -181,6 +215,7 @@ a spot in the code that makes breaking it hard.
 | Never calls a tool | The `mcp` package has constants only for `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
 | Only the listed network calls | `netguard` is the only package allowed to make a network connection. golangci `forbidigo` bans `http.Get`, `http.Client`, `http.Transport`, `http.DefaultClient`, `net.Dial*`, `net.Dialer`, `tls.Dial*`, `tls.Client`, DNS lookups (`net.Lookup*`, `net.Resolver`), `net/smtp` and `net/rpc` everywhere else. Inside netguard, every connection is checked in the dialer's `Control` hook, after DNS and right before connect, on the exact IP being connected, so DNS rebinding and reconnects can't get past it. A literal IP host is also checked before dialing, because Go rewrites `0.0.0.0`, `::` and an empty host into a dial to the local machine before `Control` sees it. The tests run with a fake DNS server and a test-only rule that refuses any non-loopback connection, so a broken guard fails its tests instead of reaching a real address. |
 | Only discover runs a process | `forbidigo` bans `exec.Command`, `exec.CommandContext`, `exec.LookPath` (it reads the real PATH), `os.StartProcess` and `syscall.Exec`/`ForkExec` outside `discover`, which only runs hardened git. `proc` joins it in phase 4. git is found through `platform.Env`'s PATH, never under `--home`. |
+| Never reads a credential value | `fsys` refuses content reads of any path `credmeta.Location` calls a credential, checked on the path and on where its symlinks lead, so following an `@import` or a symlinked rule can't open one. Stat still works for existence checks. The phase 5 metadata parsers get their input through an explicit `fsys` method, not by opening files themselves. |
 | Never writes agent config | `fsys` has no write methods. The only writer is `jarxdir`, which is rooted at jarx's state dir (`os.UserConfigDir()/jarx`, or `<home>/.jarx-state` with `--home`) with `os.Root`. `forbidigo` bans `os.WriteFile`, `os.Create`, `os.Mkdir*`, `os.Remove*`, `os.Rename` and friends everywhere else (tests may write fixtures). |
 | Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, PATH, state dir, system roots). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`, and bans `os.Open`, `os.ReadFile`, `os.Stat`, `os.OpenRoot`, `filepath.Walk*` and friends outside `fsys`, `jarxdir` and `platform`. Under `--home`, `fsys` confines every read to the fake home with `os.Root`, so a fixture that points at a real path, a `..` trick or a symlink can't reach the real machine. `--home` builds a `platform.Env` with no system roots, registry, plists, real env or real PATH. |
 | Only approved dependencies | golangci `depguard` lists the five approved modules plus stdlib. A new import fails lint until someone approves it. |
@@ -275,7 +310,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `cmd/jarx` | main, wiring only | CLI |
 | `internal/cli` | subcommands with stdlib `flag` | CLI |
 | `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`). Registry reads land here in phase 3 (macOS plists aren't read, see Limits in the PRD). Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
-| `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. | Walking a repo |
+| `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. Refuses network paths (and symlinks to them), anything that isn't a regular file, and content reads of credential locations (see "What an @import can point at"). | Walking a repo |
 | `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
 | `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. The secret patterns themselves arrive with `catalog` in phase 3. | Promise 4, Secrets |
 | `internal/model` | agent-neutral inventory, `Origin`, `Path`, `Setting[T]` (one layer per scope, highest first, with each layer marked in effect or not and why; adapters decide, the model only holds the result), `Project`, `Unknown`. Grows per phase. | Architecture |
@@ -285,7 +320,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/agent/claude` | Claude paths, precedence, trust, MCP approval, modes | Scope: Claude Code |
 | `internal/agent/codex` | Codex paths, profiles, legacy `sandbox_mode` switch, requirements | Scope: Codex CLI |
 | `internal/catalog` | embedded data: builtin tools, vendors, advisories, secret patterns, each with an "as of" stamp | Built-in tools catalog, Vendor badge, Advisory data |
-| `internal/credmeta` | cred locations and safe metadata parsers (aws config, ssh header, gh hosts, `.env` keys) | Credentials |
+| `internal/credmeta` | cred locations and safe metadata parsers (aws config, ssh header, gh hosts, `.env` keys). `Location` lands in phase 3 because `fsys` needs it to refuse credential reads; the parsers come in phase 5. It never imports `fsys`. | Credentials |
 | `internal/analyze/secrets` | prefix and entropy patterns, the sees state | Secrets |
 | `internal/analyze/poison` | text rules over every text the agent reads | Detection rules |
 | `internal/analyze/perms` | effective permissions with origin and in-effect reason | Effective permissions view |

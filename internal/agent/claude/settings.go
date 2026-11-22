@@ -44,6 +44,13 @@ type layer struct {
 	behavior    string // managedSourcesBehavior, "" when unset
 	helper      bool   // sets a policyHelper
 	managedOnly *bool  // allowManagedPermissionRulesOnly
+
+	// What the instruction reader needs. Paths stay raw: jarx reads them.
+	outputStyle      *redact.Text
+	memoryDir        string // autoMemoryDirectory, "" when unset
+	memoryOn         *bool  // autoMemoryEnabled
+	instructionFiles string // pluginConfigs: the AGENTS.md plugin's instructionFiles
+	claudeMd         *redact.Text
 }
 
 // disable takes a whole layer out of effect.
@@ -58,34 +65,71 @@ func (l *layer) disable(why redact.Text) {
 // project's project and local files, and stores the result on each project.
 // Unknown keys come back once per file.
 func (Adapter) Settings(c agent.Context, projects []model.Project) ([]model.Unknown, []finding.Finding) {
-	mgd := readManaged(c)
-	unknown, findings := mgd.unknown, mgd.findings
-	userFile := userSettingsFile(c.Env)
-	user, u, f := readLayer(c, userFile, model.ScopeUser)
-	unknown, findings = append(unknown, u...), append(findings, f...)
-
+	all := loadSettings(c)
+	unknown, findings := all.unknown, all.findings
 	for i := range projects {
 		p := &projects[i]
 		if p.Status != model.ProjectOK {
 			continue
 		}
-		dir := filepath.Join(p.Path.Raw(), ".claude")
-		layers := slices.Clone(mgd.layers)
-		local, u, f := readLayer(c, filepath.Join(dir, "settings.local.json"), model.ScopeLocal)
+		layers, u, f := all.forProject(c, *p)
 		unknown, findings = append(unknown, u...), append(findings, f...)
-		layers = append(layers, local)
-		if projFile := filepath.Join(dir, "settings.json"); projFile != userFile {
-			proj, u, f := readLayer(c, projFile, model.ScopeProject)
-			unknown, findings = append(unknown, u...), append(findings, f...)
-			layers = append(layers, proj)
-		}
-		layers = append(layers, user)
-
-		if perm, ok := permissions(c, *p, layers, mgd.rulesOnly); ok {
+		if perm, ok := permissions(c, *p, layers, all.managed.rulesOnly); ok {
 			p.Permissions = append(p.Permissions, perm)
 		}
 	}
 	return unknown, findings
+}
+
+// allSettings is the settings every project shares: the managed tier and
+// the user file.
+type allSettings struct {
+	managed  managed
+	user     *layer
+	userFile string
+	unknown  []model.Unknown
+	findings []finding.Finding
+}
+
+func loadSettings(c agent.Context) allSettings {
+	s := allSettings{managed: readManaged(c), userFile: userSettingsFile(c.Env)}
+	s.unknown, s.findings = s.managed.unknown, s.managed.findings
+	user, u, f := readLayer(c, s.userFile, model.ScopeUser)
+	s.user, s.unknown, s.findings = user, append(s.unknown, u...), append(s.findings, f...)
+	return s
+}
+
+// shared is the managed and user layers, highest first.
+func (s allSettings) shared() []*layer { return append(slices.Clone(s.managed.layers), s.user) }
+
+// forProject returns p's layers, highest first: managed, local, project,
+// user. A missing file is a nil layer.
+func (s allSettings) forProject(c agent.Context, p model.Project) ([]*layer, []model.Unknown, []finding.Finding) {
+	dir := filepath.Join(p.Path.Raw(), ".claude")
+	layers := slices.Clone(s.managed.layers)
+	local, unknown, findings := readLayer(c, filepath.Join(dir, "settings.local.json"), model.ScopeLocal)
+	layers = append(layers, local)
+	if projFile := filepath.Join(dir, "settings.json"); projFile != s.userFile {
+		proj, u, f := readLayer(c, projFile, model.ScopeProject)
+		unknown, findings = append(unknown, u...), append(findings, f...)
+		layers = append(layers, proj)
+	}
+	return append(layers, s.user), unknown, findings
+}
+
+// effective returns the value from the highest in-effect layer that sets
+// it, and that layer.
+func effective[T comparable](layers []*layer, get func(*layer) T) (T, *layer) {
+	var zero T
+	for _, l := range layers {
+		if l == nil || !l.origin.InEffect {
+			continue
+		}
+		if v := get(l); v != zero {
+			return v, l
+		}
+	}
+	return zero, nil
 }
 
 func userSettingsFile(env platform.Env) string {
@@ -287,6 +331,9 @@ func (r *layerReader) topKey(key string, raw json.RawMessage) {
 	}
 	if r.l.origin.Scope == model.ScopeManaged && allowed {
 		r.managedKey(key, raw)
+	}
+	if allowed {
+		r.instructionKey(key, raw)
 	}
 	if key != "permissions" {
 		return // read by later items, or not needed yet

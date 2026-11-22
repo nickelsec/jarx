@@ -507,8 +507,10 @@ copy other scanners.
 
 - Unicode tag characters, bidi overrides and zero-width characters in
   instruction files, skills and tool descriptions.
-- HTML comments in instruction files (the agent sees them, the rendered view
-  hides them).
+- HTML comments in instruction files (the rendered view hides them). The
+  memory docs say Claude strips block-level HTML comments from CLAUDE.md
+  before loading it and keeps the ones in code blocks, so this rule needs
+  rethinking before it ships (see Open items).
 - ANSI escape tricks.
 
 ### What the text rules run on
@@ -918,6 +920,14 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   capability view), which is usually unknown.
 - **Undocumented formats** can change with any agent release. jarx degrades
   to "unknown" there.
+- **Approval of external imports.** Claude asks before it loads an
+  `@import` from a project file that points outside the project, and the
+  docs don't say where that answer is kept. jarx lists those imports as
+  waiting on approval.
+- **Network paths.** jarx never reads a UNC path (`\\host\share`), a
+  `/net` or `/Network` path, or a symlink that leads to one, since even a
+  lookup can contact the host and, on Windows, send it your NTLM hash.
+  Claude doesn't follow those links either.
 - **Static analysis only.** Verdicts come from settings and docs, not from
   testing the agent.
 
@@ -943,6 +953,10 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   policy setting). Take it from the docs, or leave it out.
 - The Codex sessions path and the shapes of the sqlite and zstd files, as
   observed formats.
+- The HTML comment rule. Claude strips block-level HTML comments from
+  CLAUDE.md, so a hidden comment there may never reach the agent. Check
+  which comments survive (inline ones, comments in code blocks, comments in
+  rules and AGENTS.md) and aim the rule at those.
 
 ## Sources
 

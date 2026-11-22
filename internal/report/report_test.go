@@ -197,3 +197,50 @@ func TestUnknownSettingsListing(t *testing.T) {
 		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
 	}
 }
+
+func TestProjectsListingShowsInstructions(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	path := func(raw string) model.Path { return model.NewPath(s, raw) }
+	at := func(scope model.Scope) model.Origin {
+		return model.Origin{Agent: model.AgentClaude, Scope: scope, InEffect: true}
+	}
+	waits := at(model.ScopeProject)
+	waits.InEffect, waits.Why = false, text("external import: needs approval")
+
+	p.Projects([]model.Project{{
+		Path: path("/projects/app"), Status: model.ProjectOK, Origins: []model.Origin{{Agent: model.AgentClaude}},
+		Instructions: []model.Instruction{
+			{Kind: model.InstructionFile, Path: path("/projects/app/CLAUDE.md"), Load: model.LoadLaunch, Read: model.ReadOK, Origin: at(model.ScopeProject)},
+			{Kind: model.InstructionImport, Path: path("/projects/shared.md"), Load: model.LoadLaunch, Read: model.ReadOK,
+				ImportedBy: path("/projects/app/CLAUDE.md"), Depth: 1, Origin: waits},
+			{Kind: model.InstructionImport, Path: path("/projects/app/.env"), Load: model.LoadLaunch, Read: model.ReadCredential,
+				ImportedBy: path("/projects/app/CLAUDE.md"), Depth: 1, Origin: at(model.ScopeProject)},
+		},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  claude\n" +
+		"    claude instructions\n" +
+		"      instructions  CLAUDE.md  project, at launch\n" +
+		"      import  /projects/shared.md  project, at launch, via CLAUDE.md  not in effect: external import: needs approval\n" +
+		"      import  .env  project, at launch, via CLAUDE.md, credential file, not read\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestUnboundInstructionsListing(t *testing.T) {
+	p, s, out, _ := setup(t)
+	origin := model.Origin{Agent: model.AgentClaude, Scope: model.ScopeUser, InEffect: true}
+
+	p.Instructions([]model.Instruction{
+		{Kind: model.InstructionMemory, Path: model.NewPath(s, "/home/.claude/projects/x/memory/MEMORY.md"), Load: model.LoadLaunch, Read: model.ReadOK, Origin: origin},
+	})
+
+	want := "instructions not tied to a project (1)\n" +
+		"  claude memory  /home/.claude/projects/x/memory/MEMORY.md  user, at launch\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}

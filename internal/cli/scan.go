@@ -71,6 +71,7 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	p.Out.Printf("\n")
 	p.Projects(res.Projects)
 	p.Unknown(res.Unknown)
+	p.Instructions(res.Instructions)
 	p.Findings(res.Findings, rules)
 	return exitOK
 }

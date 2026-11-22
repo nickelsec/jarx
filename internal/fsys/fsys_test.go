@@ -298,3 +298,19 @@ func TestSkipped(t *testing.T) {
 		}
 	}
 }
+
+func TestASkippedFileIsRecordedOnce(t *testing.T) {
+	f, home := fakeFS(t)
+	big := filepath.Join(home, "big.json")
+	write(t, big, make([]byte, MaxReadSize+1))
+
+	for range 3 {
+		if _, err := f.ReadFile(big); !errors.Is(err, ErrTooLarge) {
+			t.Fatalf("ReadFile() error = %v, want ErrTooLarge", err)
+		}
+	}
+
+	if got := f.Skips(); len(got) != 1 {
+		t.Errorf("skips = %+v, want the file once", got)
+	}
+}

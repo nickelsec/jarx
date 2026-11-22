@@ -137,6 +137,68 @@ type Project struct {
 	// Permissions holds each agent's permission settings as they apply in
 	// this project, one entry per agent that has any.
 	Permissions []Permissions
+	// Instructions is every text an agent reads as instructions in this
+	// project: instruction files, rules, imports, memory and output styles,
+	// in effect or not. Origin.Agent says whose.
+	Instructions []Instruction
+}
+
+// InstructionKind is what kind of instruction text a file is.
+type InstructionKind string
+
+// Instruction kinds.
+const (
+	InstructionFile        InstructionKind = "instructions" // CLAUDE.md, AGENTS.md and the like
+	InstructionLocal       InstructionKind = "local instructions"
+	InstructionRule        InstructionKind = "rule"
+	InstructionImport      InstructionKind = "import"
+	InstructionSetting     InstructionKind = "instructions in settings" // like Claude's managed claudeMd key
+	InstructionMemory      InstructionKind = "memory"
+	InstructionAgentMemory InstructionKind = "agent memory"
+	InstructionOutputStyle InstructionKind = "output style"
+)
+
+// LoadWhen is when the agent puts an instruction into its context.
+type LoadWhen string
+
+// Load times.
+const (
+	LoadLaunch   LoadWhen = "at launch"
+	LoadOnDemand LoadWhen = "on demand"
+	LoadMatching LoadWhen = "when matching files are read"
+	LoadSelected LoadWhen = "when selected"
+	LoadSubagent LoadWhen = "when its subagent runs"
+)
+
+// ReadStatus says whether jarx read an instruction's text, and if not, why.
+type ReadStatus string
+
+// Read statuses.
+const (
+	ReadOK          ReadStatus = "read"
+	ReadMissing     ReadStatus = "missing"
+	ReadCredential  ReadStatus = "credential file, not read" //nolint:gosec // G101: a status label, not a credential
+	ReadNetwork     ReadStatus = "network path, not read"
+	ReadOutsideHome ReadStatus = "outside fake home, not read"
+	ReadNotRegular  ReadStatus = "not a regular file, not read"
+	ReadTooLarge    ReadStatus = "too large, not read"
+	ReadFailed      ReadStatus = "couldn't read"
+	ReadNotFollowed ReadStatus = "not followed"
+)
+
+// Instruction is one text an agent reads as instructions.
+type Instruction struct {
+	Kind InstructionKind
+	Path Path
+	Load LoadWhen
+	Read ReadStatus
+	// Text is the content, scrubbed. It's empty unless Read is ReadOK.
+	Text redact.Text
+	// ImportedBy is the file whose @import pulled this one in, and Depth how
+	// many hops that took. Both are zero for files the agent finds itself.
+	ImportedBy Path
+	Depth      int
+	Origin     Origin
 }
 
 // RuleAction is what a permission rule does.
@@ -176,4 +238,7 @@ type Unknown struct {
 type Inventory struct {
 	Projects []Project
 	Unknown  []Unknown
+	// Instructions holds instruction texts jarx can't tie to one project,
+	// like auto memory folders whose project naming isn't documented.
+	Instructions []Instruction
 }

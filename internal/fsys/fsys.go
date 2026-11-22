@@ -16,6 +16,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -45,8 +47,9 @@ type Skip struct {
 
 // FS reads files. Use New to build one.
 type FS struct {
-	home string   // fake home, "" on the real machine
-	root *os.Root // open on home under --home, nil on the real machine
+	home string       // fake home, "" on the real machine
+	root *os.Root     // open on home under --home, nil on the real machine
+	env  platform.Env // for credmeta.Location, which needs the home and config dirs
 
 	mu    sync.Mutex
 	skips []Skip
@@ -55,13 +58,13 @@ type FS struct {
 // New returns an FS for env. Under --home it's confined to env.Home.
 func New(env platform.Env) (*FS, error) {
 	if !env.Fake() {
-		return &FS{}, nil
+		return &FS{env: env}, nil
 	}
 	root, err := os.OpenRoot(env.Home)
 	if err != nil {
 		return nil, fmt.Errorf("opening fake home: %w", err)
 	}
-	return &FS{home: env.Home, root: root}, nil
+	return &FS{home: env.Home, root: root, env: env}, nil
 }
 
 // Close releases the fake home root.
@@ -100,9 +103,9 @@ func (f *FS) Stat(path string) (fs.FileInfo, error) {
 	return info, nil
 }
 
-// Open opens path for streaming. It has no size cap.
+// Open opens path for streaming. It has no size cap. Only plain files open.
 func (f *FS) Open(path string) (io.ReadCloser, error) {
-	file, err := f.open(path)
+	file, err := f.openFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -110,9 +113,9 @@ func (f *FS) Open(path string) (io.ReadCloser, error) {
 }
 
 // ReadFile reads path. A file over MaxReadSize is refused with ErrTooLarge
-// and recorded in Skips.
+// and recorded in Skips. Only plain files are read.
 func (f *FS) ReadFile(path string) ([]byte, error) {
-	file, err := f.open(path)
+	file, err := f.openFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +193,35 @@ func (f *FS) walkFS(root, rel string) (fs.FS, string) {
 	return os.DirFS(root), "."
 }
 
+// openFile opens a plain file. It stats first, so a FIFO or device is refused
+// before an open could block on it, and checks again after, in case the path
+// changed in between.
+func (f *FS) openFile(path string) (*os.File, error) {
+	if err := f.guard(path); err != nil {
+		return nil, err
+	}
+	info, err := f.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := regular(path, info); err != nil {
+		return nil, err
+	}
+	file, err := f.open(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err = file.Stat()
+	if err == nil {
+		err = regular(path, info)
+	}
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
 func (f *FS) open(path string) (*os.File, error) {
 	rel, err := f.resolve(path)
 	if err != nil {
@@ -211,10 +243,18 @@ func (f *FS) open(path string) (*os.File, error) {
 
 // resolve checks path and, under --home, returns it relative to the home.
 func (f *FS) resolve(path string) (string, error) {
+	if networkPath(runtime.GOOS, path) {
+		return "", fmt.Errorf("%s: %w", path, ErrNetworkPath)
+	}
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("%s: %w", path, ErrNotAbsolute)
 	}
 	if f.root == nil {
+		// The real machine follows symlinks, so check where they lead first.
+		// Under --home, os.Root keeps every link inside the fake home.
+		if _, err := resolveLinks(runtime.GOOS, osLinks{}, path); err != nil {
+			return "", err
+		}
 		return path, nil
 	}
 	rel, err := filepath.Rel(f.home, filepath.Clean(path))
@@ -224,9 +264,12 @@ func (f *FS) resolve(path string) (string, error) {
 	return rel, nil
 }
 
+// tooLarge records a refused file, once per path however often it's read.
 func (f *FS) tooLarge(path string, size int64) error {
 	f.mu.Lock()
-	f.skips = append(f.skips, Skip{Path: path, Size: size, Reason: "too large"})
+	if !slices.ContainsFunc(f.skips, func(s Skip) bool { return s.Path == path }) {
+		f.skips = append(f.skips, Skip{Path: path, Size: size, Reason: "too large"})
+	}
 	f.mu.Unlock()
 	return fmt.Errorf("%s (%d bytes, cap %d): %w", path, size, MaxReadSize, ErrTooLarge)
 }
