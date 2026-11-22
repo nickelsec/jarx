@@ -53,8 +53,8 @@ stale ones marked.
 ## Phase 3: Instruction files and settings
 
 - [ ] Claude adapter: settings, precedence, trust. Includes the Windows
-  registry and macOS plist reads in `platform` (first use of `golang.org/x/sys`)
-  and checking the managed paths against the official docs
+  registry reads in `platform` (first use of `golang.org/x/sys`), the settings
+  index scope table, and checking the managed paths against the official docs
 - [ ] Claude adapter: instruction files, `@` imports, memory, output styles
 - [ ] Claude adapter: skills, commands, subagents, plugins, hooks
 - [ ] Codex adapter: config, profiles, precedence, trust, requirements

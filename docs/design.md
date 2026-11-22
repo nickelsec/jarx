@@ -115,6 +115,47 @@ Streamable HTTP. The client:
 
 Source: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
 
+### Claude managed settings and trust
+
+From the settings, settings-reference, managed-settings and permissions
+pages (read 2026-11-22):
+
+- Settings files are strict JSON. A comment or trailing comma is an error,
+  so there's no JSONC parser.
+- Managed sources rank remote > MDM (macOS plist or `HKLM`) > files >
+  `HKCU`. Under the default `managedSourcesBehavior: "first-wins"` only the
+  top source with a policy key counts, apart from a short list of keys read
+  from every admin source. `"merge"` combines them by kind of key. `HKCU`
+  counts only when no admin source is present. jarx records every source it
+  sees and marks the ones that lose as not in effect.
+- The files are `managed-settings.json`, then `managed-settings.d/*.json` in
+  alphabetical order (hidden and non-`.json` files skipped). Windows'
+  legacy `C:\ProgramData\ClaudeCode\` isn't read by Claude, so not by jarx.
+- Registry: the JSON in a `REG_SZ` or `REG_EXPAND_SZ` value named
+  `Settings` under `SOFTWARE\Policies\ClaudeCode`, in `HKLM` and `HKCU`.
+  `platform` reads it with `golang.org/x/sys/windows/registry` in a
+  `_windows.go` file. Other OSes and `--home` get "not available".
+- jarx doesn't read the macOS plist at all. Claude's docs give only the
+  domain, and Apple's docs don't say where managed preferences live on disk,
+  so the PRD lists it under Limits.
+- Which file a key may come from is the Scope column of the settings index
+  (Any file, User or managed, Managed, Global config and so on). That table
+  ships as embedded data with an "as of" date and doubles as the known-keys
+  list for the unknown settings report.
+- Trust is the documented `projects["<path>"].hasTrustDialogAccepted` in
+  `~/.claude.json`, keyed on the git repo root. Parent folder trust doesn't
+  count, and home dir trust is never written. Anything but a bool is
+  "unknown".
+- `settings.local.json` lives at the repo root, except on Windows, outside a
+  repo, or when ownership doesn't match. A file left in the start dir by
+  older versions is read too. If it's tracked in git or `.claude` is a
+  symlink, its allows wait for trust like project ones.
+
+Sources: https://code.claude.com/docs/en/settings,
+https://code.claude.com/docs/en/settings-reference,
+https://code.claude.com/docs/en/managed-settings,
+https://code.claude.com/docs/en/permissions
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
@@ -233,7 +274,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 |---|---|---|
 | `cmd/jarx` | main, wiring only | CLI |
 | `internal/cli` | subcommands with stdlib `flag` | CLI |
-| `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`). Registry and plist reads land here in phase 3. Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
+| `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`). Registry reads land here in phase 3 (macOS plists aren't read, see Limits in the PRD). Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
 | `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. | Walking a repo |
 | `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
 | `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. The secret patterns themselves arrive with `catalog` in phase 3. | Promise 4, Secrets |

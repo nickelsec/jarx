@@ -96,15 +96,22 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
 - **Settings:** managed (`managed-settings.json` and `managed-settings.d/*.json`
   in the managed dir; macOS `/Library/Application Support/ClaudeCode/`,
   Linux/WSL `/etc/claude-code/`, Windows `C:\Program Files\ClaudeCode\`; plus
-  the macOS plist domain and the Windows `HKLM`/`HKCU` policy keys), user
-  `~/.claude/settings.json`, project `.claude/settings.json`, local
-  `.claude/settings.local.json`, and `~/.claude.json`. Honor
-  `CLAUDE_CONFIG_DIR`.
-- **Precedence:** managed > `--settings` > local > project > user. Two quirks
-  that matter: `defaultMode` of `auto` or `bypassPermissions` is ignored from
-  project and local files, and project `allow` rules,
-  `additionalDirectories` and `extraKnownMarketplaces` only count once the
-  folder is trusted. Deny and ask apply right away.
+  the `Settings` value under the Windows `HKLM` and `HKCU`
+  `SOFTWARE\Policies\ClaudeCode` keys), user `~/.claude/settings.json`,
+  project `.claude/settings.json`, local `.claude/settings.local.json`, and
+  `~/.claude.json`. Honor `CLAUDE_CONFIG_DIR`. The macOS managed preferences
+  domain isn't read (see [Limits](#limits)).
+- **Precedence:** managed > `--settings` > local > project > user. Inside
+  managed, sources rank remote > MDM > files > HKCU, and by default the first
+  one with a policy key wins (`managedSourcesBehavior`). Each key's allowed
+  files come from the settings index, so a managed-only key in a project file
+  is listed as not in effect. Two quirks that matter: `defaultMode` of `auto`
+  or `bypassPermissions` is ignored from project and local files, and project
+  `allow` rules, `additionalDirectories`, `extraKnownMarketplaces` and most
+  `env` values only count once the folder is trusted. Deny and ask apply right
+  away. Trust is `projects["<path>"].hasTrustDialogAccepted` in
+  `~/.claude.json`, keyed on the git repo root. A missing or odd value is
+  "unknown".
 - **MCP:** local and user scope in `~/.claude.json`, project `.mcp.json`,
   plugin `.mcp.json` or `plugin.json`, managed `managed-mcp.json`, and the
   `mcpServers` frontmatter in agent and subagent files (`.claude/agents/`,
@@ -896,6 +903,17 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   them.
 - **Other `--settings` / `-c` overrides** passed per run, for the same
   reason.
+- **macOS MDM policy for Claude.** Claude's docs name the
+  `com.anthropic.claudecode` managed preferences domain, but neither they nor
+  Apple's docs say where it sits on disk, so jarx doesn't check it. Managed
+  settings files and the Windows registry are still read.
+- **Server-managed Claude settings and `policyHelper`.** Remote policy lives
+  on Anthropic's servers or a gateway, and a policy helper is a program jarx
+  won't run. When a helper is set, jarx says the effective managed settings
+  are unknown.
+- **WSL inheriting Windows policy.** With `wslInheritsWindowsSettings`,
+  Claude in WSL also reads the Windows registry and managed settings file.
+  jarx treats WSL as plain Linux and doesn't follow that.
 - **What a token is allowed to do** on the server side (layer 2 of the
   capability view), which is usually unknown.
 - **Undocumented formats** can change with any agent release. jarx degrades
@@ -932,7 +950,7 @@ Official docs, read 2026-11-21. Codex pages now redirect to
 learn.chatgpt.com.
 
 - Claude Code: https://code.claude.com/docs/en/settings,
-  /managed-settings, /mcp (including `#credential-variables-that-read-as-empty`),
+  /settings-reference (read 2026-11-22), /managed-settings, /mcp (including `#credential-variables-that-read-as-empty`),
   /managed-mcp, /permissions (including `#read-only-commands`),
   /permission-modes, /sandboxing, /hooks, /skills, /sub-agents, /memory,
   /plugins-reference, /claude-directory, /authentication, /sessions,
