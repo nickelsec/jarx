@@ -274,7 +274,8 @@ Stdlib plus these, and depguard enforces the list:
 - `modernc.org/sqlite`
 - `golang.org/x/sys` (Windows job objects)
 
-`go.mod` targets Go 1.25 for `http.CrossOriginProtection` and `os.Root`.
+`go.mod` targets the latest stable Go (1.27.4 right now). jarx needs at least
+1.25 for `http.CrossOriginProtection` and `os.Root`.
 
 ## CI
 

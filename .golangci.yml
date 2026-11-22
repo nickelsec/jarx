@@ -1,0 +1,90 @@
+version: "2"
+
+linters:
+  default: all
+  disable:
+    # Deprecated; default: all still turns them on. Replaced by the _v5/_v2
+    # versions handled below.
+    - exhaustruct
+    - wsl
+    - gomodguard
+    # depguard holds the approved module list, one guard is enough.
+    - gomodguard_v2
+    # Zero-value structs are idiomatic Go. Forcing every field makes code noisy.
+    - exhaustruct_v5
+    # Short names like r, w, tt are fine in small scopes.
+    - varnamelen
+    # Blank-line style. gofmt already decides formatting.
+    - wsl_v5
+    - nlreturn
+    # The adapter design returns interfaces on purpose.
+    - ireturn
+    # Tests need unexported access, so they live in the same package.
+    - testpackage
+    # Many tests will use t.Setenv or shared fixture dirs, which can't run in
+    # parallel. Parallel is opt-in, not required.
+    - paralleltest
+    - tparallel
+    # `if err := f(); err != nil` is idiomatic.
+    - noinlineerr
+    # Errors with fmt.Errorf("...: %w") and context are fine; not everything
+    # needs a sentinel.
+    - err113
+    # TODO comments are allowed; they get tracked in issues, not by lint.
+    - godox
+    # Long URLs in comments and doc links. gofmt handles code layout.
+    - lll
+
+  settings:
+    depguard:
+      rules:
+        # Only stdlib, our own module and the deps approved in docs/prd.md.
+        # A new import fails lint until it's approved and added here.
+        approved:
+          list-mode: strict
+          files:
+            - $all
+          allow:
+            - $gostd
+            - github.com/nickelsec/jarx
+            - github.com/BurntSushi/toml
+            - github.com/zalando/go-keyring
+            - github.com/klauspost/compress
+            - modernc.org/sqlite
+            - golang.org/x/sys
+
+    forbidigo:
+      analyze-types: true
+      # Messages start with "network:" or "platform:" so the path exclusions
+      # below can exempt exactly one group per choke point package.
+      forbid:
+        # Only internal/netguard may build HTTP clients, transports or dialers.
+        - pattern: ^http\.(Get|Post|Head|PostForm|DefaultClient|DefaultTransport|Client|Transport)$
+          pkg: ^net/http$
+          msg: "network: only internal/netguard may make HTTP clients or calls"
+        - pattern: ^net\.(Dial|DialTimeout|DialTCP|DialUDP|DialIP|DialUnix|Dialer)$
+          pkg: ^net$
+          msg: "network: only internal/netguard may dial"
+        # Only internal/platform may read the real env and user dirs, so tests
+        # and --home never touch the real machine.
+        - pattern: ^os\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir|UserConfigDir|UserCacheDir)$
+          pkg: ^os$
+          msg: "platform: read env and user dirs through internal/platform"
+        - pattern: ^syscall\.(Getenv|Environ)$
+          pkg: ^syscall$
+          msg: "platform: read env through internal/platform"
+
+  exclusions:
+    rules:
+      # Table tests repeat expected values by design.
+      - path: _test\.go$
+        linters:
+          - goconst
+      - path: ^internal/netguard/
+        linters:
+          - forbidigo
+        text: "network:"
+      - path: ^internal/platform/
+        linters:
+          - forbidigo
+        text: "platform:"
