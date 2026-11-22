@@ -1,3 +1,6 @@
 # go build output
 /jarx
 /jarx.exe
+
+# jarx state written by --home demo and test runs
+testdata/**/.jarx-state/

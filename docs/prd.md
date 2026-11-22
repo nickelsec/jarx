@@ -699,7 +699,9 @@ Flags:
 `--home <dir>` points `jarx scan` and `jarx ui` at a fake home. Everything
 jarx would read from the real machine comes from inside `<dir>` instead:
 agent config dirs, project records, history, cred locations, and jarx's own
-state (snapshots, cursor, cache), so demo runs never mix with real ones. With
+state (snapshots, cursor, cache), so demo runs never mix with real ones.
+jarx's state goes in `<dir>/.jarx-state/`, which the repo's `.gitignore`
+ignores under `testdata/`, so demo runs never dirty the repo. With
 `--home`, jarx doesn't read managed policy dirs, the Windows registry, macOS
 plists, the real env or the real PATH. Env vars for the env var channel come
 from `<dir>/.jarx-env` instead.
@@ -762,7 +764,8 @@ With `--no-probe` and no `--llm`, jarx makes zero network calls.
 
 ## What jarx writes to disk
 
-Everything lives under `os.UserConfigDir()/jarx/`:
+Everything lives under `os.UserConfigDir()/jarx/` (or `<home>/.jarx-state/`
+with `--home`):
 
 - `config` with LLM base URL, model, key env var name (not the key) and extra
   repo paths
@@ -877,6 +880,9 @@ Things jarx can't see, stated plainly in the README and the dashboard:
 - Cross-artifact LLM review.
 - Release binaries.
 - More agents.
+- Agent files shipped inside dependencies. npm packages can ship their own
+  `CLAUDE.md` or `AGENTS.md` inside `node_modules`, which is a supply chain
+  angle worth checking.
 
 ## Open items to check during implementation
 

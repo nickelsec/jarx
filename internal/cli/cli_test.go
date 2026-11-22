@@ -2,9 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"testing"
+
+	"github.com/nickelsec/jarx/internal/fsys"
+	"github.com/nickelsec/jarx/internal/platform"
 )
 
 // result is what one Run call produced.
@@ -116,17 +124,101 @@ func TestUnknownFlagIsAUsageError(t *testing.T) {
 	}
 }
 
-func TestScanRuns(t *testing.T) {
-	got := run("scan")
+func fakeHome(t *testing.T, jarxEnv string) string {
+	t.Helper()
+	home := t.TempDir()
+	if jarxEnv != "" {
+		if err := os.WriteFile(filepath.Join(home, ".jarx-env"), []byte(jarxEnv), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return home
+}
+
+func TestScanWithHomePrintsWhatPlatformResolved(t *testing.T) {
+	home := fakeHome(t, "A=1\nB=2\n")
+
+	got := run("scan", "--home", home)
 
 	if got.code != 0 {
-		t.Fatalf("exit code = %d, want 0", got.code)
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
 	}
-	if got.stdout != "jarx scan: nothing to scan yet\n" {
-		t.Errorf("stdout = %q, want the placeholder line", got.stdout)
+	for _, want := range []string{
+		"environment (fake home)",
+		home,
+		runtime.GOOS,
+		"2 vars from .jarx-env",
+		"0 entries",
+		filepath.Join(home, ".jarx-state"),
+		"skipped (--home)",
+	} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
+		}
 	}
 	if got.stderr != "" {
 		t.Errorf("stderr = %q, want empty", got.stderr)
+	}
+}
+
+func TestScanNeverPrintsEnvNamesOrValues(t *testing.T) {
+	home := fakeHome(t, "DEMO_TOKEN=sk-demo-0000-not-real\n")
+
+	got := run("scan", "--home", home)
+
+	for _, leak := range []string{"sk-demo-0000-not-real", "DEMO_TOKEN"} {
+		if strings.Contains(got.stdout+got.stderr, leak) {
+			t.Errorf("output contains %q:\n%s%s", leak, got.stdout, got.stderr)
+		}
+	}
+}
+
+func TestScanWithAMissingHomeIsARuntimeError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope")
+
+	got := run("scan", "--home", missing)
+
+	if got.code != 1 {
+		t.Fatalf("exit code = %d, want 1", got.code)
+	}
+	if !strings.Contains(got.stderr, "does not exist") {
+		t.Errorf("stderr = %q, want a does not exist error", got.stderr)
+	}
+	if got.stdout != "" {
+		t.Errorf("stdout = %q, want empty", got.stdout)
+	}
+}
+
+func TestScanHomeNeedsADir(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no value":    {"scan", "--home"},
+		"empty value": {"scan", "--home="},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := run(args...)
+
+			if got.code != 2 {
+				t.Fatalf("exit code = %d, want 2", got.code)
+			}
+			if !strings.Contains(got.stderr, "usage: jarx scan") {
+				t.Errorf("stderr = %q, want scan usage", got.stderr)
+			}
+		})
+	}
+}
+
+func TestScanWithoutHomeShowsThisMachine(t *testing.T) {
+	// Prints counts and paths only. No config file is read.
+	got := run("scan")
+
+	if got.code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
+	}
+	if !strings.Contains(got.stdout, "environment (this machine)") {
+		t.Errorf("stdout = %q, want the this machine heading", got.stdout)
+	}
+	if strings.Contains(got.stdout, "skipped (--home)") {
+		t.Errorf("stdout = %q, system dirs should not be skipped", got.stdout)
 	}
 }
 
@@ -211,5 +303,157 @@ func TestVersionFrom(t *testing.T) {
 				t.Errorf("versionFrom() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// line returns the first stdout line whose label (the first word after the
+// indent) is label, or "".
+func line(stdout, label string) string {
+	for l := range strings.SplitSeq(stdout, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), label+" ") {
+			return l
+		}
+	}
+	return ""
+}
+
+func TestPathStatus(t *testing.T) {
+	env, err := platform.FromHome(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := fsys.New(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	dir := filepath.Join(env.Home, "dir")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(env.Home, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]string{
+		dir:                                "exists",
+		filepath.Join(env.Home, "nope"):    "missing",
+		file:                               "not a directory",
+		filepath.Join(t.TempDir(), "else"): "can't check",
+	}
+	for path, want := range tests {
+		if got := pathStatus(f, path); got != want {
+			t.Errorf("pathStatus(%s) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestScanShowsTheHomeExists(t *testing.T) {
+	got := run("scan", "--home", fakeHome(t, ""))
+
+	if l := line(got.stdout, "home"); !strings.HasSuffix(l, "(exists)") {
+		t.Errorf("home line = %q, want it to end with (exists)", l)
+	}
+}
+
+func TestScanShowsTheStateDirNotCreatedAndLeavesItThat(t *testing.T) {
+	home := fakeHome(t, "")
+
+	got := run("scan", "--home", home)
+
+	if l := line(got.stdout, "state dir"); !strings.HasSuffix(l, "(not created yet)") {
+		t.Errorf("state dir line = %q, want it to end with (not created yet)", l)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".jarx-state")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("scan created the state dir (stat err %v), want it to write nothing", err)
+	}
+}
+
+func TestScanShowsTheStateDirWhenItExists(t *testing.T) {
+	home := fakeHome(t, "")
+	if err := os.Mkdir(filepath.Join(home, ".jarx-state"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	got := run("scan", "--home", home)
+
+	if l := line(got.stdout, "state dir"); !strings.HasSuffix(l, "(exists)") {
+		t.Errorf("state dir line = %q, want it to end with (exists)", l)
+	}
+}
+
+func TestScanSaysWhenThereIsNoJarxEnv(t *testing.T) {
+	got := run("scan", "--home", fakeHome(t, ""))
+
+	if l := line(got.stdout, "env"); !strings.Contains(l, "no .jarx-env, empty env") {
+		t.Errorf("env line = %q, want it to say there's no .jarx-env", l)
+	}
+}
+
+func TestScanCountsArePlural(t *testing.T) {
+	sep := string(os.PathListSeparator)
+	tests := []struct {
+		jarxEnv  string
+		wantEnv  string
+		wantPath string
+	}{
+		{"PATH=/a\n", "1 var from .jarx-env", "1 entry"},
+		{"PATH=/a" + sep + "/b\nX=1\n", "2 vars from .jarx-env", "2 entries"},
+	}
+	for _, tt := range tests {
+		got := run("scan", "--home", fakeHome(t, tt.jarxEnv))
+
+		if l := line(got.stdout, "env"); !strings.HasSuffix(l, tt.wantEnv) {
+			t.Errorf("env line = %q, want it to end with %q", l, tt.wantEnv)
+		}
+		if l := line(got.stdout, "PATH"); !strings.HasSuffix(l, tt.wantPath) {
+			t.Errorf("PATH line = %q, want it to end with %q", l, tt.wantPath)
+		}
+	}
+}
+
+func TestScanShowsEachSystemDirWithAStatus(t *testing.T) {
+	// The real machine, paths and statuses only.
+	got := run("scan")
+
+	l := line(got.stdout, "system dirs")
+	if l == "" || strings.Contains(l, "skipped") {
+		t.Fatalf("system dirs line = %q, want real system dirs", l)
+	}
+	if !strings.HasSuffix(l, ")") {
+		t.Errorf("system dirs line = %q, want a (status) at the end", l)
+	}
+}
+
+func TestScanDemoHome(t *testing.T) {
+	demo := filepath.Join("..", "..", "testdata", "demo")
+	data, err := os.ReadFile(filepath.Join(demo, ".jarx-env")) //nolint:gosec // G304: fixed repo fixture path
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := run("scan", "--home", demo)
+
+	if got.code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
+	}
+	for _, want := range []string{"environment (fake home)", "3 vars from .jarx-env", "skipped (--home)"} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
+		}
+	}
+	// No name or value from the demo env may show up.
+	for l := range strings.SplitSeq(string(data), "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		name, value, _ := strings.Cut(l, "=")
+		for _, leak := range []string{name, value} {
+			if strings.Contains(got.stdout+got.stderr, leak) {
+				t.Errorf("output contains %q from the demo .jarx-env:\n%s", leak, got.stdout)
+			}
+		}
 	}
 }

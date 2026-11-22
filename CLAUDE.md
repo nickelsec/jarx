@@ -25,8 +25,11 @@ credentials. Single Go binary with a CLI and a local dashboard.
 
 ## How we work
 - Read docs/prd.md and docs/design.md before starting any feature.
-- Build in the phases from docs/design.md. Each item in docs/progress.md is
-  one small PR. Tick it in docs/progress.md in the same PR as the work.
+- Build in the phases from docs/design.md. One branch and one PR per phase,
+  opened as a draft early so the windows and mac checks run on every push.
+  One commit per item in docs/progress.md.
+- Tick the item in docs/progress.md in the same commit as the work. A commit
+  can't hold its own hash, so the next commit adds it next to the tick.
 - Before starting phase 7 (the dashboard), stop and ask me about the UI. I
   want to give input on how it looks before any `ui` code gets written.
 - Keep the folder layout from the package table in docs/design.md, so things

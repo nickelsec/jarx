@@ -1,0 +1,5 @@
+# Fake env for the jarx demo home. Every value here is made up.
+# jarx reads this instead of the real env when run with --home testdata/demo.
+ANTHROPIC_API_KEY=sk-ant-demo-0000-not-a-real-key
+GITHUB_TOKEN=demo-not-a-real-token
+EDITOR=vim

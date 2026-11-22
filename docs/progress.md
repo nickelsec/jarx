@@ -1,20 +1,24 @@
 # jarx progress
 
 The checklist for the build phases in [design.md](design.md#build-phases).
-Each item is one PR. Tick it in the same PR as the work, and add the PR number.
+Each phase is one PR, and each item is one commit in it. Tick the item in the
+same commit as the work. The next commit adds that commit's short hash.
 
 ## Phase 1: Foundation
 
 - [x] skeleton and CI: `go.mod`, `.gitattributes`, `cmd/jarx`, workflow,
-  golangci config with forbidigo and depguard (#2)
+  golangci config with forbidigo and depguard (84504b1)
 - [x] build phases, progress checklist, CLI trimmed to scan, ui and setup
-  (#3)
+  (bdc8f63)
 - [x] CLI skeleton: move to `internal/cli`, `--version` instead of the
-  `version` subcommand, `scan` command
-- [ ] `platform`: injected `Env`, OS paths, managed dirs, `--home`
-- [ ] `fsys` (read-only view, size caps, skip list) and `jarxdir` (`os.Root`
-  on the jarx config dir)
-- [ ] `scan` prints what jarx resolved, first bits of `testdata/demo/`
+  `version` subcommand, `scan` command (a0613b1)
+- [x] `platform`: injected `Env`, OS facts and system roots, `--home`, `scan`
+  prints what platform resolved, `.jarx-state` ignored under testdata (200c17d)
+- [x] `fsys` (read-only view, size caps, skip list) and `jarxdir` (`os.Root`
+  on the jarx config dir), with lint rules that make them the only reader and
+  writer (865ab36)
+- [x] `scan` adds jarx's state dir and exists checks, first bits of
+  `testdata/demo/` (b27607b)
 
 **Run it:** `jarx scan --home testdata/demo` prints the resolved paths and
 whether each exists.
@@ -23,7 +27,8 @@ whether each exists.
 
 - [ ] `redact`: `Text` type, scrubber, `REDACTED:<type>`, fingerprint, start
   of the no-leak suite
-- [ ] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry
+- [ ] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry.
+  Turn `fsys` skips into "skipped, too large" info findings
 - [ ] `netguard`: the one HTTP client, dial-time IP block, no redirects, no
   proxy
 - [ ] `discover` and `report`: project records from both adapters, hardened
@@ -36,7 +41,9 @@ stale ones marked.
 
 ## Phase 3: Instruction files and settings
 
-- [ ] Claude adapter: settings, precedence, trust
+- [ ] Claude adapter: settings, precedence, trust. Includes the Windows
+  registry and macOS plist reads in `platform` (first use of `golang.org/x/sys`)
+  and checking the managed paths against the official docs
 - [ ] Claude adapter: instruction files, `@` imports, memory, output styles
 - [ ] Claude adapter: skills, commands, subagents, plugins, hooks
 - [ ] Codex adapter: config, profiles, precedence, trust, requirements
