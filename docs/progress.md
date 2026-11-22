@@ -28,8 +28,10 @@ whether each exists.
 - [x] `redact`: `Text` type, scrubber, `REDACTED:<type>`, fingerprint, start
   of the no-leak suite. Also a minimal `report` as the only output writer,
   with lint rules banning output everywhere else, and `cli` moved onto it
-- [ ] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry.
-  Turn `fsys` skips into "skipped, too large" info findings
+  (d0ca3da)
+- [x] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry.
+  Turn `fsys` skips into "skipped, too large" info findings. Also `Setting[T]`
+  for values set in more than one scope, and the no-raw-string model test
 - [ ] `netguard`: the one HTTP client, dial-time IP block, no redirects, no
   proxy
 - [ ] `discover` and `report`: project records from both adapters, hardened
