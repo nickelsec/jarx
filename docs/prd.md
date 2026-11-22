@@ -1,6 +1,6 @@
 # jarx PRD
 
-Status: draft v1. Last updated 2026-11-21.
+Status: draft v1. Last updated 2026-11-22.
 
 ## What jarx is
 
@@ -174,7 +174,7 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
 - From the agents' own records: the `projects` map in `~/.claude.json`, folder
   names under `~/.claude/projects/`, Codex `[projects]` trust entries and
   session cwds.
-- Plus paths the user adds with `jarx repos add` or the dashboard.
+- Plus paths the user adds with `jarx setup repo add` or the dashboard.
 - jarx doesn't crawl the whole disk.
 - A recorded project that no longer exists on disk shows as **stale**, not as
   an error.
@@ -249,6 +249,10 @@ A server is probed only if the agent would start it:
   documented list, with `:-default` ignored on them. `ANTHROPIC_BASE_URL`
   still expands.
 - No redirects. A redirect shows as **"blocked"**.
+- Probes never go through a proxy. They ignore `HTTPS_PROXY` and friends and
+  connect directly, because through a proxy jarx can't check the address it's
+  really talking to. Behind a corporate proxy, remote servers show as
+  **"unreachable"**.
 - Link-local addresses and cloud metadata endpoints are blocked, checked at
   dial time after DNS so rebinding can't get around it. Blocked: 169.254.0.0/16,
   fe80::/10, `169.254.169.254`, `fd00:ec2::254`, `metadata.google.internal`
@@ -430,8 +434,7 @@ Rules:
 - Snapshots keep only counts and hashes from history, never excerpts.
 - Scans are incremental. A per-file cursor stores path, size, mtime, byte
   offset and a hash of the first 4 KB. If the file shrank or the head hash
-  changed, it gets rescanned from the start. `--full-history` forces a full
-  rescan.
+  changed, it gets rescanned from the start.
 - Earlier leak findings carry forward (masked) until the file is gone. Mode
   counts are running tallies per session id.
 - SQLite files are opened in place with `mode=ro`, `PRAGMA query_only = 1`
@@ -618,6 +621,7 @@ A dashboard panel and a CLI section, per project and per agent:
 - **Auth source:** login file, `apiKeyHelper`, env var name, keychain (named
   only, never read), Codex `cli_auth_credentials_store`.
 - **Proxies:** proxy env vars and settings, Codex `features.network_proxy`.
+  When a proxy is set, the panel says "proxy set, probes went direct".
 - **TLS:** custom CA settings and anything that turns TLS checks off.
 - **MCP hosts:** every remote MCP host with its status.
 - **Network domains:** sandbox `allowedDomains`/`deniedDomains`, `WebFetch`
@@ -660,27 +664,35 @@ Results are cached by content hash, so an unchanged artifact isn't sent twice.
 ## Snapshots and diff
 
 - Every `jarx scan` saves a masked JSON snapshot. jarx keeps the last 20.
-- The diff is against the previous snapshot and covers: projects, servers,
-  tools, prompts, resources, hooks, skills, instruction files, permission
-  changes, verdict changes and tool description hash changes.
-- `jarx diff [snapshot]` compares against an older one.
+- `jarx scan` always shows the diff against the previous snapshot. It covers:
+  projects, servers, tools, prompts, resources, hooks, skills, instruction
+  files, permission changes, verdict changes and tool description hash
+  changes.
+- To compare against an older snapshot, use the snapshot picker in the
+  dashboard.
 - Named baselines are for later.
 
 ## CLI
 
+The CLI stays small: three commands and a version flag.
+
 | Command | What it does |
 |---|---|
-| `jarx scan [path...]` | full scan, prints a summary grouped by severity plus what changed |
-| `jarx scan --no-probe` | skip MCP probing |
-| `jarx scan --no-history` | skip session history |
-| `jarx scan --full-history` | rescan history from the start |
-| `jarx scan --llm` | run the LLM review after showing the preview |
+| `jarx scan [path...]` | full scan, prints a summary grouped by severity plus what changed since the last scan. Extra paths are scanned for this run only. |
 | `jarx ui` | start the dashboard |
-| `jarx diff [snapshot]` | diff against the previous or a named snapshot |
+| `jarx setup` | show jarx's own settings: extra repo paths, and whether the LLM is set up |
+| `jarx setup repo add\|rm <path>` | add or remove an extra project path |
 | `jarx setup llm` | set base URL, model, and key or env var name |
-| `jarx repos add\|rm\|ls` | manage extra project paths |
-| `jarx version` | print version and advisory data date |
-| `jarx scan --home <dir>` / `jarx ui --home <dir>` | treat `<dir>` as the home dir instead of the real one (see [Demo home](#demo-home)) |
+| `jarx --version` | print version and advisory data date |
+
+Flags:
+
+| Flag | On | What it does |
+|---|---|---|
+| `--home <dir>` | `scan`, `ui` | treat `<dir>` as the home dir instead of the real one (see [Demo home](#demo-home)) |
+| `--no-probe` | `scan` | skip MCP probing |
+| `--no-history` | `scan` | skip session history |
+| `--llm` | `scan` | run the LLM review after showing the preview |
 
 ### Demo home
 
@@ -741,6 +753,8 @@ Rules for every outbound call jarx makes itself:
 - Plain `http://` remote MCP URLs are never called.
 - No redirects.
 - Link-local and cloud metadata addresses are blocked at dial time.
+- No proxy. Probe traffic connects directly, so the dial-time check sees the
+  real address.
 - There's no telemetry, update check, advisory download, vendor list download
   or crash reporting.
 
@@ -763,7 +777,7 @@ jarx writes nothing anywhere else.
 - An embedded, hand-curated list of known vulnerabilities for Claude Code and
   Codex, built from the official GitHub security advisories for both repos.
 - Matching is by package name plus version range.
-- Only as fresh as the jarx build. The dashboard and `jarx version` show
+- Only as fresh as the jarx build. The dashboard and `jarx --version` show
   "advisory data as of <date>".
 
 ## Architecture
@@ -806,6 +820,7 @@ Approved for v1:
 - `github.com/zalando/go-keyring`: jarx's own LLM key
 - `github.com/klauspost/compress`: zstd Codex session files
 - `modernc.org/sqlite`: Codex sqlite files, pure Go
+- `golang.org/x/sys`: Windows job objects for probe process trees
 
 Everything else is stdlib (`net/http`, `html/template`, `embed`, `log/slog`,
 `os/exec`). There's no CLI or web framework, and the MCP client is our own.
