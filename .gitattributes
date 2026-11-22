@@ -1,0 +1,12 @@
+# LF everywhere so fixture bytes and hashes match on Windows and Linux.
+* text=auto eol=lf
+
+# Binary fixtures and images: never touch line endings.
+*.sqlite binary
+*.zst binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
