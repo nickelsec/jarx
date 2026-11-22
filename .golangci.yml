@@ -65,6 +65,16 @@ linters:
         - pattern: ^net\.(Dial|DialTimeout|DialTCP|DialUDP|DialIP|DialUnix|Dialer)$
           pkg: ^net$
           msg: "network: only internal/netguard may dial"
+        - pattern: ^tls\.(Dial|DialWithDialer|Dialer|Client)$
+          pkg: ^crypto/tls$
+          msg: "network: only internal/netguard may open TLS connections"
+        # A DNS lookup is a network call too.
+        - pattern: ^net\.(Lookup[A-Za-z]*|Resolver|DefaultResolver)$
+          pkg: ^net$
+          msg: "network: only internal/netguard may do DNS lookups"
+        - pattern: ^(smtp|rpc|jsonrpc)\..*$
+          pkg: ^net/(smtp|rpc|rpc/jsonrpc)$
+          msg: "network: only internal/netguard may make network calls"
         # Only internal/platform may read the real env and user dirs, so tests
         # and --home never touch the real machine.
         - pattern: ^os\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir|UserConfigDir|UserCacheDir)$

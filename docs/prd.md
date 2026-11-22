@@ -214,7 +214,9 @@ A server is probed only if the agent would start it:
 
 ### What gets skipped
 
-- Remote servers on plain `http://` URLs.
+- Remote servers on plain `http://` URLs. Plain `http://` to a loopback
+  address (`127.0.0.0/8`, `::1`, or a name that resolves to one) is allowed,
+  since that traffic never leaves the machine.
 - OAuth servers (`auth = oauth|chatgpt`, or Claude servers set up for OAuth).
 - Servers that use `headersHelper` or `http_headers_helper`, since running the
   helper means running a command. These show as **"requires auth"**.
@@ -276,7 +278,7 @@ Every server ends up with exactly one status:
 | failed to start | the process exited or the command wasn't found |
 | timed out | no answer within 15s |
 | not started | the agent wouldn't start it (disabled, not approved, untrusted project, `--no-probe`) |
-| insecure transport | plain `http://` remote URL, skipped |
+| insecure transport | plain `http://` URL that isn't loopback, skipped |
 | requires auth | OAuth, a headers helper, or a `401`/`403` with no creds sent |
 | credential rejected | a `401`/`403` after sending the configured static creds |
 | blocked | a redirect, or a link-local or metadata address |
@@ -752,11 +754,16 @@ This is the full list. Anything not here is a bug.
 
 Rules for every outbound call jarx makes itself:
 
-- Plain `http://` remote MCP URLs are never called.
+- Plain `http://` is only ever used for loopback. Every other `http://` URL
+  is never called. The loopback check runs on every connection, after DNS, so
+  a name that later resolves somewhere else is still refused.
 - No redirects.
 - Link-local and cloud metadata addresses are blocked at dial time.
 - No proxy. Probe traffic connects directly, so the dial-time check sees the
   real address.
+- A hostile server can't stall jarx or fill its memory: a response body is
+  capped at 10 MiB, headers at 64 KiB, and a whole request at 20s. jarx never
+  asks for compressed responses, so nothing inflates behind the cap.
 - There's no telemetry, update check, advisory download, vendor list download
   or crash reporting.
 

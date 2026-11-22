@@ -32,8 +32,10 @@ whether each exists.
 - [x] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry.
   Turn `fsys` skips into "skipped, too large" info findings. Also `Setting[T]`
   for values set in more than one scope, and the no-raw-string model test
-- [ ] `netguard`: the one HTTP client, dial-time IP block, no redirects, no
-  proxy
+  (f2508f2)
+- [x] `netguard`: the one HTTP client, dial-time IP block, no redirects, no
+  proxy. Also loopback-only plain http checked per connection, response size
+  and time caps, and lint bans on TLS, DNS, smtp and rpc outside netguard
 - [ ] `discover` and `report`: project records from both adapters, hardened
   git walk, stale detection, the project listing in `report`
 - [ ] `jarx setup` and `setup repo add|rm`
