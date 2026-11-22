@@ -90,6 +90,22 @@ linters:
         - pattern: ^ioutil\..*$
           pkg: ^io/ioutil$
           msg: "io: io/ioutil is deprecated, and its file calls skip fsys and jarxdir"
+        # Only internal/report writes output, and it only takes redact.Text, so
+        # a raw string can't reach the terminal or a log.
+        - pattern: ^fmt\.(Print|Printf|Println|Fprint|Fprintf|Fprintln)$
+          pkg: ^fmt$
+          msg: "output: write output through internal/report"
+        - pattern: ^os\.(Stdout|Stderr)$
+          pkg: ^os$
+          msg: "output: only cmd/jarx may use os.Stdout and os.Stderr, to hand them to report"
+        - pattern: ^(print|println)$
+          msg: "output: write output through internal/report"
+        - pattern: ^log\..*$
+          pkg: ^log$
+          msg: "output: logging goes through internal/report"
+        - pattern: ^slog\..*$
+          pkg: ^log/slog$
+          msg: "output: logging goes through internal/report"
 
   exclusions:
     rules:
@@ -113,6 +129,14 @@ linters:
         linters:
           - forbidigo
         text: "write:"
+      - path: ^internal/report/
+        linters:
+          - forbidigo
+        text: "output:"
+      - path: ^cmd/jarx/
+        linters:
+          - forbidigo
+        text: "output: only cmd/jarx may use os.Stdout"
       # Tests build fixtures in t.TempDir() and check what got written.
       - path: _test\.go$
         linters:

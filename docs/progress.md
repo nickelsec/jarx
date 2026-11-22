@@ -25,14 +25,15 @@ whether each exists.
 
 ## Phase 2: Core engine
 
-- [ ] `redact`: `Text` type, scrubber, `REDACTED:<type>`, fingerprint, start
-  of the no-leak suite
+- [x] `redact`: `Text` type, scrubber, `REDACTED:<type>`, fingerprint, start
+  of the no-leak suite. Also a minimal `report` as the only output writer,
+  with lint rules banning output everywhere else, and `cli` moved onto it
 - [ ] `model` and `finding`: inventory, `Origin`, `Unknown`, rule registry.
   Turn `fsys` skips into "skipped, too large" info findings
 - [ ] `netguard`: the one HTTP client, dial-time IP block, no redirects, no
   proxy
 - [ ] `discover` and `report`: project records from both adapters, hardened
-  git walk, stale detection, terminal output
+  git walk, stale detection, the project listing in `report`
 - [ ] `jarx setup` and `setup repo add|rm`
 - [ ] offline CI job
 

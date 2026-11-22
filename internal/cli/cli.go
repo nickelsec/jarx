@@ -1,4 +1,5 @@
-// Package cli parses jarx's command line and runs the commands.
+// Package cli parses jarx's command line and runs the commands. All output
+// goes through report, and every value it prints goes through redact first.
 package cli
 
 import (
@@ -7,6 +8,9 @@ import (
 	"fmt"
 	"io"
 	"runtime/debug"
+
+	"github.com/nickelsec/jarx/internal/redact"
+	"github.com/nickelsec/jarx/internal/report"
 )
 
 const (
@@ -25,32 +29,51 @@ flags:
   -h, --help  show this help
 `
 
+// helpFunc prints a command's help to the given stream.
+type helpFunc func(*report.Stream)
+
+func mainHelp(s *report.Stream) { s.Printf(usage) }
+
 // Run runs jarx with args (without the program name) and returns the exit
 // code. ldflagsVersion is the version set at build time, or "".
 func Run(args []string, stdout, stderr io.Writer, ldflagsVersion string) int {
+	// No patterns until the catalog lands in phase 3, and no fingerprint key:
+	// this scrubber only masks error text and wraps values as Text. New can
+	// only fail on bad patterns, and there are none.
+	plain, err := redact.New(nil, nil)
+	if err != nil {
+		panic("redact.New with no patterns failed: " + err.Error())
+	}
+	p := report.New(stdout, stderr, plain)
+
 	fs := newFlagSet("jarx")
 	showVersion := fs.Bool("version", false, "")
-
-	if code, ok := parse(fs, args, usage, stdout, stderr); !ok {
+	if code, ok := parse(p, plain, fs, args, mainHelp); !ok {
 		return code
 	}
 	if *showVersion {
 		info, _ := debug.ReadBuildInfo() // nil when not available
-		_, _ = fmt.Fprintf(stdout, "jarx %s\n", versionFrom(ldflagsVersion, info))
+		p.Out.Printf("jarx %s\n", scrubbed(plain, versionFrom(ldflagsVersion, info)))
 		return exitOK
 	}
 
 	rest := fs.Args()
 	if len(rest) == 0 {
-		_, _ = fmt.Fprint(stderr, usage)
+		mainHelp(p.Err)
 		return exitUsage
 	}
 	switch rest[0] {
 	case "scan":
-		return runScan(rest[1:], stdout, stderr)
+		return runScan(p, plain, rest[1:])
 	default:
-		return usageError(stderr, fmt.Sprintf("unknown command %q", rest[0]), usage)
+		return usageError(p, mainHelp, scrubbed(plain, fmt.Sprintf("unknown command %q", rest[0])))
 	}
+}
+
+// scrubbed runs raw through s and drops the finds.
+func scrubbed(s *redact.Scrubber, raw string) redact.Text {
+	t, _ := s.Scrub(raw)
+	return t
 }
 
 // newFlagSet returns a flag set that reports nothing itself, so parse decides
@@ -65,21 +88,22 @@ func newFlagSet(name string) *flag.FlagSet {
 // parse parses args into fs. Help goes to stdout with exit 0, and a bad flag
 // goes to stderr with exit 2. It returns the exit code and whether the caller
 // should keep going; when that's false, the caller returns the code.
-func parse(fs *flag.FlagSet, args []string, help string, stdout, stderr io.Writer) (int, bool) {
+func parse(p *report.Printer, s *redact.Scrubber, fs *flag.FlagSet, args []string, help helpFunc) (int, bool) {
 	err := fs.Parse(args)
 	switch {
 	case err == nil:
 		return exitOK, true
 	case errors.Is(err, flag.ErrHelp):
-		_, _ = fmt.Fprint(stdout, help)
+		help(p.Out)
 		return exitOK, false
 	default:
-		return usageError(stderr, err.Error(), help), false
+		return usageError(p, help, scrubbed(s, err.Error())), false
 	}
 }
 
-func usageError(stderr io.Writer, msg, help string) int {
-	_, _ = fmt.Fprintf(stderr, "jarx: %s\n\n%s", msg, help)
+func usageError(p *report.Printer, help helpFunc, msg redact.Text) int {
+	p.Err.Printf("jarx: %s\n\n", msg)
+	help(p.Err)
 	return exitUsage
 }
 

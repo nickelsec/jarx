@@ -4,12 +4,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"io/fs"
 	"path/filepath"
+	"strconv"
 
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/platform"
+	"github.com/nickelsec/jarx/internal/redact"
+	"github.com/nickelsec/jarx/internal/report"
 )
 
 const scanUsage = `usage: jarx scan [--home <dir>]
@@ -21,19 +23,21 @@ flags:
   -h, --help    show this help
 `
 
-func runScan(args []string, stdout, stderr io.Writer) int {
+func scanHelp(s *report.Stream) { s.Printf(scanUsage) }
+
+func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	fs := newFlagSet("scan")
 	home := fs.String("home", "", "")
-	if code, ok := parse(fs, args, scanUsage, stdout, stderr); !ok {
+	if code, ok := parse(p, plain, fs, args, scanHelp); !ok {
 		return code
 	}
 	if fs.NArg() > 0 {
-		return usageError(stderr, fmt.Sprintf("unexpected argument %q", fs.Arg(0)), scanUsage)
+		return usageError(p, scanHelp, scrubbed(plain, fmt.Sprintf("unexpected argument %q", fs.Arg(0))))
 	}
 	homeSet := false
 	fs.Visit(func(f *flag.Flag) { homeSet = homeSet || f.Name == "home" })
 	if homeSet && *home == "" {
-		return usageError(stderr, "--home needs a directory", scanUsage)
+		return usageError(p, scanHelp, scrubbed(plain, "--home needs a directory"))
 	}
 
 	var env platform.Env
@@ -44,50 +48,58 @@ func runScan(args []string, stdout, stderr io.Writer) int {
 		env, err = platform.Real()
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "jarx: %v\n", err)
+		p.Error(err)
 		return exitError
 	}
 	files, err := fsys.New(env)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "jarx: %v\n", err)
+		p.Error(err)
 		return exitError
 	}
 	defer func() { _ = files.Close() }()
 
-	printEnv(stdout, env, files)
+	// The fingerprint key is only created if a secret is actually found.
+	scrub, err := redact.New(nil, redact.KeyFromState(env))
+	if err != nil {
+		p.Error(err)
+		return exitError
+	}
+	printEnv(p.Out, scrub, env, files)
 	return exitOK
 }
 
 // printEnv shows what platform resolved and whether each path exists. It
 // prints the env var count only, never names or values. It reads nothing but
 // file info and writes nothing.
-func printEnv(w io.Writer, env platform.Env, files *fsys.FS) {
-	source := "this machine"
+func printEnv(out *report.Stream, s *redact.Scrubber, env platform.Env, files *fsys.FS) {
+	t := func(raw string) redact.Text { return scrubbed(s, raw) }
+	row := func(label string, value redact.Text) { out.Printf("  %-12s %s\n", t(label), value) }
+	withStatus := func(path, status string) redact.Text { return t(path + "  (" + status + ")") }
+
 	envLine := plural(env.VarCount(), "var", "vars") + " from the process"
 	if env.Fake() {
-		source = "fake home"
+		out.Printf("environment (fake home)\n")
 		envLine = plural(env.VarCount(), "var", "vars") + " from " + platform.JarxEnvName
 		if _, err := files.Stat(filepath.Join(env.Home, platform.JarxEnvName)); err != nil {
 			envLine = "no " + platform.JarxEnvName + ", empty env"
 		}
+	} else {
+		out.Printf("environment (this machine)\n")
 	}
 	stateStatus := pathStatus(files, env.StateDir)
 	if stateStatus == statusMissing {
 		stateStatus = "not created yet"
 	}
 
-	_, _ = fmt.Fprintf(w, "environment (%s)\n", source)
-	row := func(label, value string) { _, _ = fmt.Fprintf(w, "  %-12s %s\n", label, value) }
-	withStatus := func(path, status string) string { return path + "  (" + status + ")" }
 	row("home", withStatus(env.Home, pathStatus(files, env.Home)))
-	row("os", env.GOOS)
-	row("env", envLine)
-	row("PATH", plural(len(env.Path), "entry", "entries"))
+	row("os", t(env.GOOS))
+	row("env", t(envLine))
+	row("PATH", t(plural(len(env.Path), "entry", "entries")))
 	row("state dir", withStatus(env.StateDir, stateStatus))
 
 	roots, ok := env.SystemRoots()
 	if !ok {
-		row("system dirs", "skipped (--home)")
+		row("system dirs", t("skipped (--home)"))
 		return
 	}
 	label, found := "system dirs", false
@@ -99,7 +111,7 @@ func printEnv(w io.Writer, env platform.Env, files *fsys.FS) {
 		label, found = "", true
 	}
 	if !found {
-		row(label, "none found")
+		row(label, t("none found"))
 	}
 }
 
@@ -125,5 +137,5 @@ func plural(n int, one, many string) string {
 	if n == 1 {
 		return "1 " + one
 	}
-	return fmt.Sprintf("%d %s", n, many)
+	return strconv.Itoa(n) + " " + many
 }
