@@ -205,6 +205,7 @@ func (Adapter) Settings(c agent.Context, projects []model.Project) ([]model.Unkn
 	s := &settings{c: c}
 	s.load()
 	var perProject []finding.Finding
+	u := &unknowns{s: s, seen: map[string]bool{}}
 	for i := range projects {
 		p := &projects[i]
 		if p.Status != model.ProjectOK {
@@ -216,9 +217,33 @@ func (Adapter) Settings(c agent.Context, projects []model.Project) ([]model.Unkn
 		}
 		p.Configs = append(p.Configs, v.configs()...)
 		perProject = append(perProject, v.findings...)
+		for _, l := range v.layers {
+			u.add(tableConfig, l.origin, l.raw)
+		}
+	}
+	if s.req != nil {
+		u.add(tableRequirements, s.req.origin, s.req.raw)
 	}
 	// Reading project files can add to s.findings, so take them last.
-	return nil, append(s.findings, perProject...)
+	return u.out, append(s.findings, perProject...)
+}
+
+// unknowns collects undocumented keys, one pass per file, since projects
+// share the user and system files.
+type unknowns struct {
+	s    *settings
+	seen map[string]bool
+	out  []model.Unknown
+}
+
+func (u *unknowns) add(table string, o model.Origin, raw map[string]any) {
+	if u.seen[o.File.Raw()] {
+		return
+	}
+	u.seen[o.File.Raw()] = true
+	u.out = append(u.out, unknownKeys(table, raw, func(key, near string) model.Unknown {
+		return model.Unknown{Key: u.s.text(key), Near: u.s.text(near), Origin: o}
+	})...)
 }
 
 // settings holds the layers every project shares.

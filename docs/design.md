@@ -323,6 +323,22 @@ for user settings, the project otherwise), anything else from the working
 dir. A path with no glob covers everything under it. Each grant is tested
 against credmeta's sample credential paths.
 
+### Unknown keys and typos
+
+Each adapter checks the keys it reads against its own table and leaves a
+`model.Unknown` with the key, the file, and, when there is one, the known key
+it's probably a typo of (`Near`) or what the docs say about it (`Note`).
+`analyze/unknown` only reads those, so the agents' tables stay in the
+adapters.
+
+- A typo is checked against keys at the same level: `permissions.defaultMod`
+  against the other `permissions` keys, `[mcp_servers.x].comand` against the
+  other server keys. A tie gives no guess.
+- Codex's walk goes into a table only when the reference lists keys under
+  it. That keeps it out of maps of names you choose, like
+  `mcp_servers.<id>.env`, and out of `[hooks]`.
+- Whether a typo is a safety typo depends on the key it was meant to be.
+
 ### Placeholders are info, not unmasked
 
 A pattern match is always masked. Whether it looks like a placeholder only

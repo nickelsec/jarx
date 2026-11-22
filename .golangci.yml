@@ -53,6 +53,13 @@ linters:
             - modernc.org/sqlite
             - golang.org/x/sys
 
+    misspell:
+      # The unknown-settings tests misspell keys on purpose, often inside
+      # raw strings where a nolint comment can't go.
+      ignore-rules:
+        - permisions
+        - aproval
+
     forbidigo:
       analyze-types: true
       # Messages start with "network:" or "platform:" so the path exclusions

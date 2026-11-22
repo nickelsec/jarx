@@ -393,6 +393,7 @@ func parseLayer(c agent.Context, origin model.Origin, data []byte) (*layer, []mo
 	for _, key := range sortedKeys(top) {
 		r.topKey(key, top[key])
 	}
+	r.aliasFindings(top)
 	return r.l, r.unknown, r.findings
 }
 
@@ -528,7 +529,34 @@ func (r *layerReader) problem(why string) {
 }
 
 func (r *layerReader) unknownKey(key string) {
-	r.unknown = append(r.unknown, model.Unknown{Key: r.scrub(key), Origin: r.l.origin})
+	r.unknown = append(r.unknown, model.Unknown{
+		Key: r.scrub(key), Near: r.scrub(nearKey(key)), Note: r.scrub(deprecatedNote(key)), Origin: r.l.origin,
+	})
+}
+
+// aliasFindings flags an alias set in a file that also sets its canonical
+// key, since Claude then ignores the alias.
+func (r *layerReader) aliasFindings(top map[string]json.RawMessage) {
+	for _, alias := range sortedKeys(keyAliases) {
+		canonical := keyAliases[alias]
+		_, hasAlias := top[alias]
+		_, hasCanonical := top[canonical]
+		if hasAlias && hasCanonical {
+			r.findings = append(r.findings, AliasIgnored().New(r.l.origin,
+				r.scrub(alias+" is ignored: this file also sets "+canonical+", and Claude uses that one")))
+		}
+	}
+}
+
+// AliasIgnored is a key alias Claude ignores because the canonical key is
+// set in the same file.
+func AliasIgnored() finding.Rule {
+	return finding.Rule{
+		ID:       "JARX-CLAUDE-005",
+		Severity: finding.Info,
+		Title:    "a key alias is ignored because the same file sets the canonical key",
+		Fix:      "keep one spelling and move the alias's value into it",
+	}
 }
 
 func (r *layerReader) scrub(s string) redact.Text {

@@ -198,6 +198,24 @@ func TestUnknownSettingsListing(t *testing.T) {
 	}
 }
 
+func TestUnknownSettingsShowTheNearKeyOrNote(t *testing.T) {
+	p, s, out, _ := setup(t)
+	key := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	origin := model.Origin{Agent: model.AgentClaude, Scope: model.ScopeUser, File: model.NewPath(s, "/h/.claude/settings.json")}
+
+	p.Unknown([]model.Unknown{
+		{Key: key("permisions"), Near: key("permissions"), Origin: origin},
+		{Key: key("ignorePatterns"), Note: key("deprecated: replaced by permissions.deny"), Origin: origin},
+	})
+
+	want := "unknown settings (2)\n" +
+		"  permisions  claude user  /h/.claude/settings.json  did you mean permissions?\n" +
+		"  ignorePatterns  claude user  /h/.claude/settings.json  deprecated: replaced by permissions.deny\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
 func TestProjectsListingShowsInstructions(t *testing.T) {
 	p, s, out, _ := setup(t)
 	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }

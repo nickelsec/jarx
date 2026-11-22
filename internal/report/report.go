@@ -143,7 +143,14 @@ func (p *Printer) Instructions(is []model.Instruction) {
 func (p *Printer) Unknown(us []model.Unknown) {
 	p.Out.Printf("unknown settings (%s)\n", p.text(strconv.Itoa(len(us))))
 	for _, u := range us {
-		p.Out.Printf("  %s  %s %s  %s\n", u.Key, p.text(string(u.Origin.Agent)), p.text(string(u.Origin.Scope)), u.Origin.File.Text())
+		extra := ""
+		switch {
+		case !u.Near.IsZero():
+			extra = "  did you mean " + u.Near.String() + "?"
+		case !u.Note.IsZero():
+			extra = "  " + u.Note.String()
+		}
+		p.Out.Printf("  %s  %s %s  %s%s\n", u.Key, p.text(string(u.Origin.Agent)), p.text(string(u.Origin.Scope)), u.Origin.File.Text(), p.text(extra))
 	}
 }
 

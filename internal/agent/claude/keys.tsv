@@ -1,6 +1,14 @@
 # Claude Code settings keys and the files each may be set in.
 # From the Settings index at code.claude.com/docs/en/settings-reference,
 # as of 2026-11-22. Columns: key, scope (as the docs write it).
+# $schema isn't a setting: the settings page shows it as the line that
+# points editors at the published JSON schema.
+# additionalMarketplaces and allowedMarketplaces are the aliases the
+# "Marketplace key aliases" section gives for extraKnownMarketplaces and
+# strictKnownMarketplaces, with the same scopes.
+$schema	Any file
+additionalMarketplaces	Any file
+allowedMarketplaces	Managed
 # permissions.disableAutoMode isn't in the index; the disableAutoMode
 # section says it's "also accepted under permissions".
 advisorModel	Any file

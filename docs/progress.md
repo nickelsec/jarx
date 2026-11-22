@@ -141,8 +141,17 @@ stale ones marked.
     execution-policy rules files, how two different Bash patterns overlap,
     `blockReadsOutsideWorkingDirectories` and the other `permissions.*`
     switches, sandbox network settings (phase 5 egress), and programs not in
-    the command table
-- [ ] `analyze/unknown`: unknown settings report
+    the command table (ef4961a)
+- [x] `analyze/unknown`: unknown settings report. A Codex key table from
+  the config reference (both files, with aliases), Claude's `$schema` and
+  marketplace aliases, "did you mean" for likely typos, and three findings:
+  an unknown key (info), a likely typo (medium), and a likely typo of a
+  safety key (high). Also a finding for a Claude alias ignored next to its
+  canonical key
+  - Not covered yet: keys inside Codex `[hooks]` (the Hooks guide, not the
+    reference, lists them), hooks.json and plugin manifests, MCP config keys
+    (phase 4), and Claude's deprecated keys beyond `ignorePatterns`, since
+    the index still lists the rest
 - [ ] `snapshot`: masked snapshots, retention, diff in `scan` output
 
 **Run it:** `jarx scan --home testdata/demo` shows instruction files, skills,

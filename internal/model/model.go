@@ -336,7 +336,11 @@ type Option struct {
 
 // Unknown is a config key the adapter doesn't recognize.
 type Unknown struct {
-	Key    redact.Text
+	Key redact.Text
+	// Near is the known key this one is most likely a typo of, or empty.
+	Near redact.Text
+	// Note says more about it, like what replaced a deprecated key.
+	Note   redact.Text
 	Origin Origin
 }
 

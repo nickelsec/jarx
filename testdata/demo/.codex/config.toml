@@ -4,6 +4,10 @@
 # A permission profile that keeps keys and env files out of reach.
 default_permissions = "locked"
 
+# Planted: a typo. Someone meant Codex to ask before running commands, but
+# Codex never sees approval_policy, so it keeps its default.
+aproval_policy = "on-request"
+
 [projects."/projects/app"]
 trust_level = "trusted"
 

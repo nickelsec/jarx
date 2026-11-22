@@ -526,7 +526,7 @@ func TestScanRegistryHasEveryOwnersRules(t *testing.T) {
 		t.Fatalf("scanRules() error = %v", err)
 	}
 
-	for _, id := range []string{"JARX-SCAN-001", "JARX-CLAUDE-001", "JARX-CODEX-001", "JARX-SECRET-001", "JARX-POISON-001", "JARX-PERMS-001"} {
+	for _, id := range []string{"JARX-SCAN-001", "JARX-CLAUDE-001", "JARX-CODEX-001", "JARX-SECRET-001", "JARX-POISON-001", "JARX-PERMS-001", "JARX-UNKNOWN-001"} {
 		if _, ok := rules.Lookup(id); !ok {
 			t.Errorf("registry is missing %s", id)
 		}
@@ -575,7 +575,9 @@ func demoWant(abs string) []string {
 			"    claude instructions\n" +
 			"      instructions  " + userClaudeMD + "  user, at launch\n" +
 			"  " + proj("old") + "  claude (unknown)  stale\n",
-		"unknown settings (0)\n",
+		"unknown settings (1)\n" +
+			"  aproval_policy  codex user  " + filepath.Join(abs, ".codex", "config.toml") +
+			"  did you mean approval_policy?\n",
 		"instructions not tied to a project (0)\n",
 		demoFindingsWant(proj, appCodex),
 	}
@@ -585,7 +587,8 @@ func demoWant(abs string) []string {
 func demoFindingsWant(proj func(string) string, appCodex string) string {
 	releaseSkill := proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md"))
 	userSettings := filepath.Join(filepath.Dir(filepath.Dir(proj("x"))), ".claude", "settings.json")
-	return "findings (17)\n" +
+	userCodex := filepath.Join(filepath.Dir(filepath.Dir(proj("x"))), ".codex", "config.toml")
+	return "findings (18)\n" +
 		"  high  JARX-CLAUDE-002  " + proj(filepath.Join("app", ".env")) +
 		"  an instruction file pulls a credential file into Claude's context: an @import in " +
 		proj(filepath.Join("app", "CLAUDE.md")) + " points at a credential file; jarx didn't read it\n" +
@@ -602,6 +605,9 @@ func demoFindingsWant(proj func(string) string, appCodex string) string {
 		"  high  JARX-SECRET-001  " + proj(filepath.Join("app", "CLAUDE.md")) +
 		"  a secret is in text the agent loads, so it's already in the agent's context: " +
 		"named_secret, fingerprint FP, in text the agent sees, also in 1 other file\n" +
+		"  high  JARX-UNKNOWN-003  " + userCodex +
+		"  a safety setting is misspelled, so the protection it was meant to add isn't on: " +
+		"aproval_policy looks like a typo of approval_policy, so this file doesn't set approval_policy\n" +
 		"  medium  JARX-CLAUDE-003  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +
 		"  a skill runs shell commands before Claude sees it: release runs 1 shell command when invoked\n" +
 		"  medium  JARX-CLAUDE-004  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +

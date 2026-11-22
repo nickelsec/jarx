@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/nickelsec/jarx/internal/agent"
 	"github.com/nickelsec/jarx/internal/model"
 )
 
@@ -20,6 +21,65 @@ var keysTSV string
 
 //nolint:gochecknoglobals // parsed once from the embedded table, never written
 var loadKeys = sync.OnceValues(func() (map[string][]model.Scope, error) { return parseKeys(keysTSV) })
+
+// keyAliases maps each documented alias to its canonical key. The settings
+// reference: in one file with both spellings, Claude uses the canonical
+// value and ignores the alias.
+//
+//nolint:gochecknoglobals // fixed list, read only
+var keyAliases = map[string]string{
+	"additionalMarketplaces": "extraKnownMarketplaces",
+	"allowedMarketplaces":    "strictKnownMarketplaces",
+}
+
+// deprecatedNote says what replaced a key the docs call deprecated and the
+// index no longer lists, or "".
+func deprecatedNote(key string) string {
+	if key == "ignorePatterns" {
+		return "deprecated: the settings reference says permissions.deny replaced it"
+	}
+	return ""
+}
+
+// nearKey is the known key at the same level that key is most likely a
+// typo of: permissions.defaultMod is checked against the other
+// permissions keys, not every key.
+func nearKey(key string) string {
+	keys, err := loadKeys()
+	if err != nil {
+		return ""
+	}
+	parent, _ := splitKey(key)
+	var siblings []string
+	for k := range keys {
+		if p, _ := splitKey(k); p == parent {
+			siblings = append(siblings, k)
+		}
+	}
+	slices.Sort(siblings)
+	_, last := splitKey(key)
+	names := make([]string, 0, len(siblings))
+	for _, k := range siblings {
+		_, n := splitKey(k)
+		names = append(names, n)
+	}
+	near := agent.NearKey(last, names)
+	if near == "" {
+		return ""
+	}
+	if parent == "" {
+		return near
+	}
+	return parent + "." + near
+}
+
+// splitKey splits a dotted key into its parent and last part.
+func splitKey(key string) (string, string) {
+	if parent, last, ok := strings.CutLast(key, "."); ok {
+		return parent, last
+	}
+	return "", key
+}
 
 // docScopes maps a scope as the settings index writes it to the settings
 // files it covers. "Global config" keys live in ~/.claude.json, so no

@@ -958,8 +958,31 @@ Adding an agent later means writing an adapter. The analyzers stay the same.
 
 Each adapter knows the keys it understands. Any key it doesn't recognize gets
 listed in an unknown settings report with its file and scope, so a new agent
-release can't silently add a setting jarx ignores. Unknown keys are info
-findings, never errors.
+release can't silently add a setting jarx ignores. Unknown keys are findings,
+never errors.
+
+- Claude's keys are the settings index, plus `$schema` (the settings page
+  shows it as the line that points editors at the schema) and the two
+  documented marketplace aliases. Codex's keys are every row in the config
+  reference's `config.toml` and `requirements.toml` tables, with the aliases
+  the rows name. `[hooks]` isn't checked inside: the reference sends its
+  fields to the Hooks guide.
+- A key one or two edits from a known key at the same level (one for keys
+  under five chars, a swap counts as one, case doesn't count) is a likely
+  typo, and the report says "did you mean".
+- `JARX-UNKNOWN-001` (info): a key the docs don't list. It may be newer than
+  jarx's table, or deprecated, and the report says which when the docs do.
+- `JARX-UNKNOWN-002` (medium): a likely typo, so the setting it was meant to
+  be isn't set by that file.
+- `JARX-UNKNOWN-003` (high): a likely typo of a key that protects you, so
+  someone thinks they're protected when they're not. For Claude that's
+  `permissions.*`, `sandbox.*`, the mode locks and the managed-only switches;
+  for Codex the sandbox, approval, permission profile and shell environment
+  keys, and every `requirements.toml` key. A typo of a key that loosens
+  things, like `enableAllProjectMcpServers`, leaves you safer than you
+  think, so it's 002.
+- `JARX-CLAUDE-005` (info): a key alias in the same file as its canonical
+  key. The settings reference says Claude then ignores the alias.
 
 ### Fixtures per agent version
 
@@ -1051,6 +1074,10 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   reaches the agent, including in an AGENTS.md that Claude reads. A stripped
   comment still shows when the agent opens the file with its Read tool;
   jarx doesn't flag those.
+- **Codex hook fields.** The config reference sends `[hooks]` fields to the
+  Hooks guide, so jarx doesn't check keys inside `[hooks]` for typos.
+- **Key tables lag new releases.** A key newer than jarx's tables shows as
+  unknown until the table is updated. Its finding says so.
 - **Codex's command allowlist.** Codex's execution-policy rules files can
   pre-approve commands. jarx doesn't read them yet.
 - **Commands beyond the table.** `JARX-PERMS-008` to 010 come from an
