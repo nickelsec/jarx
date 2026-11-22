@@ -118,7 +118,18 @@ stale ones marked.
     configs (phase 4), Codex config files that aren't valid TOML, plugin
     `installed_plugins.json`, the "sees" state in the credential view
     (phase 5), and the line a secret is on (f70cc46)
-- [ ] `analyze/poison`: hidden text and poisoned content rules
+- [x] `analyze/poison`: hidden text and poisoned content rules. 13 rules
+  over instructions, memory, skills, hook commands and hook scripts: tag
+  characters, bidi controls, zero-width characters, terminal escapes, HTML
+  comments the agent reads (block comments in CLAUDE.md skipped, since
+  Claude strips them), text aimed at the agent, the same found in hidden
+  text, exfil shapes, credential file pointers, and the PRD's four hook
+  rules. Fixtures per rule, the demo's hidden comment, and `-text` for
+  analyzer fixtures in `.gitattributes`
+  - Not covered yet: MCP text (phase 4), lying annotations and tool
+    shadowing (phase 4), Codex memories, look-alike characters, phrases in
+    languages other than English, and comments that only show when the
+    agent opens a CLAUDE.md with its Read tool
 - [ ] `analyze/perms`: effective permissions view
 - [ ] `analyze/unknown`: unknown settings report
 - [ ] `snapshot`: masked snapshots, retention, diff in `scan` output

@@ -525,13 +525,25 @@ copy other scanners.
 
 ### Hidden or tricky text
 
-- Unicode tag characters, bidi overrides and zero-width characters in
-  instruction files, skills and tool descriptions.
-- HTML comments in instruction files (the rendered view hides them). The
-  memory docs say Claude strips block-level HTML comments from CLAUDE.md
-  before loading it and keeps the ones in code blocks, so this rule needs
-  rethinking before it ships (see Open items).
-- ANSI escape tricks.
+- `JARX-POISON-001` (high): Unicode tag characters. They spell out ASCII
+  that renders as nothing, so the finding shows what they spell. Emoji tag
+  sequences, like the England flag, don't count.
+- `JARX-POISON-002` (medium): bidi controls, so the text reads differently
+  than it looks.
+- `JARX-POISON-003` (info): zero-width characters. A BOM at the start of a
+  file doesn't count, and neither do joiners inside emoji or scripts that
+  need them.
+- `JARX-POISON-004` (medium): terminal control sequences, like ANSI escapes
+  or a lone carriage return, that hide or rewrite text when it's printed.
+- `JARX-POISON-005` (info): an HTML comment the agent reads but a rendered
+  view hides. The memory docs say Claude strips block-level comments from
+  CLAUDE.md files, so those are skipped. Everything else counts, since the
+  docs don't say it's stripped: inline comments, and comments in rules,
+  imports, `CLAUDE.local.md`, skills, output styles and AGENTS.md. Comments
+  in code blocks and code spans render as code, so they aren't hidden.
+- `JARX-POISON-007` (high): the content rules below, found inside hidden
+  text: a comment the agent reads, tag characters, or words split by
+  zero-width characters. A hit there is this rule, not the visible one.
 
 ### What the text rules run on
 
@@ -549,18 +561,30 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 
 ### Poisoned content
 
-- Text aimed at the agent ("ignore previous", "don't tell the user", "before
-  using any other tool").
-- Sensitive path references (`~/.ssh`, `.aws`, `.env`).
-- Exfil patterns: URLs plus encode-and-send instructions, `curl | sh`, base64
-  blobs.
+- `JARX-POISON-006` (medium): text aimed at the agent that works against
+  you: overriding its other instructions ("ignore your previous
+  instructions"), keeping things from you ("don't tell the user"), doing
+  things on the quiet, or "before using any other tool". "Don't deploy
+  without telling the user" is the opposite, so a negated sentence doesn't
+  count. English phrases only.
+- `JARX-POISON-008` (medium): exfil shapes: download-then-run (`curl | sh`
+  and the PowerShell forms), a send tool used on a credential file,
+  encode-and-send instructions, and base64 blobs of 200 chars or more.
+- `JARX-POISON-009` (info): pointers to credential and key files (`~/.ssh`,
+  `.aws/credentials`, `.env`, `.netrc` and the like). `.envrc` doesn't count.
 - Annotations that lie, like a delete tool marked `readOnlyHint`.
 - Tool shadowing: two servers exposing the same tool name.
 
 ### Hooks
 
-- Network calls, download-then-execute, writes to shell rc or startup files,
-  running from temp dirs.
+- `JARX-POISON-010` (info): network calls, including every http hook.
+- `JARX-POISON-011` (high): download-then-execute. In a hook it's this rule,
+  not `JARX-POISON-008`.
+- `JARX-POISON-012` (high): writes to shell rc or startup files (`.bashrc`,
+  `$PROFILE`, crontab, launch agents, the Windows Run key and the like).
+  Reading one doesn't count.
+- `JARX-POISON-013` (medium): running a program from a temp dir. A project's
+  own scripts don't count, even when the project is cloned into a temp dir.
 
 ### Skills
 
@@ -987,6 +1011,11 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   profile a run selects with `--profile`, and which hooks you've trusted in
   `/hooks` (Codex keeps that against each hook's hash, somewhere the docs
   don't name).
+- **Comments the docs don't cover.** The memory docs only say block-level
+  comments in CLAUDE.md files are stripped. jarx assumes every other comment
+  reaches the agent, including in an AGENTS.md that Claude reads. A stripped
+  comment still shows when the agent opens the file with its Read tool;
+  jarx doesn't flag those.
 - **Which Codex version you run.** Codex before 0.150.0 loads a project's
   AGENTS.md even when the project isn't trusted. jarx follows current
   Codex until `analyze/versions` can tell which one is installed.
@@ -1025,10 +1054,6 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   set to `false`. jarx records it now; the verdict comes with phase 5.
 - The Codex sessions path and the shapes of the sqlite and zstd files, as
   observed formats.
-- The HTML comment rule. Claude strips block-level HTML comments from
-  CLAUDE.md, so a hidden comment there may never reach the agent. Check
-  which comments survive (inline ones, comments in code blocks, comments in
-  rules and AGENTS.md) and aim the rule at those.
 
 ## Sources
 

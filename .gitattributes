@@ -10,3 +10,7 @@
 *.gif binary
 *.ico binary
 *.webp binary
+
+# Analyzer rule fixtures test exact bytes (CRLF, BOM, control chars), so git
+# keeps them as written.
+internal/analyze/*/testdata/** -text

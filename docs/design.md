@@ -274,6 +274,28 @@ pick one:
 Source: https://developers.openai.com/codex/guides/agents-md,
 https://developers.openai.com/codex/config-file/config-advanced
 
+### Which HTML comments the agent reads
+
+The memory docs say "block-level HTML comments in CLAUDE.md files are
+stripped before the content is injected into Claude's context", that
+"comments inside code blocks are preserved", and that the Read tool still
+shows them. Nothing else is documented.
+
+| Where | Agent reads it | jarx |
+|---|---|---|
+| Block-level comment in a CLAUDE.md file | no, stripped | skipped |
+| Inline comment in a CLAUDE.md file | not documented | flagged |
+| Any comment in rules, imports, `CLAUDE.local.md`, skills, output styles, AGENTS.md | not documented | flagged |
+| Comment in a fenced code block or a code span | yes, but it renders as code | not hidden, skipped |
+
+Where the docs are silent, jarx assumes the agent reads the comment.
+Missing a hidden instruction is the worse mistake. A block-level comment is
+one that starts its line with at most 3 spaces of indent (CommonMark). The
+comment itself is info; what's in it goes through the content rules, and a
+hit there is the high hidden-text rule.
+
+Source: https://code.claude.com/docs/en/memory
+
 ### Placeholders are info, not unmasked
 
 A pattern match is always masked. Whether it looks like a placeholder only
@@ -465,7 +487,9 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
   for the expected findings, so the demo can't silently stop showing them.
 - **Line endings:** `.gitattributes` sets `* text=auto eol=lf`, and marks
   `*.sqlite`, `*.zst` and images as `binary`, so fixture bytes (and hashes)
-  are identical on Windows and Linux runners.
+  are identical on Windows and Linux runners. Analyzer rule fixtures under
+  `internal/analyze/*/testdata/` are `-text`, since some test exact bytes
+  like CRLF or a BOM.
 
 ## Dependencies
 
