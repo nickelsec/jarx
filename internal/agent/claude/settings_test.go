@@ -324,3 +324,25 @@ func TestNoSettingsFilesMeansNoPermissions(t *testing.T) {
 		t.Errorf("Settings() = %+v, %+v, %+v; want nothing", ps[0].Permissions, unknown, fs)
 	}
 }
+
+func TestEachSettingsFileIsKeptScrubbedForTheSecretsScan(t *testing.T) {
+	c := fakeHome(t, map[string]string{
+		".claude/settings.json":   `{"env": {"DEPLOY": "` + canary + `"}}`,
+		"p/.claude/settings.json": `{"permissions": {"allow": ["Read"]}}`,
+	})
+	ps := []model.Project{project(c, model.TrustTrusted)}
+
+	Adapter{}.Settings(c, ps)
+
+	got := map[model.Scope]model.Config{}
+	for _, cfg := range ps[0].Configs {
+		got[cfg.Origin.Scope] = cfg
+	}
+	user, project := got[model.ScopeUser], got[model.ScopeProject]
+	if strings.Contains(user.Text.String(), canary) || len(user.Text.Secrets()) != 1 {
+		t.Errorf("user config = %q with %d secrets, want the token masked and counted", user.Text, len(user.Text.Secrets()))
+	}
+	if !strings.Contains(project.Text.String(), `"Read"`) || len(ps[0].Configs) != 2 {
+		t.Errorf("configs = %+v, want the user and project files", ps[0].Configs)
+	}
+}

@@ -352,3 +352,29 @@ func TestSecretsInValuesAreMaskedAndBrokenFilesAreFindings(t *testing.T) {
 		t.Errorf("findings = %+v, want the broken project file reported", fs)
 	}
 }
+
+func TestEachConfigFileIsKeptScrubbedForTheSecretsScan(t *testing.T) {
+	c := systemHome(t, map[string]string{
+		".codex/config.toml":   "[mcp_servers.x.env]\nTOKEN = \"" + canary + "\"\n",
+		"p/.git/HEAD":          "ref: refs/heads/main\n",
+		"p/.codex/config.toml": "model = \"o3\"\n",
+	}, func(env platform.Env) map[string]string {
+		return map[string]string{requirementsFile(env): "allowed_sandbox_modes = [\"read-only\"]\n"}
+	})
+	p := model.Project{Path: model.NewPath(c.Scrub, c.Env.MapPath("/p")), Status: model.ProjectOK,
+		Trust: []model.Trust{{Level: model.TrustTrusted, Origin: model.Origin{Agent: model.AgentCodex}}}}
+	ps := []model.Project{p}
+
+	Adapter{}.Settings(c, ps)
+
+	got := map[model.Scope]model.Config{}
+	for _, cfg := range ps[0].Configs {
+		got[cfg.Origin.Scope] = cfg
+	}
+	if user := got[model.ScopeUser]; strings.Contains(user.Text.String(), canary) || len(user.Text.Secrets()) != 1 {
+		t.Errorf("user config = %q, want the token masked and counted", user.Text)
+	}
+	if len(ps[0].Configs) != 3 || got[model.ScopeProject].Text.IsZero() || got[model.ScopeRequirements].Text.IsZero() {
+		t.Errorf("configs = %+v, want user, project and requirements", ps[0].Configs)
+	}
+}

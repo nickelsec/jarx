@@ -12,6 +12,8 @@ import (
 	"github.com/nickelsec/jarx/internal/agent"
 	"github.com/nickelsec/jarx/internal/agent/claude"
 	"github.com/nickelsec/jarx/internal/agent/codex"
+	"github.com/nickelsec/jarx/internal/analyze/secrets"
+	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/discover"
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/fsys"
@@ -72,7 +74,7 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	p.Projects(res.Projects)
 	p.Unknown(res.Unknown)
 	p.Instructions(res.Instructions)
-	p.Findings(res.Findings, rules)
+	p.Findings(slices.Concat(res.Findings, secrets.Analyze(scrub, res.Projects, res.Instructions)), rules)
 	return exitOK
 }
 
@@ -101,7 +103,12 @@ func openEnv(home string) (platform.Env, *fsys.FS, *redact.Scrubber, error) {
 	if err != nil {
 		return platform.Env{}, nil, nil, err //nolint:wrapcheck // fsys errors already say what failed
 	}
-	scrub, err := redact.New(nil, redact.KeyFromState(env))
+	patterns, err := catalog.Secrets()
+	if err != nil {
+		_ = files.Close()
+		return platform.Env{}, nil, nil, err //nolint:wrapcheck // catalog errors already say what failed
+	}
+	scrub, err := redact.New(patterns, redact.KeyFromState(env))
 	if err != nil {
 		_ = files.Close()
 		return platform.Env{}, nil, nil, err //nolint:wrapcheck // redact errors already say what failed
@@ -189,7 +196,7 @@ func plural(n int, one, many string) string {
 // scanRules is every rule a scan can report: finding's own and each
 // adapter's.
 func scanRules() (*finding.Registry, error) {
-	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules())
+	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules())
 	r, err := finding.NewRegistry(all...)
 	if err != nil {
 		return nil, fmt.Errorf("building the rule registry: %w", err)

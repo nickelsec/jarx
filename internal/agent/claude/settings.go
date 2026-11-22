@@ -31,6 +31,7 @@ var _ agent.SettingsReader = Adapter{}
 // scrubbed.
 type layer struct {
 	origin      model.Origin
+	text        redact.Text // the whole file, scrubbed
 	defaultMode *redact.Text
 	modeOff     redact.Text // set when only this layer's defaultMode is ignored
 	rules       []model.PermissionRule
@@ -84,6 +85,11 @@ func (Adapter) Settings(c agent.Context, projects []model.Project) ([]model.Unkn
 		unknown, findings = append(unknown, u...), append(findings, f...)
 		if perm, ok := permissions(c, *p, layers, all.managed.rulesOnly); ok {
 			p.Permissions = append(p.Permissions, perm)
+		}
+		for _, l := range layers {
+			if l != nil && !l.text.IsZero() {
+				p.Configs = append(p.Configs, model.Config{Origin: l.origin, Text: l.text})
+			}
 		}
 	}
 	return unknown, findings
@@ -307,7 +313,8 @@ func readLayer(c agent.Context, path string, scope model.Scope) (*layer, []model
 // broken layer and one finding that says where, never what. A bad value is
 // skipped with a finding and the rest is kept, like Claude does.
 func parseLayer(c agent.Context, origin model.Origin, data []byte) (*layer, []model.Unknown, []finding.Finding) {
-	r := &layerReader{c: c, l: &layer{origin: origin}}
+	text, _ := c.Scrub.Scrub(string(data))
+	r := &layerReader{c: c, l: &layer{origin: origin, text: text}}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(data, &top); err != nil {
 		r.l.broken = true

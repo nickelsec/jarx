@@ -129,15 +129,35 @@ jobs:
       - name: jarx scan --home testdata/demo, offline, with no network syscalls
         run: |
           offline() { sudo unshare --net -- sudo -u "$(id -un)" -- "$@"; }
+          files() { git status --porcelain --ignored --untracked-files=all | sort; }
+          before=$(files)
           out=$(offline strace -f -qq -o "$RUNNER_TEMP/jarx.trace" -e trace="$NET_SYSCALLS" \
             "$RUNNER_TEMP/jarx" scan --home testdata/demo)
           echo "$out"
           grep -q '^projects (3)$' <<<"$out"
+          grep -q 'JARX-SECRET-001' <<<"$out"
           if grep -E "^[0-9]+ +(${NET_SYSCALLS//,/|})\(" "$RUNNER_TEMP/jarx.trace"; then
             echo "jarx made the network syscalls above during an offline scan"
             exit 1
           fi
-          if [ -e testdata/demo/.jarx-state ]; then
-            echo "the demo scan wrote state, but it should write nothing"
+          for planted in demo-not-a-real-token your-api-key-here; do
+            if grep -qF "$planted" <<<"$out"; then
+              echo "the scan printed the demo's planted secret $planted"
+              exit 1
+            fi
+          done
+          # The demo has secrets, so the scan makes its fingerprint key, and
+          # nothing else anywhere in the checkout.
+          wrote=$(comm -13 <(echo "$before") <(files))
+          if [ "$wrote" != "!! testdata/demo/.jarx-state/fingerprint.key" ]; then
+            echo "the demo scan should write only its fingerprint key, but wrote:"
+            echo "$wrote"
+            exit 1
+          fi
+          # A second scan reuses the key, so the fingerprints don't change.
+          key=$(sha256sum testdata/demo/.jarx-state/fingerprint.key)
+          again=$(offline "$RUNNER_TEMP/jarx" scan --home testdata/demo)
+          if [ "$again" != "$out" ] || [ "$key" != "$(sha256sum testdata/demo/.jarx-state/fingerprint.key)" ]; then
+            echo "a second scan changed the key or printed something different"
             exit 1
           fi

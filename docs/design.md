@@ -274,6 +274,21 @@ pick one:
 Source: https://developers.openai.com/codex/guides/agents-md,
 https://developers.openai.com/codex/config-file/config-advanced
 
+### Placeholders are info, not unmasked
+
+A pattern match is always masked. Whether it looks like a placeholder only
+changes the finding: `JARX-SECRET-003` (info) instead of 001 or 002. This
+keeps the noise of example values out of the high findings without ever
+showing a real secret.
+
+- Token formats judge by entropy. Their bodies are long and random, so
+  `ghp_aaaa...` is clearly fake.
+- The name rule judges by shape: words like `example`, `changeme`, `your`
+  or `xxx`, an `<angle bracket>` hole, or one char repeated. Entropy only
+  counts from 16 chars up. Entropy per char can't go past log2 of the
+  length, so under 8 chars every value scores below 3 bits, and a real
+  short password would always look fake.
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
@@ -396,7 +411,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`). Registry reads land here in phase 3 (macOS plists aren't read, see Limits in the PRD). Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
 | `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. Refuses network paths (and symlinks to them), anything that isn't a regular file, and content reads of credential locations (see "What an @import can point at"). | Walking a repo |
 | `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
-| `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. The secret patterns themselves arrive with `catalog` in phase 3. | Promise 4, Secrets |
+| `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. A `Text` keeps the kind and fingerprint of what it masked, never the value. | Promise 4, Secrets |
 | `internal/model` | agent-neutral inventory, `Origin`, `Path`, `Setting[T]` (one layer per scope, highest first, with each layer marked in effect or not and why; adapters decide, the model only holds the result), `Project`, `Unknown`. Grows per phase. | Architecture |
 | `internal/finding` | Finding, severity, rules as plain values with IDs like `JARX-MCP-001`, a `Registry` built by `scan` from every analyzer's rules (no global registry), worst-first sort, and `JARX-SCAN-001` for files fsys skipped as too large | Detection rules |
 | `internal/discover` | merges every adapter's project records with extra paths, sets each project's status (ok, stale, outside fake home, not absolute, can't check), reports fsys skips as findings, and walks each repo with hardened git or the fallback walk | Project discovery |
@@ -405,7 +420,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/agent/codex` | Codex paths, profiles, legacy `sandbox_mode` switch, requirements | Scope: Codex CLI |
 | `internal/catalog` | embedded data: builtin tools, vendors, advisories, secret patterns, each with an "as of" stamp | Built-in tools catalog, Vendor badge, Advisory data |
 | `internal/credmeta` | cred locations and safe metadata parsers (aws config, ssh header, gh hosts, `.env` keys). `Location` lands in phase 3 because `fsys` needs it to refuse credential reads; the parsers come in phase 5. It never imports `fsys`. | Credentials |
-| `internal/analyze/secrets` | prefix and entropy patterns, the sees state | Secrets |
+| `internal/analyze/secrets` | findings from what the scrubber masked: seen, plain text or placeholder | Secrets |
 | `internal/analyze/poison` | text rules over every text the agent reads | Detection rules |
 | `internal/analyze/perms` | effective permissions with origin and in-effect reason | Effective permissions view |
 | `internal/analyze/reach` | per-channel verdicts, observed modes, credential view | Reachability verdicts, Credential view |

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"slices"
@@ -458,13 +459,21 @@ func TestEnvSectionShowsEachSystemDirWithAStatus(t *testing.T) {
 }
 
 func TestScanDemoHome(t *testing.T) {
-	demo := filepath.Join("..", "..", "testdata", "demo")
-	data, err := os.ReadFile(filepath.Join(demo, ".jarx-env")) //nolint:gosec // G304: fixed repo fixture path
+	repoDemo := filepath.Join("..", "..", "testdata", "demo")
+	data, err := os.ReadFile(filepath.Join(repoDemo, ".jarx-env")) //nolint:gosec // G304: fixed repo fixture path
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Scan a copy: the demo has secrets, so the scan writes a fingerprint
+	// key, and tests don't write into the repo.
+	demo := filepath.Join(t.TempDir(), "demo")
+	if err := os.CopyFS(demo, os.DirFS(repoDemo)); err != nil {
 		t.Fatal(err)
 	}
 
 	got := run("scan", "--home", demo)
+	// Fingerprints are keyed per install, so they're random here.
+	stdout := fingerprintRe.ReplaceAllString(got.stdout, "fingerprint FP")
 
 	if got.code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
@@ -474,8 +483,15 @@ func TestScanDemoHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range demoWant(abs) {
-		if !strings.Contains(got.stdout, want) {
-			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want it to contain %q", stdout, want)
+		}
+	}
+	// The demo's planted secrets are made up to dodge push protection, and
+	// jarx still has to mask every one.
+	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here"} {
+		if strings.Contains(got.stdout+got.stderr, planted) {
+			t.Errorf("output contains the planted %q", planted)
 		}
 	}
 	assertNoEnvLeak(t, string(data), got.stdout+got.stderr)
@@ -510,12 +526,14 @@ func TestScanRegistryHasEveryOwnersRules(t *testing.T) {
 		t.Fatalf("scanRules() error = %v", err)
 	}
 
-	for _, id := range []string{"JARX-SCAN-001", "JARX-CLAUDE-001", "JARX-CODEX-001"} {
+	for _, id := range []string{"JARX-SCAN-001", "JARX-CLAUDE-001", "JARX-CODEX-001", "JARX-SECRET-001"} {
 		if _, ok := rules.Lookup(id); !ok {
 			t.Errorf("registry is missing %s", id)
 		}
 	}
 }
+
+var fingerprintRe = regexp.MustCompile(`fingerprint [0-9a-f]{12}`)
 
 // demoWant is what the demo scan has to print, with paths under abs.
 func demoWant(abs string) []string {
@@ -559,15 +577,24 @@ func demoWant(abs string) []string {
 			"  " + proj("old") + "  claude (unknown)  stale\n",
 		"unknown settings (0)\n",
 		"instructions not tied to a project (0)\n",
-		"findings (4)\n" +
+		"findings (7)\n" +
 			"  high  JARX-CLAUDE-002  " + proj(filepath.Join("app", ".env")) +
 			"  an instruction file pulls a credential file into Claude's context: an @import in " +
 			proj(filepath.Join("app", "CLAUDE.md")) + " points at a credential file; jarx didn't read it\n" +
 			"  high  JARX-CODEX-001  " + appCodex + "  a repository's sandbox_mode turns off your permission profile: " +
 			appCodex + " sets sandbox_mode = danger-full-access, so Codex ignores default_permissions = locked from user settings\n" +
+			"  high  JARX-SECRET-001  " + proj(filepath.Join("app", "CLAUDE.md")) +
+			"  a secret is in text the agent loads, so it's already in the agent's context: " +
+			"named_secret, fingerprint FP, in text the agent sees, also in 1 other file\n" +
 			"  medium  JARX-CLAUDE-003  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +
 			"  a skill runs shell commands before Claude sees it: release runs 1 shell command when invoked\n" +
 			"  medium  JARX-CLAUDE-004  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +
-			"  a repository skill grants tools or adds hooks without the trust check: release pre-approves Bash(git *)\n",
+			"  a repository skill grants tools or adds hooks without the trust check: release pre-approves Bash(git *)\n" +
+			"  medium  JARX-SECRET-002  " + proj(filepath.Join("app", ".claude", "settings.json")) +
+			"  a secret is written in plain text in a config file or hook: " +
+			"named_secret, fingerprint FP, written in the file, also in 1 other file\n" +
+			"  info  JARX-SECRET-003  " + proj(filepath.Join("app", "docs", "setup.md")) +
+			"  a value that looks like a placeholder sits where a secret would go: " +
+			"named_secret, fingerprint FP, in text the agent sees, looks like a placeholder\n",
 	}
 }

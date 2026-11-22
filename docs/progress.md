@@ -106,7 +106,18 @@ stale ones marked.
     memories, skill metadata beyond the name (`agents/openai.yaml`),
     `[skills.bundled]`, worktrees reading hooks from the main checkout,
     `--dangerously-bypass-hook-trust`, and `command_windows` in managed hooks
-- [ ] `catalog` secret patterns and `analyze/secrets`
+    (1b700af)
+- [x] `catalog` secret patterns and `analyze/secrets`. About 20 token
+  formats from provider docs and RFCs, a name rule for values with no
+  documented format, placeholders judged by shape for named values, `redact`
+  masking one group of a match, a scrubbed copy of every settings and config
+  file in the model, and three findings: a secret the agent sees (high), a
+  secret in a config file or hook (medium), and a likely placeholder (info)
+  - Not covered yet: the PRD's 30 to 50 formats (npm, OpenAI and Hugging
+    Face don't document a prefix, so only the name rule finds them), MCP
+    configs (phase 4), Codex config files that aren't valid TOML, plugin
+    `installed_plugins.json`, the "sees" state in the credential view
+    (phase 5), and the line a secret is on
 - [ ] `analyze/poison`: hidden text and poisoned content rules
 - [ ] `analyze/perms`: effective permissions view
 - [ ] `analyze/unknown`: unknown settings report

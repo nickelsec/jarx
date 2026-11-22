@@ -21,7 +21,15 @@ import (
 )
 
 // Text is a string that went through a Scrubber. Its zero value is "".
-type Text struct{ s string }
+// It also keeps what was masked in it (kinds and fingerprints, never the
+// values), so analyzers can work from the masked text alone.
+type Text struct {
+	s     string
+	found []Found
+}
+
+// Secrets returns what was masked in t, in order.
+func (t Text) Secrets() []Found { return append([]Found(nil), t.found...) }
 
 // String returns the masked string.
 func (t Text) String() string { return t.s }
@@ -43,6 +51,40 @@ type Pattern struct {
 	Kind       string         // lowercase with underscores, like github_pat
 	Re         *regexp.Regexp // what to mask
 	MinEntropy float64        // bits per char; a match below it is LikelyPlaceholder
+	// Group names the part of a match to mask, like the value in
+	// KEY=value. It defaults to a group named "secret" when Re has one,
+	// else the whole match is masked.
+	Group string
+	// Valid, when set, drops matches that aren't secrets. It gets the whole
+	// match and the part that would be masked.
+	Valid func(match, value string) bool
+	// Placeholder, when set, decides LikelyPlaceholder instead of
+	// MinEntropy. Entropy per char can't beat log2 of the length, so short
+	// values need a check by shape.
+	Placeholder func(value string) bool
+}
+
+// placeholder reports whether a masked value looks like a placeholder.
+func (p Pattern) placeholder(value string) bool {
+	if p.Placeholder != nil {
+		return p.Placeholder(value)
+	}
+	return Entropy(value) < p.MinEntropy
+}
+
+// defaultGroup is the group masked when a pattern doesn't name one.
+const defaultGroup = "secret"
+
+// groupIndex is the submatch to mask, or 0 for the whole match.
+func (p Pattern) groupIndex() int {
+	name := p.Group
+	if name == "" {
+		name = defaultGroup
+	}
+	if i := p.Re.SubexpIndex(name); i > 0 {
+		return i
+	}
+	return 0
 }
 
 // Found describes one masked secret. It never holds the value.
@@ -81,6 +123,9 @@ func New(patterns []Pattern, keys KeySource) (*Scrubber, error) {
 		if p.Re == nil {
 			return nil, fmt.Errorf("pattern %d (%s): no regexp", i, p.Kind)
 		}
+		if p.Group != "" && p.Re.SubexpIndex(p.Group) < 0 {
+			return nil, fmt.Errorf("pattern %d (%s): no group named %q", i, p.Kind, p.Group)
+		}
 	}
 	return &Scrubber{patterns: patterns, keys: keys}, nil
 }
@@ -99,21 +144,14 @@ type span struct {
 
 // Scrub masks every pattern match in raw and reports what it masked.
 func (s *Scrubber) Scrub(raw string) (Text, []Found) {
-	var spans []span
-	for i, p := range s.patterns {
-		for _, m := range p.Re.FindAllStringIndex(raw, -1) {
-			if m[1] > m[0] {
-				spans = append(spans, span{m[0], m[1], i})
-			}
-		}
-	}
+	spans := s.matches(raw)
 	if len(spans) == 0 {
-		return Text{raw}, nil
+		return Text{s: raw}, nil
 	}
 
 	// Merge overlapping matches. The kind comes from the longest match in
-	// each merged run.
-	sort.Slice(spans, func(a, b int) bool {
+	// each merged run, and on a tie from the pattern listed first.
+	sort.SliceStable(spans, func(a, b int) bool {
 		if spans[a].start != spans[b].start {
 			return spans[a].start < spans[b].start
 		}
@@ -144,7 +182,7 @@ func (s *Scrubber) Scrub(raw string) (Text, []Found) {
 		f := Found{
 			Kind:              p.Kind,
 			Fingerprint:       s.fingerprint(value),
-			LikelyPlaceholder: entropy(value) < p.MinEntropy,
+			LikelyPlaceholder: p.placeholder(value),
 		}
 		b.WriteString(raw[prev:sp.start])
 		b.WriteString(mask(f))
@@ -152,7 +190,7 @@ func (s *Scrubber) Scrub(raw string) (Text, []Found) {
 		prev = sp.end
 	}
 	b.WriteString(raw[prev:])
-	return Text{b.String()}, found
+	return Text{s: b.String(), found: found}, found
 }
 
 // Secret masks all of raw, for values the caller already knows are secret,
@@ -166,7 +204,26 @@ func (s *Scrubber) Secret(kind, raw string) (Text, Found) {
 		kind = fallbackKind
 	}
 	f := Found{Kind: kind, Fingerprint: s.fingerprint(raw)}
-	return Text{mask(f)}, f
+	return Text{s: mask(f), found: []Found{f}}, f
+}
+
+// matches finds every span to mask, in pattern order.
+func (s *Scrubber) matches(raw string) []span {
+	var spans []span
+	for i, p := range s.patterns {
+		g := p.groupIndex()
+		for _, m := range p.Re.FindAllStringSubmatchIndex(raw, -1) {
+			start, end := m[2*g], m[2*g+1]
+			if start < 0 || end <= start {
+				continue
+			}
+			if p.Valid != nil && !p.Valid(raw[m[0]:m[1]], raw[start:end]) {
+				continue
+			}
+			spans = append(spans, span{start, end, i})
+		}
+	}
+	return spans
 }
 
 func mask(f Found) string {
@@ -203,8 +260,8 @@ func (s *Scrubber) loadKey() []byte {
 	return s.key
 }
 
-// entropy is the Shannon entropy of v in bits per byte.
-func entropy(v string) float64 {
+// Entropy is the Shannon entropy of v in bits per byte.
+func Entropy(v string) float64 {
 	if v == "" {
 		return 0
 	}

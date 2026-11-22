@@ -150,6 +150,16 @@ type Project struct {
 	// Plugins are the plugins the agent's settings mention for this
 	// project, enabled or not.
 	Plugins []Plugin
+	// Configs are the settings and config files the agents read for this
+	// project, each scrubbed whole, so the secrets scan sees them.
+	Configs []Config
+}
+
+// Config is one settings or config file, scrubbed. Origin says whose and
+// from which scope.
+type Config struct {
+	Origin Origin
+	Text   redact.Text
 }
 
 // Hook is one hook handler. jarx only reads it: it never runs the command,

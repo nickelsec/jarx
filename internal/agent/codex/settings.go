@@ -183,6 +183,7 @@ type layer struct {
 	hasMarks bool                         // project_root_markers is set, maybe to []
 	legacy   bool                         // has [profiles] or a profile key
 	raw      map[string]any               // the decoded file
+	text     redact.Text                  // the whole file, scrubbed
 	_        struct{}
 }
 
@@ -192,6 +193,7 @@ type requirements struct {
 	allowed  map[string][]string // option key to allowed values
 	profiles map[string]bool     // allowed_permission_profiles
 	raw      map[string]any      // the decoded file, for hooks and features
+	text     redact.Text         // the whole file, scrubbed
 }
 
 // The adapter reads settings.
@@ -212,6 +214,7 @@ func (Adapter) Settings(c agent.Context, projects []model.Project) ([]model.Unkn
 		if perm, ok := v.permissions(); ok {
 			p.Permissions = append(p.Permissions, perm)
 		}
+		p.Configs = append(p.Configs, v.configs()...)
 		perProject = append(perProject, v.findings...)
 	}
 	// Reading project files can add to s.findings, so take them last.
@@ -294,7 +297,9 @@ func (s *settings) read(path string, scope model.Scope) *layer {
 		s.problem(origin, "not valid TOML")
 		return nil
 	}
-	return parseLayer(origin, raw)
+	l := parseLayer(origin, raw)
+	l.text = s.text(string(data))
+	return l
 }
 
 func (s *settings) problem(origin model.Origin, why string) {
@@ -396,7 +401,7 @@ func (s *settings) readRequirements(path string) *requirements {
 	if l == nil {
 		return nil
 	}
-	r := &requirements{origin: l.origin, allowed: map[string][]string{}, raw: l.raw}
+	r := &requirements{origin: l.origin, allowed: map[string][]string{}, raw: l.raw, text: l.text}
 	for key, req := range map[string]string{
 		"approval_policy": "allowed_approval_policies", keySandboxMode: "allowed_sandbox_modes", keyWebSearch: "allowed_web_search_modes",
 	} {
@@ -423,4 +428,16 @@ func (s *settings) readRequirements(path string) *requirements {
 		}
 	}
 	return r
+}
+
+// configs is every file in v, plus requirements.toml, for the secrets scan.
+func (v *view) configs() []model.Config {
+	var out []model.Config
+	for _, l := range v.layers {
+		out = append(out, model.Config{Origin: l.origin, Text: l.text})
+	}
+	if r := v.s.req; r != nil {
+		out = append(out, model.Config{Origin: r.origin, Text: r.text})
+	}
+	return out
 }

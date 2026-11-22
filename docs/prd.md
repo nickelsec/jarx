@@ -611,11 +611,28 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 
 ### Secrets
 
-- Inline secrets found with 30 to 50 provider prefixes plus an entropy check.
-  The patterns ship as an embedded data file.
+- Inline secrets found by token format, from the provider's own docs or an
+  RFC, plus a name rule. The formats ship as an embedded data file with an
+  "as of" date and a source per row. The first cut covers about 20 formats
+  devs most often hold keys for; the PRD's target is 30 to 50.
+- The **name rule** masks a value assigned to a name that says it's a
+  secret (`*_TOKEN=`, `"api_key":`, `password:`), whatever the value looks
+  like. It catches values with no documented format, like npm, OpenAI and
+  Hugging Face keys, and the demo's made-up fakes. References (`$X`,
+  `${X}`), booleans, short numbers and names that describe a secret instead
+  of holding one (`apiKeyHelper`, `token_path`) are left alone. A known
+  format wins over the name rule.
 - It runs on config files and also on instruction, memory, skill and hook
   files. A secret found in an instruction or memory file means the agent
   **sees** it (see [The credential view](#the-credential-view)).
+- Three rules, each reported once per file:
+  - `JARX-SECRET-001` (high): a secret in text the agent loads (instruction
+    files, imports, memory, skill bodies), so it's already in context.
+  - `JARX-SECRET-002` (medium): a secret written in a config file, a hook
+    command or a hook script.
+  - `JARX-SECRET-003` (info): a match that looks like a placeholder, like
+    `your-api-key-here`. It's still masked.
+- Each finding says how many other files hold the same fingerprint.
 - A found secret is replaced with `REDACTED:<type>` (for example
   `REDACTED:github_pat`) everywhere it would appear.
 - Each secret also gets a **fingerprint**: a keyed hash (HMAC with a random
@@ -937,6 +954,9 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   them.
 - **Other `--settings` / `-c` overrides** passed per run, for the same
   reason.
+- **Secrets without a known format or name.** A value with no documented
+  format, assigned to a name that doesn't say it's secret, isn't found. A
+  Codex config file that isn't valid TOML isn't scanned for secrets.
 - **macOS MDM policy for Claude.** Claude's docs name the
   `com.anthropic.claudecode` managed preferences domain, but neither they nor
   Apple's docs say where it sits on disk, so jarx doesn't check it. Managed
