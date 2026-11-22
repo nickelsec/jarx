@@ -18,7 +18,7 @@ same commit as the work. The next commit adds that commit's short hash.
   on the jarx config dir), with lint rules that make them the only reader and
   writer (865ab36)
 - [x] `scan` adds jarx's state dir and exists checks, first bits of
-  `testdata/demo/`
+  `testdata/demo/` (b27607b)
 
 **Run it:** `jarx scan --home testdata/demo` prints the resolved paths and
 whether each exists.
