@@ -25,6 +25,13 @@ credentials. Single Go binary with a CLI and a local dashboard.
 
 ## How we work
 - Read docs/prd.md and docs/design.md before starting any feature.
+- Build in the phases from docs/design.md. Each item in docs/progress.md is
+  one small PR. Tick it in docs/progress.md in the same PR as the work.
+- Before starting phase 7 (the dashboard), stop and ask me about the UI. I
+  want to give input on how it looks before any `ui` code gets written.
+- Keep the folder layout from the package table in docs/design.md, so things
+  are easy to find. Only add a new folder when nothing existing fits. When you
+  do, say why in chat and in the PR, and add it to that table.
 - Every feature and bug fix: use the test-driven-development skill. Never
   edit a test just to make it pass.
 - Before saying anything is done: use the verification-before-completion

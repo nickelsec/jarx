@@ -1,10 +1,10 @@
 # jarx design
 
-Status: draft v1. Last updated 2026-11-21. Goes with [prd.md](prd.md).
+Status: draft v1. Last updated 2026-11-22. Goes with [prd.md](prd.md).
 
 Go is decided. This doc covers everything else: how the code is split up, how
-data moves through a scan, how the PRD's promises are enforced, and what gets
-built first.
+data moves through a scan, how the PRD's promises are enforced, and the phases
+it gets built in. [progress.md](progress.md) tracks where we are.
 
 ## Decisions from research
 
@@ -279,88 +279,194 @@ Stdlib plus these, and depguard enforces the list:
 
 ## CI
 
-One workflow, `.github/workflows/ci.yml`, on push to main and on PRs. No
-release workflow yet.
+One workflow, `.github/workflows/ci.yml`. The repo is private, so it's set up
+to keep Actions minutes low:
 
-- **test:** matrix of ubuntu, macos and windows. Runs `go build ./...`,
-  `go vet ./...` and `go test -race ./...` (with `CGO_ENABLED=1` for the race
-  detector). The test step runs under bash on every runner, because
-  PowerShell splits `-coverprofile=...` badly.
-- **lint:** gofmt check, then golangci-lint v2 pinned by SHA. The config uses
-  `default: all`, and every disabled linter has a written reason.
-  golangci's gosec linter covers gosec, so there's no separate job.
-  `forbidigo` and `depguard` hold the choke points.
-- **offline:** on ubuntu, `unshare -n` runs
-  `jarx scan --home testdata/demo --no-probe --no-history` and expects
-  success. With no network namespace, any network call fails the job, which
-  proves the zero-network mode.
-- **security:** govulncheck on every run, CodeQL weekly and on PRs.
-- **hygiene:** a `go mod tidy` diff check. Dependabot for gomod and actions,
-  with every third-party action pinned by SHA.
+- **Every push, any branch:** the linux jobs (test, lint, vuln).
+- **Pull requests:** only the windows and macos test jobs. The PR branch
+  already got linux from its push, so linux doesn't run twice.
+- Newer runs on the same branch cancel older ones. Every job has a timeout,
+  the token is read-only, and checkout doesn't keep credentials.
+
+Jobs:
+
+- **test:** `go build ./...`, `go vet ./...` and `go test -race ./...` (with
+  `CGO_ENABLED=1` for the race detector). Every step runs under bash on every
+  runner, because PowerShell splits `-coverprofile=...` badly.
+- **lint:** a gofmt check, then `go mod tidy -diff`, then golangci-lint
+  v2.15.0. The config (`.golangci.yml`) uses `default: all`, and every
+  disabled linter has a written reason. golangci's gosec linter covers gosec,
+  so there's no separate job. `forbidigo` and `depguard` hold the choke points.
+- **vuln:** govulncheck, run with `go run` at a pinned version.
+
+The Go version comes from `go.mod`, so CI and local builds match. Every action
+is pinned by SHA with the version in a comment.
+
+Added in a later phase:
+
+- **offline** (phase 2): on ubuntu, `unshare -n` runs
+  `jarx scan --home testdata/demo` and expects success. With no network
+  namespace, any network call fails the job, which proves the zero-network
+  mode. `--no-probe` and `--no-history` get added to that command when they
+  exist (phases 4 and 6).
+
+Not set up for now, since the repo is private: CodeQL, Dependabot and any
+release workflow. Bumping action SHAs is manual until then.
 
 There's no Makefile, since make is awkward on Windows. CONTRIBUTING lists the
 same commands CI runs. Fuzzing is for later.
 
-## Build order
+## Build phases
 
-Each step only uses what came before it and ends with something testable.
-Choke points come first, so nothing ever gets written against a
-looser version of them.
+jarx gets built in eight phases. Each phase only uses what came before it and
+ends with something you can run or see. Choke points come first, so nothing
+ever gets written against a looser version of them.
 
-1. **Repo skeleton and CI.** `go.mod`, `.gitattributes` (`* text=auto
-   eol=lf`, binary fixtures marked), `cmd/jarx` printing its version, the
-   workflow, and the golangci config with forbidigo and depguard already on.
-   The rules have to exist before the code they guard, or the first package
-   written breaks them and nobody notices. `.gitattributes` has to come
-   before the first fixture, or Windows checkouts get CRLF bytes and hashes
-   differ from Linux CI.
-2. **platform, fsys, jarxdir.** Everything reads paths and files through
-   these, and tests inject fakes through `platform.Env`. If they came later,
-   early code would call `os.UserHomeDir` directly and tests would touch the
-   real machine.
-3. **redact.** `model` uses `redact.Text`, so it has to exist first. The
-   no-leak test suite starts here and grows with each step.
-4. **model and finding.** These are the shape every adapter writes into and
-   every analyzer reads from. Getting `Origin` right now saves rewriting
-   every adapter later.
-5. **netguard.** Nothing uses it yet, but it's a choke point. Building it
-   before `mcp` and `llm` means neither ever has a moment where it makes its
-   own client. Its tests (redirects, link-local, metadata, IPv6 forms that
-   wrap IPv4) don't depend on anything else.
-6. **agent/claude, discover, report, cli scan.** The first vertical slice:
-   `jarx scan --no-probe --no-history` lists Claude's projects, settings,
-   instruction files, MCP config, skills and hooks. Claude goes first because
-   it has the most surface and the most precedence rules. `--home` and the
-   first bits of `testdata/demo/` land here too, since this is the first
-   step with something to show. The demo grows with every later step. The
-   offline CI job starts doing real work here, against the demo home.
-7. **agent/codex.** A second adapter is what proves the model really is
-   agent-neutral. Done now, any Claude-shaped assumptions in the model get
-   caught while they're still cheap to fix.
-8. **catalog, credmeta, analyze/secrets, analyze/poison.** The static
-   checks. They need the full inventory from both adapters and nothing else.
-   After this step, jarx is already useful without probing.
-9. **analyze/perms, then analyze/reach.** Reach depends on effective
-   permissions and on the builtin tools catalog from step 8. Observed modes
-   come in at step 13, so reach ships with configured verdicts first.
-10. **snapshot and diff.** Needed before drift, and it gives every following
-    step a way to see regressions between scans.
-11. **fakemcp, proc, mcp, probe.** The riskiest part (it runs code and
-    talks to the network), so it comes after every guard it relies on:
-    redact for stderr, netguard for remote servers, the model for "would the
-    agent start it". `fakemcp` comes first so every probe test has a server
-    to talk to. The `go/ast` method test lands with `mcp`.
-12. **analyze/capability, analyze/egress, analyze/drift.** All three need
-    probe results or snapshots.
-13. **history.** It's last among the core features because it reads
-    undocumented formats. It feeds observed modes into reach, the sees state
-    into the credential view, and project cwds into discover, all of which
-    already exist and just get more data.
-14. **analyze/versions and analyze/unknown.** Small, independent, and only
-    useful once both adapters are solid.
-15. **ui.** The dashboard shows a snapshot, so it waits until the snapshot
-    has everything in it. The security middleware and its tests come before
-    any page.
-16. **keystore and llm.** Optional, off by default, and the only feature that
-    sends content off the machine. It goes last, so it sits on top of a
-    finished redact, netguard and canary test suite.
+A phase is split into small PRs, one per item in
+[progress.md](progress.md). That file is the checklist, and it gets ticked in
+the same PR as the work.
+
+`jarx scan` grows a little in every phase. Each phase adds to `testdata/demo/`
+too, so the thing you run at the end of a phase shows that phase's work.
+
+### Phase 1: Foundation
+
+Repo skeleton, CI, lint guards, the CLI skeleton (`scan`, `--version`),
+`platform`, `fsys` and `jarxdir`, and the first bits of `testdata/demo/`.
+
+- The golangci config with `forbidigo` and `depguard` comes first. The rules
+  have to exist before the code they guard, or the first package written
+  breaks them and nobody notices.
+- `.gitattributes` has to come before the first fixture, or Windows checkouts
+  get CRLF bytes and hashes differ from Linux CI.
+- Everything reads paths and files through `platform`, `fsys` and `jarxdir`,
+  and tests inject fakes through `platform.Env`. If they came later, early code
+  would call `os.UserHomeDir` directly and tests would touch the real machine.
+- `--home` lands here, with `platform`, since that's where the fake home gets
+  built.
+
+**Run it:** `jarx scan --home testdata/demo` prints what jarx resolved: the
+home dir, the OS, where the env comes from, the managed policy dirs (none with
+`--home`) and jarx's own state dir, each with whether it exists. Without
+`--home` it does the same for the real machine, existence only.
+
+### Phase 2: Core engine
+
+`redact`, `model` and `finding`, `netguard`, `discover`, `report`, the
+project-record readers in both adapters, and `jarx setup repo add|rm`.
+
+- `model` uses `redact.Text`, so `redact` comes first. The no-leak test suite
+  starts here and grows with each phase.
+- `model` and `finding` are the shape every adapter writes into and every
+  analyzer reads from. Getting `Origin` right now saves rewriting every
+  adapter later.
+- `netguard` has no users yet, but it's a choke point. Building it before
+  `mcp` and `llm` means neither ever has a moment where it makes its own
+  client. Its tests (redirects, link-local, metadata, IPv6 forms that wrap
+  IPv4) don't depend on anything else.
+- `discover` needs project records, and only adapters know where those live
+  (`~/.claude.json`, Codex `[projects]`), so the record readers land here as
+  the first piece of each adapter.
+- The offline CI job turns on.
+
+**Run it:** `jarx scan --home testdata/demo` lists every project both agents
+know about, marks stale ones, and shows file counts from the hardened git
+walk. `jarx setup repo add <path>` adds a project and the next scan lists it.
+
+### Phase 3: Instruction files and settings
+
+The Claude adapter, then the Codex adapter: settings with precedence and
+trust, instruction files (parent folders, subfolders, `@` imports), memory,
+output styles, skills, commands and hooks. Then `catalog` (secret patterns),
+`analyze/secrets`, `analyze/poison`, `analyze/perms`, `analyze/unknown`, and
+`snapshot` with diff.
+
+- Claude goes first because it has the most surface and the most precedence
+  rules. Codex right after is what proves the model really is agent-neutral,
+  while Claude-shaped assumptions are still cheap to fix.
+- `perms` lands here because it's built from settings, and both the MCP
+  capability view (phase 4) and the credential verdicts (phase 5) need it.
+- `snapshot` lands here so every later phase can see regressions between
+  scans, and because drift (phase 4) needs it.
+
+**Run it:** `jarx scan --home testdata/demo` shows each project's instruction
+files, skills, hooks and effective permissions, and flags the demo's planted
+problems: hidden unicode, the HTML comment aimed at the agent, the skill with
+injection text, `bypassPermissions` and `Bash(*)`. Change a demo file, scan
+again, and the change shows up.
+
+### Phase 4: MCP
+
+MCP config in both adapters with the "would the agent start it" logic, then
+`fakemcp`, `proc`, `mcp`, `probe`, the MCP config rules, `analyze/capability`
+and `analyze/drift`.
+
+- This is the riskiest part (it runs code and talks to the network), so it
+  comes after every guard it relies on: redact for stderr, netguard for remote
+  servers, the model for "would the agent start it".
+- `fakemcp` comes first so every probe test has a server to talk to. The
+  `go/ast` method test lands with `mcp`.
+- `--no-probe` lands here.
+
+**Run it:** `jarx scan --home testdata/demo` probes the demo's fake poisoned
+server, lists its tools with a status, and flags the poisoned descriptions,
+the unpinned `npx` server and the token in the URL. `--no-probe` shows the
+servers as "not started".
+
+### Phase 5: Credentials and reach
+
+`credmeta`, the built-in tools catalog, `analyze/reach` with the credential
+view, `analyze/egress` and `analyze/versions`.
+
+- `reach` needs effective permissions (phase 3), the built-in tools catalog,
+  and MCP servers as a channel (phase 4). It ships with configured verdicts.
+  Observed modes come in phase 6.
+- `egress` needs MCP host status, so it comes after probing.
+- `versions` is the "vulnerable agent version" exposure check, so it sits with
+  the other exposure work.
+
+**Run it:** `jarx scan --home testdata/demo` shows each credential location
+per project with its state (can read, can use, not reachable), per-channel
+verdicts and the why trail. It also shows where each agent talks to and flags
+a vulnerable agent install in the demo.
+
+### Phase 6: History
+
+The history cursor and readers for Claude transcripts, Codex rollouts (zstd)
+and Codex sqlite, then wiring the results into what already exists.
+
+- It comes last among the core features because it reads undocumented
+  formats. It feeds observed modes into reach, the "sees" state into the
+  credential view, and session cwds into discover. Those already exist and
+  just get more data.
+- `--no-history` lands here.
+
+**Run it:** the demo home gets fake transcripts and rollouts. `jarx scan
+--home testdata/demo` shows things like "14 of 20 sessions in bypass" next to
+a verdict, and a leaked secret masked with its file and line.
+
+### Phase 7: Dashboard
+
+Before this phase starts, we stop and talk about how the UI should look.
+
+`ui` with its security middleware first (host check, token cookie, CSRF, CSP)
+and its tests before any page. Then the pages, the snapshot picker, and the
+write actions (repo add and remove, rescan).
+
+- The dashboard shows a snapshot, so it waits until the snapshot has
+  everything in it.
+
+**Run it:** `jarx ui --home testdata/demo` and click through it.
+
+### Phase 8: LLM review
+
+`keystore`, `jarx setup llm`, the `llm` client (preview, schema check and
+retry, quote check, cache), the canary test, `jarx scan --llm` and the
+dashboard button.
+
+- It's optional, off by default, and the only feature that sends content off
+  the machine. It goes last, so it sits on top of a finished redact, netguard
+  and canary test suite.
+
+**Run it:** `jarx setup llm`, then `jarx scan --llm --home testdata/demo`
+against your own endpoint.
