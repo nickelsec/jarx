@@ -72,6 +72,9 @@ func Run(c agent.Context, adapters []agent.Adapter, extra []string) Result {
 			global = append(global, is...)
 			findings = append(findings, fs...)
 		}
+		if er, ok := a.(agent.ExtensionReader); ok {
+			findings = append(findings, er.Extensions(c, projects)...)
+		}
 	}
 	findings = append(findings, finding.FromSkips(c.Scrub, c.Files.Skips())...)
 	return Result{Projects: projects, Unknown: unknown, Instructions: global, Findings: findings}

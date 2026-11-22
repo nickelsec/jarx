@@ -168,3 +168,9 @@ linters:
         linters:
           - forbidigo
         text: "(read|write|exec):"
+
+# Show every issue on a line. By default golangci-lint keeps one per line,
+# so another linter on the same line (gosec, unused) can hide a forbidigo
+# ban message like "exec: only internal/discover may run commands".
+issues:
+  uniq-by-line: false

@@ -73,7 +73,17 @@ stale ones marked.
     approved (not documented), and how Claude treats an import path that
     ends in punctuation like `@docs/setup.md.` (not documented; jarx keeps
     the documented rule, the path runs to the first space)
-- [ ] Claude adapter: skills, commands, subagents, plugins, hooks
+- [x] Claude adapter: skills, commands, subagents, plugins, hooks. Also the
+  canary test that proves nothing they declare runs, and two findings:
+  skills that run shell commands before Claude sees them, and repository
+  skills that grant tools or add hooks without the trust check
+  - Not covered yet: frontmatter hooks are kept as raw text (no YAML
+    parser), `@skills-dir`, `@inline` and synced plugins, synced skills,
+    plugin MCP and LSP servers and monitors (MCP comes in phase 4), plugin
+    output styles, `extraKnownMarketplaces`, `allowedHttpHookUrls`,
+    `strictPluginOnlyCustomization`, project subagent hooks waiting for
+    trust, skill `paths` and supporting files, skills in parent dirs up to
+    the repo root, and command subfolders
 - [ ] Codex adapter: config, profiles, precedence, trust, requirements
 - [ ] Codex adapter: instruction files, skills, hooks
 - [ ] `catalog` secret patterns and `analyze/secrets`

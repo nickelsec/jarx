@@ -542,6 +542,14 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 - Network calls, download-then-execute, writes to shell rc or startup files,
   running from temp dirs.
 
+### Skills
+
+- A skill or command whose body runs shell commands before the agent sees
+  it (Claude's `` !`cmd` `` and ` ```! ` blocks), unless
+  `disableSkillShellExecution` turns that off.
+- A repository skill that pre-approves tools (`allowed-tools`) or adds
+  hooks. Claude applies both even in a folder you haven't trusted.
+
 ### MCP supply chain and config
 
 - Unpinned `npx`/`uvx` (`@latest` or no version).
@@ -920,6 +928,12 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   capability view), which is usually unknown.
 - **Undocumented formats** can change with any agent release. jarx degrades
   to "unknown" there.
+- **Hooks in skill and subagent frontmatter** are kept as raw text, not split
+  into events and commands, since jarx doesn't parse nested YAML. The rules
+  still read the text.
+- **Plugins and skills that aren't on disk as records.** `--plugin-dir`,
+  `--plugin-url` and SDK plugins (`@inline`), plugins and skills synced from
+  claude.ai, and marketplaces jarx would have to fetch aren't listed.
 - **Approval of external imports.** Claude asks before it loads an
   `@import` from a project file that points outside the project, and the
   docs don't say where that answer is kept. jarx lists those imports as

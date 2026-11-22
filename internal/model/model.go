@@ -141,6 +141,76 @@ type Project struct {
 	// project: instruction files, rules, imports, memory and output styles,
 	// in effect or not. Origin.Agent says whose.
 	Instructions []Instruction
+	// Hooks are the hook handlers that apply here, from settings and
+	// plugins. Hooks declared in skill or subagent frontmatter are kept as
+	// text on the Skill instead.
+	Hooks []Hook
+	// Skills are the skills, commands and subagents the agent can use here.
+	Skills []Skill
+	// Plugins are the plugins the agent's settings mention for this
+	// project, enabled or not.
+	Plugins []Plugin
+}
+
+// Hook is one hook handler. jarx only reads it: it never runs the command,
+// sends the request or calls the tool.
+type Hook struct {
+	Event   redact.Text
+	Matcher redact.Text
+	Type    redact.Text // command, http, mcp_tool, prompt, agent, or whatever the file says
+	// Run is what the handler runs, as written: the command and its args, the
+	// URL, the server and tool, or the prompt. Variables are never filled in.
+	Run redact.Text
+	// Script is a script file the command runs, when jarx could tell which.
+	// jarx reads it as text, so the rules can check it.
+	Script     Path
+	ScriptRead ReadStatus
+	ScriptText redact.Text
+	Origin     Origin
+}
+
+// SkillKind is what kind of skill-like thing a Skill is.
+type SkillKind string
+
+// Skill kinds.
+const (
+	SkillSkill    SkillKind = "skill"
+	SkillCommand  SkillKind = "command"
+	SkillSubagent SkillKind = "subagent"
+)
+
+// Skill is a skill, a command or a subagent: a file the agent can load as
+// instructions when it's invoked, often with tools and hooks of its own.
+type Skill struct {
+	Kind SkillKind
+	Name redact.Text
+	Path Path
+	Load LoadWhen
+	Read ReadStatus
+	Text redact.Text // the whole file, scrubbed; empty unless Read is ReadOK
+	// Tools is a skill's or command's allowed-tools, which it pre-approves,
+	// or a subagent's tools list.
+	Tools []redact.Text
+	// Hooks is the raw hooks block from the frontmatter, scrubbed, when the
+	// file declares any.
+	Hooks redact.Text
+	// ShellCommands counts the shell commands the body runs before the agent
+	// sees it (Claude's !`cmd` and ```! blocks).
+	ShellCommands int
+	// Mode is a subagent's permissionMode, when it sets one.
+	Mode   redact.Text
+	Plugin redact.Text // the plugin it comes from, if any
+	Origin Origin
+}
+
+// Plugin is a plugin an agent's settings mention.
+type Plugin struct {
+	ID      redact.Text
+	Enabled Setting[bool]
+	// Path is where its files are, when jarx found them.
+	Path    Path
+	Version redact.Text
+	Origin  Origin
 }
 
 // InstructionKind is what kind of instruction text a file is.
@@ -168,6 +238,7 @@ const (
 	LoadMatching LoadWhen = "when matching files are read"
 	LoadSelected LoadWhen = "when selected"
 	LoadSubagent LoadWhen = "when its subagent runs"
+	LoadInvoked  LoadWhen = "when invoked"
 )
 
 // ReadStatus says whether jarx read an instruction's text, and if not, why.

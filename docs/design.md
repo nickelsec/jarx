@@ -190,6 +190,36 @@ reader can skip them:
 Sources: https://code.claude.com/docs/en/memory#import-additional-files,
 https://code.claude.com/docs/en/memory#share-rules-across-projects-with-symlinks
 
+### Nothing a hook, skill or plugin declares runs
+
+Hooks, skills and plugins all carry things Claude runs: hook commands,
+`http` hooks that POST to a URL, `mcp_tool`, `prompt` and `agent` hooks,
+the `` !`cmd` `` and ` ```! ` blocks a skill runs before Claude sees it,
+plugin hook scripts, plugin dependency installs and marketplace fetches.
+jarx reads all of it as text and never runs any of it:
+
+- Process starts are lint-banned outside `discover` (hardened git), and the
+  network is `netguard`'s alone, so the adapter has no way to run a command
+  or send a request.
+- Commands are shown as written. jarx resolves only `${CLAUDE_PROJECT_DIR}`
+  and `${CLAUDE_PLUGIN_ROOT}`, and only to find a hook script so it can read
+  it. Every other variable stays as written, so an env secret can't end up
+  in the output.
+- Hook scripts and plugin files are read through `fsys`, with every guard
+  from "What an @import can point at".
+- A canary test plants each hook type, a hook script, skill injection and a
+  plugin hook, each of which would write a marker file or call a local test
+  server if it ran. It scans and checks that neither happened.
+- `installed_plugins.json` names its fields in the docs but not its shape,
+  so jarx reads it as an observed format and calls a plugin's install state
+  unknown when the file doesn't match.
+
+Sources: https://code.claude.com/docs/en/hooks,
+https://code.claude.com/docs/en/skills,
+https://code.claude.com/docs/en/sub-agents,
+https://code.claude.com/docs/en/plugins/loading,
+https://code.claude.com/docs/en/plugins-reference
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
@@ -316,7 +346,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/model` | agent-neutral inventory, `Origin`, `Path`, `Setting[T]` (one layer per scope, highest first, with each layer marked in effect or not and why; adapters decide, the model only holds the result), `Project`, `Unknown`. Grows per phase. | Architecture |
 | `internal/finding` | Finding, severity, rules as plain values with IDs like `JARX-MCP-001`, a `Registry` built by `scan` from every analyzer's rules (no global registry), worst-first sort, and `JARX-SCAN-001` for files fsys skipped as too large | Detection rules |
 | `internal/discover` | merges every adapter's project records with extra paths, sets each project's status (ok, stale, outside fake home, not absolute, can't check), reports fsys skips as findings, and walks each repo with hardened git or the fallback walk | Project discovery |
-| `internal/agent` | the adapter interface (`Agent`, `Projects`), the optional `SettingsReader` that discover calls, and the shared `Context` (env, fsys, scrubber). Shared parsers (frontmatter, `@` imports) land here in phase 3. Claude settings are strict JSON, so there is no jsonc parser. | Architecture |
+| `internal/agent` | the adapter interface (`Agent`, `Projects`), the optional `SettingsReader`, `InstructionReader` and `ExtensionReader` that discover calls, and the shared `Context` (env, fsys, scrubber). Shared parsers (frontmatter keys and raw blocks, tool lists, `@` imports) land here in phase 3. Claude settings are strict JSON, so there is no jsonc parser. | Architecture |
 | `internal/agent/claude` | Claude paths, precedence, trust, MCP approval, modes | Scope: Claude Code |
 | `internal/agent/codex` | Codex paths, profiles, legacy `sandbox_mode` switch, requirements | Scope: Codex CLI |
 | `internal/catalog` | embedded data: builtin tools, vendors, advisories, secret patterns, each with an "as of" stamp | Built-in tools catalog, Vendor badge, Advisory data |
@@ -401,6 +431,8 @@ Jobs:
   v2.15.0. The config (`.golangci.yml`) uses `default: all`, and every
   disabled linter has a written reason. golangci's gosec linter covers gosec,
   so there's no separate job. `forbidigo` and `depguard` hold the choke points.
+  `uniq-by-line` is off, so another linter on the same line can't hide a
+  forbidigo ban message.
 - **vuln:** govulncheck, run with `go run` at a pinned version.
 - **offline:** on ubuntu, `jarx scan --home testdata/demo` runs inside a
   network namespace with no network at all, under `strace -f`. It has to

@@ -480,7 +480,7 @@ func TestScanDemoHome(t *testing.T) {
 		// The demo's records use paths like /projects/app, read inside the
 		// fake home.
 		"projects (3)\n" +
-			"  " + proj("app") + "  claude (trusted), codex (trusted)  5 files (walk)\n" +
+			"  " + proj("app") + "  claude (trusted), codex (trusted)  7 files (walk)\n" +
 			"    claude permissions\n" +
 			"      mode   bypassPermissions  user\n" +
 			"      allow  Bash(*)  project\n" +
@@ -490,6 +490,10 @@ func TestScanDemoHome(t *testing.T) {
 			"      instructions  CLAUDE.md  project, at launch\n" +
 			"      import  docs/setup.md  project, at launch, via CLAUDE.md\n" +
 			"      import  .env  project, at launch, via CLAUDE.md, credential file, not read\n" +
+			"    claude hooks\n" +
+			"      PostToolUse (Edit|Write)  command  ${CLAUDE_PROJECT_DIR}/.claude/hooks/format.sh  project, script .claude/hooks/format.sh\n" +
+			"    claude skills\n" +
+			"      skill  release  .claude/skills/release/SKILL.md  project, when invoked, pre-approves Bash(git *), runs 1 shell command\n" +
 			"  " + proj("notes") + "  codex (untrusted)  1 file (walk)\n" +
 			"    claude permissions\n" +
 			"      mode   bypassPermissions  user\n" +
@@ -498,10 +502,14 @@ func TestScanDemoHome(t *testing.T) {
 			"  " + proj("old") + "  claude (unknown)  stale\n",
 		"unknown settings (0)\n",
 		"instructions not tied to a project (0)\n",
-		"findings (1)\n" +
+		"findings (3)\n" +
 			"  high  JARX-CLAUDE-002  " + proj(filepath.Join("app", ".env")) +
 			"  an instruction file pulls a credential file into Claude's context: an @import in " +
-			proj(filepath.Join("app", "CLAUDE.md")) + " points at a credential file; jarx didn't read it\n",
+			proj(filepath.Join("app", "CLAUDE.md")) + " points at a credential file; jarx didn't read it\n" +
+			"  medium  JARX-CLAUDE-003  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +
+			"  a skill runs shell commands before Claude sees it: release runs 1 shell command when invoked\n" +
+			"  medium  JARX-CLAUDE-004  " + proj(filepath.Join("app", ".claude", "skills", "release", "SKILL.md")) +
+			"  a repository skill grants tools or adds hooks without the trust check: release pre-approves Bash(git *)\n",
 	} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)

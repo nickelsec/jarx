@@ -39,3 +39,10 @@ type SettingsReader interface {
 type InstructionReader interface {
 	Instructions(c Context, projects []model.Project) ([]model.Instruction, []finding.Finding)
 }
+
+// ExtensionReader is an adapter that reads what extends the agent: hooks,
+// skills, commands, subagents and plugins. It stores each ok project's on
+// the project. It only reads them; nothing they declare is ever run.
+type ExtensionReader interface {
+	Extensions(c Context, projects []model.Project) []finding.Finding
+}

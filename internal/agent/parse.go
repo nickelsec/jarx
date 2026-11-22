@@ -152,24 +152,17 @@ const bom = rune(0xFEFF)
 // after the header, and whether there was a header. It is not a YAML parser:
 // jarx only needs to know which keys are set and a few simple values.
 func Frontmatter(text string) (map[string]string, string, bool) {
-	t := strings.TrimPrefix(text, string(bom))
-	first, rest, ok := strings.Cut(t, "\n")
-	if !ok || strings.TrimSuffix(first, "\r") != "---" {
+	lines, body, ok := frontmatterLines(text)
+	if !ok {
 		return nil, text, false
 	}
 	keys := map[string]string{}
-	for rest != "" {
-		var line string
-		line, rest, _ = strings.Cut(rest, "\n")
-		line = strings.TrimSuffix(line, "\r")
-		if line == "---" {
-			return keys, rest, true
-		}
+	for _, line := range lines {
 		if key, value, ok := topLevelKey(line); ok {
 			keys[key] = value
 		}
 	}
-	return nil, text, false
+	return keys, body, true
 }
 
 // topLevelKey reads "key: value" at the start of a line.

@@ -51,6 +51,14 @@ type layer struct {
 	memoryOn         *bool  // autoMemoryEnabled
 	instructionFiles string // pluginConfigs: the AGENTS.md plugin's instructionFiles
 	claudeMd         *redact.Text
+
+	// What the extensions reader needs. Strings stay raw until they go into
+	// the model, where they're scrubbed.
+	hooks          []rawHook
+	hooksOff       *bool // disableAllHooks
+	managedHooks   *bool // allowManagedHooksOnly
+	skillShellOff  *bool // disableSkillShellExecution
+	enabledPlugins map[string]bool
 }
 
 // disable takes a whole layer out of effect.
@@ -334,6 +342,7 @@ func (r *layerReader) topKey(key string, raw json.RawMessage) {
 	}
 	if allowed {
 		r.instructionKey(key, raw)
+		r.extensionKey(key, raw)
 	}
 	if key != "permissions" {
 		return // read by later items, or not needed yet

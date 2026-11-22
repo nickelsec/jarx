@@ -124,6 +124,7 @@ func (p *Printer) Projects(ps []model.Project) {
 			p.permissions(perm)
 		}
 		p.instructions(proj)
+		p.extensions(proj)
 	}
 }
 

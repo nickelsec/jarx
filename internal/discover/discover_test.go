@@ -273,3 +273,19 @@ func TestRunReadsInstructionsForEachOKProject(t *testing.T) {
 		t.Errorf("global instructions = %+v, want the memory index", r.Instructions)
 	}
 }
+
+func TestRunReadsExtensionsForEachOKProject(t *testing.T) {
+	c := fakeContext(t)
+	app := mkdir(t, filepath.Join(c.Env.Home, "app"))
+	skill := filepath.Join(app, ".claude", "skills", "deploy", "SKILL.md")
+	mkdir(t, filepath.Dir(skill))
+	if err := os.WriteFile(skill, []byte("deploy it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := Run(c, []agent.Adapter{claude.Adapter{}}, []string{app})
+
+	if len(r.Projects) != 1 || len(r.Projects[0].Skills) != 1 || r.Projects[0].Skills[0].Name.String() != "deploy" {
+		t.Errorf("projects = %+v, want app with its deploy skill", r.Projects)
+	}
+}

@@ -244,3 +244,46 @@ func TestUnboundInstructionsListing(t *testing.T) {
 		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
 	}
 }
+
+func TestProjectsListingShowsExtensions(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	path := func(raw string) model.Path { return model.NewPath(s, raw) }
+	at := func(scope model.Scope) model.Origin {
+		return model.Origin{Agent: model.AgentClaude, Scope: scope, InEffect: true}
+	}
+	off := at(model.ScopeProject)
+	off.InEffect, off.Why = false, text("disableAllHooks is on in user settings")
+
+	p.Projects([]model.Project{{
+		Path: path("/projects/app"), Status: model.ProjectOK, Origins: []model.Origin{{Agent: model.AgentClaude}},
+		Hooks: []model.Hook{
+			{Event: text("PostToolUse"), Matcher: text("Edit|Write"), Type: text("command"), Run: text("${CLAUDE_PROJECT_DIR}/check.sh"),
+				Script: path("/projects/app/check.sh"), ScriptRead: model.ReadOK, Origin: at(model.ScopeUser)},
+			{Event: text("Stop"), Type: text("http"), Run: text("http://localhost:8080/hook"), Origin: off},
+		},
+		Skills: []model.Skill{
+			{Kind: model.SkillSkill, Name: text("deploy"), Path: path("/projects/app/.claude/skills/deploy/SKILL.md"), Load: model.LoadInvoked,
+				Read: model.ReadOK, Tools: []redact.Text{text("Bash(*)")}, Hooks: text("Stop: []"), ShellCommands: 2, Origin: at(model.ScopeProject)},
+			{Kind: model.SkillSubagent, Name: text("fmt:rev"), Path: path("/home/.claude/plugins/rev.md"), Load: model.LoadInvoked,
+				Read: model.ReadOK, Mode: text("bypassPermissions"), Plugin: text("fmt@m"), Origin: at(model.ScopePlugin)},
+		},
+		Plugins: []model.Plugin{
+			{ID: text("fmt@m"), Version: text("1.0.0"), Path: path("/home/.claude/plugins/cache/fmt"), Origin: at(model.ScopeUser)},
+		},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  claude\n" +
+		"    claude hooks\n" +
+		"      PostToolUse (Edit|Write)  command  ${CLAUDE_PROJECT_DIR}/check.sh  user, script check.sh\n" +
+		"      Stop  http  http://localhost:8080/hook  project  not in effect: disableAllHooks is on in user settings\n" +
+		"    claude skills\n" +
+		"      skill  deploy  .claude/skills/deploy/SKILL.md  project, when invoked, pre-approves Bash(*), declares hooks, runs 2 shell commands\n" +
+		"      subagent  fmt:rev  /home/.claude/plugins/rev.md  plugin, when invoked, from fmt@m, mode bypassPermissions\n" +
+		"    claude plugins\n" +
+		"      fmt@m  user, version 1.0.0, /home/.claude/plugins/cache/fmt\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
