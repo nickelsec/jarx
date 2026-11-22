@@ -13,6 +13,7 @@ import (
 	"github.com/nickelsec/jarx/internal/discover"
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/fsys"
+	"github.com/nickelsec/jarx/internal/jarxdir"
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
@@ -38,32 +39,17 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	if code, ok := parse(p, plain, fs, args, scanHelp); !ok {
 		return code
 	}
-	homeSet := false
-	fs.Visit(func(f *flag.Flag) { homeSet = homeSet || f.Name == "home" })
-	if homeSet && *home == "" {
+	if emptyHome(fs, *home) {
 		return usageError(p, scanHelp, scrubbed(plain, "--home needs a directory"))
 	}
 
-	var env platform.Env
-	var err error
-	if *home != "" {
-		env, err = platform.FromHome(*home)
-	} else {
-		env, err = platform.Real()
-	}
-	if err != nil {
-		p.Error(err)
-		return exitError
-	}
-	files, err := fsys.New(env)
+	env, files, scrub, err := openEnv(*home)
 	if err != nil {
 		p.Error(err)
 		return exitError
 	}
 	defer func() { _ = files.Close() }()
-
-	// The fingerprint key is only created if a secret is actually found.
-	scrub, err := redact.New(nil, redact.KeyFromState(env))
+	cfg, err := jarxdir.LoadConfig(env)
 	if err != nil {
 		p.Error(err)
 		return exitError
@@ -77,13 +63,51 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	printEnv(p.Out, scrub, env, files)
 	res := discover.Run(
 		agent.Context{Env: env, Files: files, Scrub: scrub},
-		[]agent.Adapter{claude.Adapter{}, codex.Adapter{}},
+		[]agent.Adapter{claude.Adapter{}, codex.Adapter{}, discover.Saved(configPath(env), cfg.Repos)},
 		fs.Args(),
 	)
 	p.Out.Printf("\n")
 	p.Projects(res.Projects)
 	p.Findings(res.Findings, rules)
 	return exitOK
+}
+
+// emptyHome reports --home given with no value.
+func emptyHome(fs *flag.FlagSet, home string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) { set = set || f.Name == "home" })
+	return set && home == ""
+}
+
+// openEnv builds the Env (the fake home with --home, the real machine
+// without), the fsys view on it and the scrubber. The fingerprint key is only
+// created if a secret is actually found.
+func openEnv(home string) (platform.Env, *fsys.FS, *redact.Scrubber, error) {
+	var env platform.Env
+	var err error
+	if home != "" {
+		env, err = platform.FromHome(home)
+	} else {
+		env, err = platform.Real()
+	}
+	if err != nil {
+		return platform.Env{}, nil, nil, err //nolint:wrapcheck // platform errors already say what failed
+	}
+	files, err := fsys.New(env)
+	if err != nil {
+		return platform.Env{}, nil, nil, err //nolint:wrapcheck // fsys errors already say what failed
+	}
+	scrub, err := redact.New(nil, redact.KeyFromState(env))
+	if err != nil {
+		_ = files.Close()
+		return platform.Env{}, nil, nil, err //nolint:wrapcheck // redact errors already say what failed
+	}
+	return env, files, scrub, nil
+}
+
+// configPath is where jarx's own config lives, for origins and messages.
+func configPath(env platform.Env) string {
+	return filepath.Join(env.StateDir, "config.json")
 }
 
 // printEnv shows what platform resolved and whether each path exists. It

@@ -27,10 +27,10 @@ type result struct {
 }
 
 func run(args ...string) result {
-	// A scan without --home reads the real machine's agent records, and tests
-	// never touch real config. Refuse it here so a test can't do it by
-	// accident.
-	if len(args) > 0 && args[0] == "scan" && !slices.Contains(args, "-h") && !slices.Contains(args, "--help") &&
+	// A scan or setup without --home reads (or writes) the real machine's
+	// state, and tests never touch real config. Refuse it here so a test
+	// can't do it by accident.
+	if len(args) > 0 && (args[0] == "scan" || args[0] == "setup") && !slices.Contains(args, "-h") && !slices.Contains(args, "--help") &&
 		!slices.ContainsFunc(args, func(a string) bool { return a == "--home" || strings.HasPrefix(a, "--home=") }) {
 		return result{code: -1, stderr: "test helper: refusing a real-machine scan, pass --home"}
 	}

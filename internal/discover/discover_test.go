@@ -182,3 +182,27 @@ func TestRunReportsFilesFsysRefusedAsFindings(t *testing.T) {
 		t.Errorf("findings = %+v, want one %s for the oversized config", r.Findings, finding.SkippedTooLarge().ID)
 	}
 }
+
+func TestSavedReposAreProjectsFromJarx(t *testing.T) {
+	c := fakeContext(t)
+	saved := mkdir(t, filepath.Join(c.Env.Home, "saved"))
+	both := mkdir(t, filepath.Join(c.Env.Home, "both"))
+	cfg := filepath.Join(c.Env.StateDir, "config.json")
+
+	r := Run(c, []agent.Adapter{
+		fakeAdapter{name: model.AgentClaude, paths: []string{both}},
+		Saved(cfg, []string{saved, both}),
+	}, nil)
+
+	got := byPath(r.Projects)
+	if len(got) != 2 {
+		t.Fatalf("projects = %d, want 2", len(got))
+	}
+	o := got[saved].Origins[0]
+	if o.Agent != model.AgentJarx || o.Scope != model.ScopeJarx || o.File.Raw() != cfg {
+		t.Errorf("saved origin = %+v, want jarx, jarx scope, the config file", o)
+	}
+	if n := len(got[both].Origins); n != 2 {
+		t.Errorf("both has %d origins, want claude's and jarx's merged", n)
+	}
+}

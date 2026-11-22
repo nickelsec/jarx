@@ -125,3 +125,30 @@ func status(files *fsys.FS, path string) model.ProjectStatus {
 		return model.ProjectOK
 	}
 }
+
+// Saved returns an adapter for the repos saved with jarx setup repo add.
+// configFile is where they're saved, for the origin.
+func Saved(configFile string, repos []string) agent.Adapter {
+	return saved{configFile: configFile, repos: repos}
+}
+
+type saved struct {
+	configFile string
+	repos      []string
+}
+
+func (saved) Agent() model.Agent { return model.AgentJarx }
+
+func (s saved) Projects(c agent.Context) ([]model.Project, []finding.Finding) {
+	origin := model.Origin{
+		Agent:    model.AgentJarx,
+		File:     model.NewPath(c.Scrub, s.configFile),
+		Scope:    model.ScopeJarx,
+		InEffect: true,
+	}
+	out := make([]model.Project, 0, len(s.repos))
+	for _, r := range s.repos {
+		out = append(out, model.Project{Path: model.NewPath(c.Scrub, r), Origins: []model.Origin{origin}})
+	}
+	return out, nil
+}

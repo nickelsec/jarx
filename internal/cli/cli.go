@@ -23,6 +23,7 @@ const usage = `usage: jarx [--version] <command>
 
 commands:
   scan   map what the agents can see and reach
+  setup  show jarx's own settings, or add and remove extra repos
 
 flags:
   --version   print the jarx version
@@ -65,6 +66,8 @@ func Run(args []string, stdout, stderr io.Writer, ldflagsVersion string) int {
 	switch rest[0] {
 	case "scan":
 		return runScan(p, plain, rest[1:])
+	case "setup":
+		return runSetup(p, plain, rest[1:])
 	default:
 		return usageError(p, mainHelp, scrubbed(plain, fmt.Sprintf("unknown command %q", rest[0])))
 	}

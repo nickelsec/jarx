@@ -41,8 +41,9 @@ whether each exists.
   and outside-home statuses, the project and findings listing in `report`,
   `scan [path...]`, and demo records in `testdata/demo/` (723897b)
 - [x] `discover` (b): the hardened git walk and the fallback walk, file
-  counts, and the `exec:` lint rule
-- [ ] `jarx setup` and `setup repo add|rm`
+  counts, and the `exec:` lint rule (86e06a5)
+- [x] `jarx setup` and `setup repo add|rm`, with `--home`, and saved repos
+  in every scan
 - [ ] offline CI job
 
 **Run it:** `jarx scan --home testdata/demo` lists every known project with

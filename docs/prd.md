@@ -708,14 +708,14 @@ Flags:
 
 | Flag | On | What it does |
 |---|---|---|
-| `--home <dir>` | `scan`, `ui` | treat `<dir>` as the home dir instead of the real one (see [Demo home](#demo-home)) |
+| `--home <dir>` | `scan`, `ui`, `setup` | treat `<dir>` as the home dir instead of the real one (see [Demo home](#demo-home)) |
 | `--no-probe` | `scan` | skip MCP probing |
 | `--no-history` | `scan` | skip session history |
 | `--llm` | `scan` | run the LLM review after showing the preview |
 
 ### Demo home
 
-`--home <dir>` points `jarx scan` and `jarx ui` at a fake home. Everything
+`--home <dir>` points `jarx scan`, `jarx ui` and `jarx setup` at a fake home. Everything
 jarx would read from the real machine comes from inside `<dir>` instead:
 agent config dirs, project records, history, cred locations, and jarx's own
 state (snapshots, cursor, cache), so demo runs never mix with real ones.
@@ -793,8 +793,14 @@ With `--no-probe` and no `--llm`, jarx makes zero network calls.
 Everything lives under `os.UserConfigDir()/jarx/` (or `<home>/.jarx-state/`
 with `--home`):
 
-- `config` with LLM base URL, model, key env var name (not the key) and extra
-  repo paths
+- `config.json` with the extra repo paths from `jarx setup repo add`, and
+  later the LLM base URL, model and key env var name (never the key). It has
+  a version number; a config from a newer jarx is refused, not guessed at.
+  Reading it never creates the state dir, so a scan that saves nothing writes
+  nothing.
+- `fingerprint.key`, the random per-install key behind secret fingerprints.
+  It's made the first time a secret is found, and a damaged one is reported,
+  never replaced.
 - `snapshots/` with the last 20 masked snapshots
 - the history cursor (no content)
 - the LLM cache (hash to result)
