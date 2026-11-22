@@ -63,12 +63,22 @@ func (p *Printer) Error(err error) {
 func (p *Printer) Projects(ps []model.Project) {
 	p.Out.Printf("projects (%s)\n", p.text(strconv.Itoa(len(ps))))
 	for _, proj := range ps {
-		status := ""
-		if proj.Status != model.ProjectOK {
-			status = "  " + string(proj.Status)
+		detail := ""
+		switch {
+		case proj.Status != model.ProjectOK:
+			detail = "  " + string(proj.Status)
+		case proj.Walk != "":
+			detail = "  " + plural(len(proj.Files), "file", "files") + " (" + string(proj.Walk) + ")"
 		}
-		p.Out.Printf("  %s  %s%s\n", proj.Path.Text(), p.text(agents(proj)), p.text(status))
+		p.Out.Printf("  %s  %s%s\n", proj.Path.Text(), p.text(agents(proj)), p.text(detail))
 	}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + many
 }
 
 // agents names each agent once, in the order its records came, with its

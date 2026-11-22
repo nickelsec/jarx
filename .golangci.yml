@@ -75,6 +75,18 @@ linters:
         - pattern: ^(smtp|rpc|jsonrpc)\..*$
           pkg: ^net/(smtp|rpc|rpc/jsonrpc)$
           msg: "network: only internal/netguard may make network calls"
+        # Only internal/discover may run a process (hardened git), plus
+        # internal/proc from phase 4. exec.LookPath reads the real PATH, so it's
+        # banned too; git is found through platform.Env instead.
+        - pattern: ^exec\.(Command|CommandContext|LookPath)$
+          pkg: ^os/exec$
+          msg: "exec: only internal/discover may run commands"
+        - pattern: ^os\.StartProcess$
+          pkg: ^os$
+          msg: "exec: only internal/discover may run commands"
+        - pattern: ^syscall\.(Exec|ForkExec|StartProcess)$
+          pkg: ^syscall$
+          msg: "exec: only internal/discover may run commands"
         # Only internal/platform may read the real env and user dirs, so tests
         # and --home never touch the real machine.
         - pattern: ^os\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir|UserConfigDir|UserCacheDir)$
@@ -147,8 +159,12 @@ linters:
         linters:
           - forbidigo
         text: "output: only cmd/jarx may use os.Stdout"
+      - path: ^internal/discover/
+        linters:
+          - forbidigo
+        text: "exec:"
       # Tests build fixtures in t.TempDir() and check what got written.
       - path: _test\.go$
         linters:
           - forbidigo
-        text: "(read|write):"
+        text: "(read|write|exec):"

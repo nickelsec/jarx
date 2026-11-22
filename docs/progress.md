@@ -39,8 +39,8 @@ whether each exists.
   (f86f249)
 - [x] `discover` and `report` (a): project records from both adapters, stale
   and outside-home statuses, the project and findings listing in `report`,
-  `scan [path...]`, and demo records in `testdata/demo/`
-- [ ] `discover` (b): the hardened git walk and the fallback walk, file
+  `scan [path...]`, and demo records in `testdata/demo/` (723897b)
+- [x] `discover` (b): the hardened git walk and the fallback walk, file
   counts, and the `exec:` lint rule
 - [ ] `jarx setup` and `setup repo add|rm`
 - [ ] offline CI job

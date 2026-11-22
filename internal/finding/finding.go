@@ -131,9 +131,20 @@ func UnreadableRecord() Rule {
 	}
 }
 
+// WalkTruncated is jarx's own rule for a project with more files than jarx
+// lists, so a cut-off walk is never silent.
+func WalkTruncated() Rule {
+	return Rule{
+		ID:       "JARX-SCAN-003",
+		Severity: Info,
+		Title:    "stopped listing files in a very large project",
+		Fix:      "files past the limit weren't checked; scan a subfolder with jarx scan <path>",
+	}
+}
+
 // Rules returns the rules the finding package itself owns.
 func Rules() []Rule {
-	return []Rule{SkippedTooLarge(), UnreadableRecord()}
+	return []Rule{SkippedTooLarge(), UnreadableRecord(), WalkTruncated()}
 }
 
 // FromSkips turns every file fsys refused into an info finding.

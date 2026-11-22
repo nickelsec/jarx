@@ -5,7 +5,9 @@ package discover
 
 import (
 	"cmp"
+	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"path/filepath"
 	"slices"
@@ -16,6 +18,8 @@ import (
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/model"
 )
+
+const goosWindows = "windows"
 
 // Result is what discover found.
 type Result struct {
@@ -46,10 +50,30 @@ func Run(c agent.Context, adapters []agent.Adapter, extra []string) Result {
 
 	projects := merge(all, c.Env.GOOS)
 	for i := range projects {
-		projects[i].Status = status(c.Files, projects[i].Path.Raw())
+		p := &projects[i]
+		p.Status = status(c.Files, p.Path.Raw())
+		if p.Status == model.ProjectOK {
+			findings = append(findings, walkProject(c, p, maxFiles)...)
+		}
 	}
 	findings = append(findings, finding.FromSkips(c.Scrub, c.Files.Skips())...)
 	return Result{Projects: projects, Findings: findings}
+}
+
+// walkProject lists p's files. A walk cut off at limit is a finding, so it's
+// never silent.
+func walkProject(c agent.Context, p *model.Project, limit int) []finding.Finding {
+	w := walkRepo(context.Background(), c, p.Path.Raw(), limit)
+	p.Walk = w.method
+	for _, f := range w.files {
+		p.Files = append(p.Files, model.NewPath(c.Scrub, f))
+	}
+	if !w.truncated {
+		return nil
+	}
+	ev, _ := c.Scrub.Scrub(fmt.Sprintf("listed the first %d files", limit))
+	origin := model.Origin{Agent: model.AgentJarx, File: p.Path, InEffect: true}
+	return []finding.Finding{finding.WalkTruncated().New(origin, ev)}
 }
 
 // merge folds records of the same dir into one project, keeping every
@@ -77,7 +101,7 @@ func merge(all []model.Project, goos string) []model.Project {
 // case.
 func key(p, goos string) string {
 	k := filepath.Clean(p)
-	if goos == "windows" {
+	if goos == goosWindows {
 		k = strings.ToLower(k)
 	}
 	return k

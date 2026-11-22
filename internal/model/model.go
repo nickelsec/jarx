@@ -117,12 +117,23 @@ type Trust struct {
 	Origin Origin
 }
 
+// WalkMethod is how a project's files were listed.
+type WalkMethod string
+
+// Walk methods.
+const (
+	WalkGit      WalkMethod = "git"  // hardened git ls-files: tracked plus untracked, not ignored
+	WalkFallback WalkMethod = "walk" // jarx's own walk, when git isn't there or refuses
+)
+
 // Project is a project dir an agent knows about.
 type Project struct {
 	Path    Path
 	Origins []Origin // every record that mentions it
 	Status  ProjectStatus
 	Trust   []Trust
+	Files   []Path     // what the agent can see in it, after the skip list
+	Walk    WalkMethod // "" when the project wasn't walked
 }
 
 // Unknown is a config key the adapter doesn't recognize.

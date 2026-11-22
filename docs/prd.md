@@ -193,12 +193,17 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
 
 ### Walking a repo
 
-Inside a project, jarx lists files with `git ls-files` (tracked plus
-untracked, not ignored) so it sees what the agent sees in a normal repo. If
-the folder isn't a git repo or git isn't installed, it falls back to its own
-walk. Both use a skip list (`node_modules`, `.git`, `vendor`, build output
-dirs, very large files). Instruction files in parent folders above the repo
-root are collected separately, since Claude loads them too.
+Inside a project, jarx lists files with a hardened `git ls-files` (tracked
+plus untracked, not ignored) so it sees what the agent sees in a normal repo.
+The repo's own git config can't make git run anything or list another folder
+(see [design.md](design.md)). If the folder isn't a git repo, git refuses, or
+git isn't installed, it falls back to its own walk. Under `--home` it always
+uses its own walk. Both use a skip list (`node_modules`, `.git`, `vendor`,
+build output dirs) that still keeps agent files inside those dirs. jarx lists
+up to 200,000 files per project, and a project with more gets an info
+finding instead of being cut off silently. Instruction files in parent
+folders above the repo root are collected separately, since Claude loads
+them too.
 
 ## MCP probing
 

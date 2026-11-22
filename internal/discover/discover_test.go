@@ -15,7 +15,7 @@ import (
 	"github.com/nickelsec/jarx/internal/redact"
 )
 
-func context(t *testing.T) agent.Context {
+func fakeContext(t *testing.T) agent.Context {
 	t.Helper()
 	env, err := platform.FromHome(t.TempDir())
 	if err != nil {
@@ -73,7 +73,7 @@ func byPath(ps []model.Project) map[string]model.Project {
 }
 
 func TestRunMergesTheSameProjectFromEveryAgent(t *testing.T) {
-	c := context(t)
+	c := fakeContext(t)
 	app := mkdir(t, filepath.Join(c.Env.Home, "projects", "app"))
 
 	r := Run(c, []agent.Adapter{
@@ -97,7 +97,7 @@ func TestRunMergesTheSameProjectFromEveryAgent(t *testing.T) {
 }
 
 func TestRunSetsEachProjectsStatus(t *testing.T) {
-	c := context(t)
+	c := fakeContext(t)
 	ok := mkdir(t, filepath.Join(c.Env.Home, "ok"))
 	file := filepath.Join(c.Env.Home, "file")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
@@ -124,7 +124,7 @@ func TestRunSetsEachProjectsStatus(t *testing.T) {
 }
 
 func TestRunAddsExtraPathsFromTheCommandLine(t *testing.T) {
-	c := context(t)
+	c := fakeContext(t)
 	extra := mkdir(t, filepath.Join(c.Env.Home, "extra"))
 
 	r := Run(c, nil, []string{extra})
@@ -139,7 +139,7 @@ func TestRunAddsExtraPathsFromTheCommandLine(t *testing.T) {
 }
 
 func TestRunMakesRelativeExtraPathsAbsolute(t *testing.T) {
-	c := context(t)
+	c := fakeContext(t)
 	mkdir(t, filepath.Join(c.Env.Home, "rel"))
 	t.Chdir(c.Env.Home)
 
@@ -151,7 +151,7 @@ func TestRunMakesRelativeExtraPathsAbsolute(t *testing.T) {
 }
 
 func TestRunSortsProjectsAndKeepsAdapterFindings(t *testing.T) {
-	c := context(t)
+	c := fakeContext(t)
 	f := finding.UnreadableRecord().New(model.Origin{Agent: model.AgentCodex}, redact.Text{})
 
 	r := Run(c, []agent.Adapter{
@@ -168,7 +168,7 @@ func TestRunSortsProjectsAndKeepsAdapterFindings(t *testing.T) {
 }
 
 func TestRunReportsFilesFsysRefusedAsFindings(t *testing.T) {
-	c := context(t)
+	c := fakeContext(t)
 	big := filepath.Join(c.Env.Home, ".codex", "config.toml")
 	mkdir(t, filepath.Dir(big))
 	if err := os.WriteFile(big, make([]byte, fsys.MaxReadSize+1), 0o600); err != nil {

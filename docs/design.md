@@ -64,17 +64,43 @@ https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
 
 ### Hardened git for repo walks
 
-A repo's own `.git/config` can point at commands (`core.fsmonitor`, diff
-drivers). A clone doesn't carry config, but a repo that arrived as an archive
-can. So jarx runs exactly:
+A repo's own `.git/config` can run commands or change what gets listed. A
+clone doesn't carry config, but a repo that arrived as an archive can, and
+`include.path` can pull in more. On git 2.39, a plain `ls-files` in a hostile
+repo really does run `core.fsmonitor` and really does follow `core.worktree`
+to list another dir. So jarx runs exactly:
 
 ```
-git -c core.fsmonitor=false -c core.untrackedCache=false \
+git --no-pager --work-tree=<repo> \
+    -c core.fsmonitor=false -c core.useBuiltinFSMonitor=false \
+    -c core.untrackedCache=false -c core.hooksPath=<devnull> \
+    -c core.excludesFile=<devnull> -c safe.bareRepository=explicit \
     ls-files -z --cached --others --exclude-standard
 ```
 
-with `GIT_OPTIONAL_LOCKS=0` and a scrubbed env. It never touches
-`safe.directory`. If git refuses or isn't installed, jarx uses its own walk.
+Command line `-c` beats everything in the repo's config, including what
+`include.path` pulls in. The env is built from scratch: PATH from
+`platform.Env`, `GIT_OPTIONAL_LOCKS=0`, `GIT_CONFIG_NOSYSTEM=1`,
+`GIT_CONFIG_GLOBAL=<devnull>`, `GIT_TERMINAL_PROMPT=0`,
+`GIT_CEILING_DIRECTORIES=<repo's parent>` (so a dir that isn't a repo can't
+use a parent repo's config) and `LC_ALL=C`, plus `SystemRoot` on Windows.
+Nothing else from jarx's own env comes along. Stderr is thrown away. There's
+a 10s timeout and a 64 MiB output cap, and every path git prints has to be a
+plain relative path inside the repo or the whole output is dropped.
+
+`ls-files` without `-m`, `-s` or `--eol` never reads file content, so
+filter, diff and textconv drivers don't run. The pager, hooks and untracked
+cache flags are defense in depth: git 2.39 doesn't run them here, but other
+versions or paths might.
+
+What's left: `include.path` still makes git read the files it names. That's
+a read, not a run, and nothing it pulls in can override the `-c` flags.
+
+jarx never touches `safe.directory`. If git refuses, isn't on PATH, or the
+dir isn't a repo, jarx uses its own walk through fsys. Under `--home` it
+never runs git at all, so the demo and the tests never start a binary from a
+fake PATH. Tests prove each real defense with throwaway repos whose config
+writes a marker file if it ever runs.
 
 ### MCP client covers four protocol revisions
 
@@ -113,6 +139,7 @@ a spot in the code that makes breaking it hard.
 | Nothing raw reaches the terminal or a log | Only `report` writes output. `forbidigo` bans `fmt.Print*`, `fmt.Fprint*`, `os.Stdout`, `os.Stderr`, `print`, `println`, `log` and `log/slog` everywhere else (`cmd/jarx` may use `os.Stdout` and `os.Stderr` only to hand them to `report`). `report` takes values only as `redact.Text`, and its format string has an unexported type, so a string variable won't compile as the format. `report.Error` scrubs error text, since a parser error can quote the line it failed on. The limit: a package handed an `io.Writer` could still call `Write` on it, but only `cmd/jarx` can reach the real stdout and stderr, so that needs a new parameter that review would catch. |
 | Never calls a tool | The `mcp` package has constants only for `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
 | Only the listed network calls | `netguard` is the only package allowed to make a network connection. golangci `forbidigo` bans `http.Get`, `http.Client`, `http.Transport`, `http.DefaultClient`, `net.Dial*`, `net.Dialer`, `tls.Dial*`, `tls.Client`, DNS lookups (`net.Lookup*`, `net.Resolver`), `net/smtp` and `net/rpc` everywhere else. Inside netguard, every connection is checked in the dialer's `Control` hook, after DNS and right before connect, on the exact IP being connected, so DNS rebinding and reconnects can't get past it. A literal IP host is also checked before dialing, because Go rewrites `0.0.0.0`, `::` and an empty host into a dial to the local machine before `Control` sees it. The tests run with a fake DNS server and a test-only rule that refuses any non-loopback connection, so a broken guard fails its tests instead of reaching a real address. |
+| Only discover runs a process | `forbidigo` bans `exec.Command`, `exec.CommandContext`, `exec.LookPath` (it reads the real PATH), `os.StartProcess` and `syscall.Exec`/`ForkExec` outside `discover`, which only runs hardened git. `proc` joins it in phase 4. git is found through `platform.Env`'s PATH, never under `--home`. |
 | Never writes agent config | `fsys` has no write methods. The only writer is `jarxdir`, which is rooted at jarx's state dir (`os.UserConfigDir()/jarx`, or `<home>/.jarx-state` with `--home`) with `os.Root`. `forbidigo` bans `os.WriteFile`, `os.Create`, `os.Mkdir*`, `os.Remove*`, `os.Rename` and friends everywhere else (tests may write fixtures). |
 | Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, PATH, state dir, system roots). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`, and bans `os.Open`, `os.ReadFile`, `os.Stat`, `os.OpenRoot`, `filepath.Walk*` and friends outside `fsys`, `jarxdir` and `platform`. Under `--home`, `fsys` confines every read to the fake home with `os.Root`, so a fixture that points at a real path, a `..` trick or a symlink can't reach the real machine. `--home` builds a `platform.Env` with no system roots, registry, plists, real env or real PATH. |
 | Only approved dependencies | golangci `depguard` lists the five approved modules plus stdlib. A new import fails lint until someone approves it. |

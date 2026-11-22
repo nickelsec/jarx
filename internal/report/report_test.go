@@ -81,13 +81,20 @@ func TestProjectsListing(t *testing.T) {
 			Path: path("/projects/app"), Status: model.ProjectOK,
 			Origins: []model.Origin{claude, codex},
 			Trust:   []model.Trust{{Level: model.TrustTrusted, Origin: codex}},
+			Files:   []model.Path{path("a.go"), path("b.go")},
+			Walk:    model.WalkGit,
+		},
+		{
+			Path: path("/projects/one"), Status: model.ProjectOK, Origins: []model.Origin{codex},
+			Files: []model.Path{path("README.md")}, Walk: model.WalkFallback,
 		},
 		{Path: path("/projects/old"), Status: model.ProjectStale, Origins: []model.Origin{claude, claude}},
 		{Path: path("/" + canary), Status: model.ProjectOutsideHome, Origins: []model.Origin{{Agent: model.AgentJarx}}},
 	})
 
-	want := "projects (3)\n" +
-		"  /projects/app  claude, codex (trusted)\n" +
+	want := "projects (4)\n" +
+		"  /projects/app  claude, codex (trusted)  2 files (git)\n" +
+		"  /projects/one  codex  1 file (walk)\n" +
 		"  /projects/old  claude  stale\n" +
 		"  /REDACTED:test_token  jarx  outside fake home\n"
 	if out.String() != want {
