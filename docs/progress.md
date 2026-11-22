@@ -1,18 +1,19 @@
 # jarx progress
 
 The checklist for the build phases in [design.md](design.md#build-phases).
-Each item is one PR. Tick it in the same PR as the work, and add the PR number.
+Each phase is one PR, and each item is one commit in it. Tick the item in the
+same commit as the work. The next commit adds that commit's short hash.
 
 ## Phase 1: Foundation
 
 - [x] skeleton and CI: `go.mod`, `.gitattributes`, `cmd/jarx`, workflow,
-  golangci config with forbidigo and depguard (#2)
+  golangci config with forbidigo and depguard (84504b1)
 - [x] build phases, progress checklist, CLI trimmed to scan, ui and setup
-  (#3)
+  (bdc8f63)
 - [x] CLI skeleton: move to `internal/cli`, `--version` instead of the
-  `version` subcommand, `scan` command (#4)
+  `version` subcommand, `scan` command (a0613b1)
 - [x] `platform`: injected `Env`, OS facts and system roots, `--home`, `scan`
-  prints what platform resolved, `.jarx-state` ignored under testdata
+  prints what platform resolved, `.jarx-state` ignored under testdata (200c17d)
 - [ ] `fsys` (read-only view, size caps, skip list) and `jarxdir` (`os.Root`
   on the jarx config dir)
 - [ ] `scan` adds jarx's state dir and exists checks, first bits of

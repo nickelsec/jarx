@@ -322,9 +322,10 @@ jarx gets built in eight phases. Each phase only uses what came before it and
 ends with something you can run or see. Choke points come first, so nothing
 ever gets written against a looser version of them.
 
-A phase is split into small PRs, one per item in
-[progress.md](progress.md). That file is the checklist, and it gets ticked in
-the same PR as the work.
+Each phase is one PR, opened as a draft early so CI runs on all three OSes
+on every push. Each item in [progress.md](progress.md) is one commit in that
+PR. That file is the checklist, and it gets ticked in the same commit as the
+work.
 
 `jarx scan` grows a little in every phase. Each phase adds to `testdata/demo/`
 too, so the thing you run at the end of a phase shows that phase's work.
