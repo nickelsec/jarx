@@ -502,3 +502,27 @@ func TestEnvAndHeaderValuesAreMaskedByTheirName(t *testing.T) {
 		t.Errorf("env = %q, want plain values and references kept", got)
 	}
 }
+
+func TestServersCarryTheRawLaunchForProbe(t *testing.T) {
+	const tok = "tok_ABCDEFGHIJKLMNOPQRST"
+	files := fmtPlugin("true")
+	files[fmtRoot+"/.mcp.json"] = mcpJSON(`"lint": {"command": "${CLAUDE_PLUGIN_ROOT}/bin/lint", "env": {"KEY": "` + tok + `"}}`)
+	files[".claude.json"] = claudeJSON(`"remote": {"type": "http", "url": "https://r.example.com/mcp", "headers": {"Authorization": "Bearer `+tok+`"}, "oauth": {"clientId": "x"}},
+		"helped": {"type": "http", "url": "https://h.example.com/mcp", "headersHelper": "get-token"}`, "", "")
+	c := fakeHome(t, files)
+
+	p := serversFor(t, c, model.TrustTrusted)
+
+	lint, ok := findServer(t, p, model.ScopePlugin, "lint").Launch.Spec()
+	if !ok || lint.Command != "${CLAUDE_PLUGIN_ROOT}/bin/lint" || lint.Env[0][1] != tok ||
+		lint.PluginRoot != c.Env.MapPath("/"+fmtRoot) || lint.ProjectDir != p.Path.Raw() {
+		t.Errorf("plugin launch = %+v, want the raw command, env and dirs", lint)
+	}
+	remote, _ := findServer(t, p, model.ScopeUser, "remote").Launch.Spec()
+	if remote.URL != "https://r.example.com/mcp" || remote.Headers[0][1] != "Bearer "+tok || !remote.OAuth {
+		t.Errorf("remote launch = %+v, want the raw header and the oauth flag", remote)
+	}
+	if helped, _ := findServer(t, p, model.ScopeUser, "helped").Launch.Spec(); !helped.HeadersHelper {
+		t.Error("a headersHelper should be flagged")
+	}
+}

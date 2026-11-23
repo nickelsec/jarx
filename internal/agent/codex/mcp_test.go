@@ -295,3 +295,39 @@ func TestLegacyManagedConfigServers(t *testing.T) {
 		t.Errorf("managed git = %s, want it to start", s.Start)
 	}
 }
+
+func TestCodexServersCarryTheRawLaunchForProbe(t *testing.T) {
+	c := fakeHome(t, map[string]string{".codex/config.toml": `
+[mcp_servers.local]
+command = "srv"
+args = ["--fast"]
+cwd = "/work"
+env = { KEY = "raw-value-123" }
+env_vars = ["LOCAL", { name = "FAR", source = "remote" }]
+
+[mcp_servers.remote]
+url = "https://r.example.com/mcp"
+bearer_token_env_var = "R_TOKEN"
+http_headers = { "X-Team" = "a" }
+env_http_headers = { "X-Key" = "R_KEY" }
+
+[mcp_servers.signin]
+url = "https://s.example.com/mcp"
+auth = "oauth"
+`})
+
+	p := codexServers(t, c, model.TrustTrusted)
+
+	l, _ := codexServer(t, p, model.ScopeUser, "local").Launch.Spec()
+	if l.Command != "srv" || l.Cwd != "/work" || l.Env[0] != [2]string{"KEY", "raw-value-123"} ||
+		!slices.Equal(l.ForwardEnv, []model.ForwardVar{{Name: "LOCAL"}, {Name: "FAR", Remote: true}}) {
+		t.Errorf("local launch = %+v", l)
+	}
+	r, _ := codexServer(t, p, model.ScopeUser, "remote").Launch.Spec()
+	if r.BearerVar != "R_TOKEN" || r.Headers[0] != [2]string{"X-Team", "a"} || r.HeaderVars[0] != [2]string{"X-Key", "R_KEY"} || r.OAuth {
+		t.Errorf("remote launch = %+v", r)
+	}
+	if s, _ := codexServer(t, p, model.ScopeUser, "signin").Launch.Spec(); !s.OAuth {
+		t.Error("auth = oauth should be flagged")
+	}
+}

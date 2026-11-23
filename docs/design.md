@@ -571,6 +571,47 @@ Sources: https://developers.openai.com/codex/mcp,
 https://developers.openai.com/codex/config-reference,
 https://developers.openai.com/codex/enterprise/managed-configuration
 
+### How probe starts and reaches servers
+
+- **Raw launch data, kept out of every output.** Probe has to start a server
+  with the real env values and send the real configured tokens, as the agent
+  would. The adapters put those on `model.Server` as a `model.Launch`, a
+  leaf type built like `Path`: its contents are unexported, only probe reads
+  them (through `Spec`, which lint bans everywhere else), and it prints as `[launch]` for every fmt verb and
+  encodes as JSON `null`. Snapshots, the report and the analyzers never see
+  it, and a test proves it never prints or encodes a value.
+- **Once per definition.** A server that applies in several projects, like a
+  user server, is probed once and the result goes on every copy. A stdio
+  server runs in its project's dir, so for those the project is part of the
+  identity.
+- **Claude's credential variables.** The docs list examples of variables that
+  read as empty in a remote server's URL and headers, and the families they
+  come from, not a full list. jarx reads those examples and the families
+  (`ANTHROPIC_*`, `CLAUDE_CODE_*`, the cloud providers' prefixes, `*_PROXY`)
+  as empty, except `*_BASE_URL`, so it never sends a credential Claude would
+  hold back. The cost is a possible 401 where Claude would get in.
+- **Codex `auth`.** The docs make `oauth` the default, and without stored
+  credentials Codex connects with none. So only an explicit `oauth` or
+  `chatgpt` makes a server "requires auth".
+- **Reasons don't quote errors.** A status reason never includes an error's
+  text, since a URL in it can hold a token. It names the kind of failure.
+
+#### Under --home
+
+Probe never contacts a remote server and never starts a program from the
+fake PATH. Both show as "not started" with that reason. The one thing it
+starts is the demo home's fake server: a stdio server whose command is
+`jarx-fakemcp <script>`. Probe reads the script through `fsys`, so it has to
+be inside the fake home, and runs the jarx binary itself in a hidden
+`__fakemcp` mode with the script as its argument and a marker variable in
+its env. The hidden mode refuses without the marker. On the real machine
+`jarx-fakemcp` is an ordinary command name, looked up on PATH like any
+other, and a test proves probe never starts jarx for it there. A remote
+server can't use it at all.
+
+So a demo scan probes over stdio pipes only, and the offline CI job keeps
+probing on, which proves the probe makes no network syscall.
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
@@ -591,7 +632,7 @@ a spot in the code that makes breaking it hard.
 
 | Promise | How the code makes breaking it hard |
 |---|---|
-| Secrets never leak | Model text fields are `redact.Text`. Only the `redact` package can build one (unexported field). `report`, `ui`, `snapshot` and `llm` only take `redact.Text`, so there's no way to put a raw string on screen, on disk or on the wire. Anything that matches a secret pattern is always masked. Entropy only flags a match as a likely placeholder, it never decides whether to mask, because showing a real secret is far worse than hiding a fake one. A reflection test walks every type reachable from `model.Inventory` and fails on a raw string anywhere: fields (exported or not), named string types, pointers, slices, arrays, map keys and values, `[]byte`, `[]rune`, interfaces, funcs, chans, embedded and generic types, and structs from other packages that aren't allowlisted. The test has one fixture per hiding spot, so a gap in the walker fails too. `model.Path` keeps the raw path only for fsys reads, and prints and encodes as the masked path for every fmt verb and in JSON. |
+| Secrets never leak | Model text fields are `redact.Text`. Only the `redact` package can build one (unexported field). `report`, `ui`, `snapshot` and `llm` only take `redact.Text`, so there's no way to put a raw string on screen, on disk or on the wire. Anything that matches a secret pattern is always masked. Entropy only flags a match as a likely placeholder, it never decides whether to mask, because showing a real secret is far worse than hiding a fake one. A reflection test walks every type reachable from `model.Inventory` and fails on a raw string anywhere: fields (exported or not), named string types, pointers, slices, arrays, map keys and values, `[]byte`, `[]rune`, interfaces, funcs, chans, embedded and generic types, and structs from other packages that aren't allowlisted. The test has one fixture per hiding spot, so a gap in the walker fails too. `model.Path` keeps the raw path only for fsys reads, and prints and encodes as the masked path for every fmt verb and in JSON. The one exception is `model.Launch`, the raw launch data probe needs to start a server the way the agent would: like `Path` it keeps its contents unexported, it prints as `[launch]` and encodes as `null` (with a test for every fmt verb and JSON), and `forbidigo` bans `Launch.Spec` everywhere but `internal/probe` and tests. |
 | Nothing raw reaches the terminal or a log | Only `report` writes output. `forbidigo` bans `fmt.Print*`, `fmt.Fprint*`, `os.Stdout`, `os.Stderr`, `print`, `println`, `log` and `log/slog` everywhere else (`cmd/jarx` may use `os.Stdout` and `os.Stderr` only to hand them to `report`). `report` takes values only as `redact.Text`, and its format string has an unexported type, so a string variable won't compile as the format. `report.Error` scrubs error text, since a parser error can quote the line it failed on. The limit: a package handed an `io.Writer` could still call `Write` on it, but only `cmd/jarx` can reach the real stdout and stderr, so that needs a new parameter that review would catch. |
 | Never calls a tool | The `mcp` package has constants only for `server/discover`, `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
 | Only the listed network calls | `netguard` is the only package allowed to make a network connection. golangci `forbidigo` bans `http.Get`, `http.Client`, `http.Transport`, `http.DefaultClient`, `net.Dial*`, `net.Dialer`, `tls.Dial*`, `tls.Client`, DNS lookups (`net.Lookup*`, `net.Resolver`), `net/smtp` and `net/rpc` everywhere else. Inside netguard, every connection is checked in the dialer's `Control` hook, after DNS and right before connect, on the exact IP being connected, so DNS rebinding and reconnects can't get past it. A literal IP host is also checked before dialing, because Go rewrites `0.0.0.0`, `::` and an empty host into a dial to the local machine before `Control` sees it. The tests run with a fake DNS server and a test-only rule that refuses any non-loopback connection, so a broken guard fails its tests instead of reaching a real address. |
@@ -937,8 +978,9 @@ Jobs:
   back to the runner user, so jarx never runs as root. A control step first
   proves both layers work: `curl` has to fail inside the namespace, and
   `strace` has to see `curl`'s connection attempt, so a blind audit can't
-  make the job pass. `--no-probe` and `--no-history` join the command when
-  they exist (phases 4 and 6).
+  make the job pass. The scan runs with probing on: under `--home` probe only
+  starts the demo's fake server, over stdio pipes, so the job proves the
+  probe makes no network syscall. `--no-history` joins the command in phase 6.
 
 The Go version comes from `go.mod`, so CI and local builds match. Every action
 is pinned by SHA with the version in a comment.

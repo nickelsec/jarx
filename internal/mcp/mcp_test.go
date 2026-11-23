@@ -404,3 +404,18 @@ func TestTheOldSSETransportSendsTheConfiguredHeaders(t *testing.T) {
 	}
 	onlyListed(t, srv)
 }
+
+func TestListSSEGoesStraightToTheStream(t *testing.T) {
+	srv, url := serve(t, fakemcp.Script{Era: fakemcp.EraLegacy, Tools: tools(1), Bad: fakemcp.Bad{LegacySSE: true}})
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	l, err := ListSSE(ctx, netguard.New(), url+"/sse", nil, Options{})
+
+	if err != nil || len(l.Tools) != 1 || l.Transport != TransportSSE {
+		t.Fatalf("listing = %+v, %v; want the tool over HTTP+SSE", l, err)
+	}
+	if got := srv.Received(); len(got) == 0 || got[0] != "initialize" {
+		t.Errorf("received %q, want initialize first, with no modern POST before it", got)
+	}
+}

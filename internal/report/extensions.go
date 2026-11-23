@@ -166,7 +166,37 @@ func (p *Printer) servers(a model.Agent, ss []model.Server) {
 		if !s.Plugin.IsZero() {
 			parts = append(parts, "from "+s.Plugin.String())
 		}
+		if s.Origin.InEffect && s.Status != model.StatusUnprobed {
+			parts = append(parts, probeStatus(s))
+		}
 		p.Out.Printf("      %s  %s  %s  %s\n", s.Name, p.text(string(s.Transport)), p.text(strings.Join(run, " ")),
 			p.text(strings.Join(parts, ", ")+notInEffect(s.Origin)+note(s.Note)))
+		p.offers(s.Offers)
+	}
+}
+
+// probeStatus is the server's status after probing, with its reason.
+func probeStatus(s model.Server) string {
+	if s.StatusWhy.IsZero() {
+		return string(s.Status)
+	}
+	return string(s.Status) + ": " + s.StatusWhy.String()
+}
+
+// offers lists what a listed server offers, one line each.
+func (p *Printer) offers(os []model.Offer) {
+	for _, o := range os {
+		parts := []string{string(o.Kind), o.Name.String()}
+		if !o.Description.IsZero() {
+			parts = append(parts, o.Description.String())
+		}
+		hints := make([]string, 0, len(o.Hints))
+		for _, h := range o.Hints {
+			hints = append(hints, h.String())
+		}
+		if len(hints) > 0 {
+			parts = append(parts, strings.Join(hints, " "))
+		}
+		p.Out.Printf("        %s\n", p.text(strings.Join(parts, "  ")))
 	}
 }

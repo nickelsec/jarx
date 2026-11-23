@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "notes-helper": {
+      "command": "jarx-fakemcp",
+      "args": [".jarx-demo/notes-helper.json"]
+    },
     "deploy": {
       "command": "npx",
       "args": ["-y", "deploy-helper-mcp@latest"]

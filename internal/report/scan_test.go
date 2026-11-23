@@ -292,3 +292,41 @@ func TestTheInventoryListsEveryServer(t *testing.T) {
 		}
 	}
 }
+
+func TestTheInventoryShowsProbeStatusAndOffers(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.All = true
+	listed := f.server("notes", model.StartYes)
+	listed.Status = model.StatusListed
+	listed.Offers = []model.Offer{
+		{Kind: model.OfferTool, Name: f.text("save_note"), Description: f.text("Saves a note."), Hints: []redact.Text{f.text("destructiveHint")}},
+		{Kind: model.OfferPrompt, Name: f.text("summarize")},
+	}
+	failed := f.server("broken", model.StartYes)
+	failed.Status, failed.StatusWhy = model.StatusFailed, f.text("it exited with code 1 before answering")
+	v.Projects[0].Servers = []model.Server{listed, failed}
+
+	out := render(Style{Width: 200}, v)
+
+	for _, want := range []string{
+		"notes  stdio  node  project, starts, listed",
+		"tool  save_note  Saves a note.  destructiveHint",
+		"prompt  summarize",
+		"broken  stdio  node  project, starts, failed to start: it exited with code 1 before answering",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output =\n%s\nwant it to contain %q", out, want)
+		}
+	}
+}
+
+func TestTheAgentRowCountsItsServers(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.Projects[0].Servers = []model.Server{f.server("a", model.StartYes), f.server("b", model.StartNo)}
+
+	if out := render(Style{Width: 120}, v); !strings.Contains(out, "Claude Code ~"+string(filepath.Separator)+".claude  1 project (1 trusted) - 2 MCP servers") {
+		t.Errorf("output =\n%s\nwant the server count on the Claude row", out)
+	}
+}

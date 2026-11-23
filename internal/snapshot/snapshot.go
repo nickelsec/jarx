@@ -34,6 +34,7 @@ const (
 	KindOption      Kind = "setting"
 	KindConfig      Kind = "config file"
 	KindServer      Kind = "mcp server"
+	KindOffer       Kind = "mcp offer"
 )
 
 // Item is one thing a scan found. Project, Kind and Key say which thing it
@@ -214,6 +215,15 @@ func (b *builder) server(dir redact.Text, s model.Server) {
 		Key:      b.join(string(s.Origin.Agent), string(s.Origin.Scope), s.Name.String(), "in", s.Origin.File.Text().String()),
 		InEffect: s.Origin.InEffect, Why: s.Origin.Why, Value: b.join(string(s.Start)), Hash: hash(b.join(strings.Join(parts, "\x00"))),
 	})
+	// What a listed server offers, each as its own item with a hash of its
+	// whole masked entry, so a changed description shows up (drift).
+	for _, o := range s.Offers {
+		b.add(Item{
+			Project: dir, Kind: KindOffer,
+			Key:      b.join(string(s.Origin.Agent), s.Name.String(), "in", s.Origin.File.Text().String(), string(o.Kind), o.Name.String()),
+			InEffect: true, Hash: hash(o.Text),
+		})
+	}
 }
 
 func texts(ts []redact.Text) string {

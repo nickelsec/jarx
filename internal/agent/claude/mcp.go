@@ -38,6 +38,8 @@ type rawServer struct {
 	env, headers                    [][2]string
 	// vars says whether a ${VAR} reference appears outside env.
 	vars bool
+	// oauth says the entry has an oauth block.
+	oauth bool
 	// extra is the keys a managedMcpServers entry may not have.
 	extra []string
 }
@@ -99,6 +101,7 @@ func parseServer(name string, raw json.RawMessage) (rawServer, bool) {
 			s.extra = append(s.extra, k)
 		}
 	}
+	_, s.oauth = keys["oauth"]
 	s.vars = usesVars(s)
 	return s, true
 }
@@ -362,7 +365,7 @@ func (e *extReader) onePluginServers(pl model.Plugin) []def {
 	var out []def
 	add := func(o model.Origin, ss []rawServer) {
 		for _, s := range ss {
-			out = append(out, def{raw: s, origin: o, rank: rankPlugin, plugin: pl.ID.String(), pluginName: m.Name})
+			out = append(out, def{raw: s, origin: o, rank: rankPlugin, plugin: pl.ID.String(), pluginName: m.Name, pluginRoot: root})
 		}
 	}
 	for _, f := range files {
@@ -475,6 +478,10 @@ func (e *extReader) toModel(d def) model.Server {
 	if !s.Origin.InEffect {
 		s.Origin.Why = e.text(d.why)
 	}
+	s.Launch = model.NewLaunch(model.LaunchSpec{
+		Command: d.raw.command, Args: d.raw.args, URL: d.raw.url, Env: d.raw.env, Headers: d.raw.headers,
+		HeadersHelper: d.raw.helper != "", OAuth: d.raw.oauth, ProjectDir: e.project.Path.Raw(), PluginRoot: d.pluginRoot,
+	})
 	return s
 }
 

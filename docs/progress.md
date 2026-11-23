@@ -268,8 +268,29 @@ shows it.
     header aren't checked by `fakemcp`, the 32 MiB cap has no test, and
     `ttlMs` caching and `subscriptions/listen` aren't used (jarx lists
     once)
-- [ ] `probe`: which servers, env expansion, concurrency, status,
-  `--no-probe`
+- [x] `probe`: which servers, env expansion, concurrency, status,
+  `--no-probe`. Every server that starts gets probed once per definition,
+  4 at a time with 15s each, and ends with one of the PRD's statuses. Claude's
+  `${VAR}` and `${VAR:-default}` with the path variables, its credential
+  variables read as empty toward remote servers (the documented examples and
+  their families), and Codex's `env_vars`, `bearer_token_env_var` and
+  `env_http_headers`. A reference to an unset variable is "missing
+  credential" and starts nothing. OAuth and headers helpers are "requires
+  auth" without contact, a 401 or 403 is "requires auth" or "credential
+  rejected" by whether creds were sent, and netguard's refusals are
+  "blocked" or "insecure transport". Also `model.Launch` for the raw launch
+  data (never printed or encoded, and a lint rule that lets only probe and
+  tests unwrap it), masked offers, instructions and stderr on
+  the server, the status and offers under `--all`, the server count on each
+  agent's row, offers as snapshot items for drift, `ListSSE` for SSE
+  servers, and `platform.LookupReal`. Under `--home` the only thing probe
+  starts is the demo's fake server, jarx itself in a hidden mode, with a
+  test that it never happens on the real machine; the demo gains its
+  poisoned `notes-helper` server
+  - Not covered yet: the probe's own findings on what servers offer (item 7
+    and 8), the PRD's "allowed by the token" layer (it stays unknown), Codex
+    plugin servers, and `${CLAUDE_PLUGIN_DATA}`, whose dir the docs don't
+    name
 - [ ] MCP supply chain and config rules. Includes the rules item 1, 2 and 4
   set up: a repo server that takes your server's name, one name in two
   scopes with different endpoints, a repo redefining a Codex server whose

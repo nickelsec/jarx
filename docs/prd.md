@@ -899,6 +899,13 @@ from `<dir>/.jarx-env` instead. Absolute paths inside the fake home's agent
 records are read relative to `<dir>`, so `/projects/app` in the demo's
 `.claude.json` means `<dir>/projects/app` on any machine.
 
+Probing under `--home` never contacts a remote server and never starts a
+program from the fake PATH; those servers show as "not started" and say
+why. The one server it starts is the demo's fake one: a stdio server whose
+command is `jarx-fakemcp <script>`, which jarx serves itself from a script
+inside the fake home. On the real machine `jarx-fakemcp` is just a command
+name like any other.
+
 The repo ships `testdata/demo/`, a fake home with planted problems:
 
 - a CLAUDE.md with hidden unicode and an HTML comment aimed at the agent

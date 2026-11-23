@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -23,13 +25,15 @@ import (
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/jarxdir"
 	"github.com/nickelsec/jarx/internal/model"
+	"github.com/nickelsec/jarx/internal/netguard"
 	"github.com/nickelsec/jarx/internal/platform"
+	"github.com/nickelsec/jarx/internal/probe"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
 	"github.com/nickelsec/jarx/internal/snapshot"
 )
 
-const scanUsage = `usage: jarx scan [--home <dir>] [path...]
+const scanUsage = `usage: jarx scan [--home <dir>] [--all] [--no-probe] [path...]
 
 Scans what Claude Code and Codex can see and reach on this machine.
 
@@ -38,6 +42,8 @@ this run only.
 
 flags:
   --home <dir>  use <dir> as the home dir instead of the real one
+  --all         show every finding in full, and the whole inventory
+  --no-probe    don't start or contact any MCP server
   -h, --help    show this help
 `
 
@@ -47,6 +53,7 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	fs := newFlagSet("scan")
 	home := fs.String("home", "", "")
 	all := fs.Bool("all", false, "")
+	noProbe := fs.Bool("no-probe", false, "")
 	if code, ok := parse(p, plain, fs, args, scanHelp); !ok {
 		return code
 	}
@@ -77,6 +84,10 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		append(slices.Clone(adapters), discover.Saved(configPath(env), cfg.Repos)),
 		fs.Args(),
 	)
+	self, _ := os.Executable() // runs the demo server under --home; probe never uses it elsewhere
+	probe.Run(context.Background(), agent.Context{Env: env, Files: files, Scrub: scrub}, res.Projects, probe.Options{
+		Disabled: *noProbe, Client: netguard.New(), Self: self,
+	})
 	findings, err := analyze(scrub, env, res)
 	if err != nil {
 		p.Error(err)

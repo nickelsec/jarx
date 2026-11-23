@@ -526,3 +526,22 @@ func TestCapabilitiesCanBeCutDown(t *testing.T) {
 		t.Errorf("capabilities = %v, want only tools", caps)
 	}
 }
+
+func TestMainServesTheScriptItIsGiven(t *testing.T) {
+	var out, errOut bytes.Buffer
+	in := strings.NewReader(req(1, "tools/list", modern, nil) + "\n")
+
+	code := Main([]string{`{"Tools": [{"name": "from-the-script"}], "Bad": {"Stderr": "hello"}}`}, in, &out, &errOut)
+
+	if code != 0 || !strings.Contains(out.String(), "from-the-script") || !strings.Contains(errOut.String(), "hello") {
+		t.Errorf("Main = %d, out %q, stderr %q; want the scripted tool and stderr", code, out.String(), errOut.String())
+	}
+}
+
+func TestMainRefusesABadScript(t *testing.T) {
+	for _, args := range [][]string{nil, {"not json"}, {"{}", "extra"}} {
+		if code := Main(args, strings.NewReader(""), io.Discard, io.Discard); code == 0 {
+			t.Errorf("Main(%q) = 0, want a failure", args)
+		}
+	}
+}

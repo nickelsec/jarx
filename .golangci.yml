@@ -65,6 +65,12 @@ linters:
       # Messages start with "network:" or "platform:" so the path exclusions
       # below can exempt exactly one group per choke point package.
       forbid:
+        # Only internal/probe may read a server's raw launch spec (real env
+        # values and tokens). model.Launch never prints or encodes it; this
+        # keeps every other package from unwrapping it.
+        - pattern: ^model\.Launch\.Spec$
+          pkg: ^github\.com/nickelsec/jarx/internal/model$
+          msg: "launch: only internal/probe may read a raw launch spec"
         # Only internal/netguard may build HTTP clients, transports or dialers.
         - pattern: ^http\.(Get|Post|Head|PostForm|DefaultClient|DefaultTransport|Client|Transport)$
           pkg: ^net/http$
@@ -171,11 +177,15 @@ linters:
         linters:
           - forbidigo
         text: "exec:"
+      - path: ^internal/probe/
+        linters:
+          - forbidigo
+        text: "launch:"
       # Tests build fixtures in t.TempDir() and check what got written.
       - path: _test\.go$
         linters:
           - forbidigo
-        text: "(read|write|exec):"
+        text: "(read|write|exec|launch):"
 
 # Show every issue on a line. By default golangci-lint keeps one per line,
 # so another linter on the same line (gosec, unused) can hide a forbidigo

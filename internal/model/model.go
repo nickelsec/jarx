@@ -224,8 +224,59 @@ type Server struct {
 	// for StartYes and StartMaybe, and Origin.Why says why not otherwise.
 	Start StartState
 	// Note says what jarx can't settle about starting it.
-	Note   redact.Text
-	Origin Origin
+	Note redact.Text
+	// Launch is the raw launch data for probe. It never prints or encodes.
+	Launch Launch
+	// What probe found: one status with its reason, what the server offers,
+	// its instructions and stderr, and notes on what didn't go as asked.
+	Status       ServerStatus
+	StatusWhy    redact.Text
+	Offers       []Offer
+	Instructions redact.Text
+	Stderr       redact.Text
+	ProbeNotes   []redact.Text
+	Origin       Origin
+}
+
+// ServerStatus is the one status a server ends up with after probing.
+type ServerStatus string
+
+// Server statuses, from the PRD's table.
+const (
+	StatusUnprobed          ServerStatus = "" // probe hasn't run
+	StatusListed            ServerStatus = "listed"
+	StatusMissingCredential ServerStatus = "missing credential"
+	StatusFailed            ServerStatus = "failed to start"
+	StatusTimedOut          ServerStatus = "timed out"
+	StatusNotStarted        ServerStatus = "not started"
+	StatusInsecure          ServerStatus = "insecure transport"
+	StatusRequiresAuth      ServerStatus = "requires auth"
+	StatusRejected          ServerStatus = "credential rejected"
+	StatusBlocked           ServerStatus = "blocked"
+	StatusUnreachable       ServerStatus = "unreachable"
+)
+
+// OfferKind is what a server offers.
+type OfferKind string
+
+// Offer kinds.
+const (
+	OfferTool     OfferKind = "tool"
+	OfferPrompt   OfferKind = "prompt"
+	OfferResource OfferKind = "resource"
+)
+
+// Offer is one tool, prompt or resource a server listed, scrubbed.
+type Offer struct {
+	Kind        OfferKind
+	Name        redact.Text // a resource's name, or its URI when it has none
+	Description redact.Text
+	// Hints are the annotation hints the server set true, like
+	// readOnlyHint or destructiveHint.
+	Hints []redact.Text
+	// Text is the whole entry as the server sent it, so the rules and the
+	// drift hash see every field: schemas, param names, enums and defaults.
+	Text redact.Text
 }
 
 // Config is one settings or config file, scrubbed. Origin says whose and

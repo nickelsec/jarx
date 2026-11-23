@@ -1,5 +1,5 @@
 {
-  "enabledMcpjsonServers": ["deploy", "tickets"],
+  "enabledMcpjsonServers": ["deploy", "tickets", "notes-helper"],
   "env": {"DEPLOY_TOKEN": "demo-not-a-real-token"},
   "permissions": {
     "allow": ["Bash(*)"],

@@ -34,6 +34,7 @@ type def struct {
 	rank       int
 	plugin     string // plugin id
 	pluginName string // the name in plugin.json, for its scoped name
+	pluginRoot string // the plugin dir, for ${CLAUDE_PLUGIN_ROOT}
 	start      model.StartState
 	why, note  string
 }

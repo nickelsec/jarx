@@ -167,7 +167,43 @@ func (e *extensions) fields(d serverDef) model.Server {
 	}
 	s.DisabledTools = texts(strList(t, "disabled_tools"), text)
 	s.Approvals = approvals(t, text)
+	s.Launch = launch(t)
 	return s
+}
+
+// launch is the raw launch data probe needs. Codex doesn't expand ${VAR} in
+// config, so values are used as written; env vars come in through env_vars,
+// bearer_token_env_var and env_http_headers.
+func launch(t map[string]any) model.Launch {
+	spec := model.LaunchSpec{
+		Command: str(t, "command"), Args: strList(t, "args"), URL: str(t, "url"), Cwd: str(t, "cwd"),
+		BearerVar: str(t, "bearer_token_env_var"), HeadersHelper: str(t, "http_headers_helper") != "",
+		Env: rawPairs(t, "env"), Headers: rawPairs(t, "http_headers"), HeaderVars: rawPairs(t, "env_http_headers"),
+	}
+	switch str(t, "auth") {
+	case "oauth", "chatgpt":
+		spec.OAuth = true
+	}
+	list, _ := t["env_vars"].([]any)
+	for _, v := range list {
+		switch v := v.(type) {
+		case string:
+			spec.ForwardEnv = append(spec.ForwardEnv, model.ForwardVar{Name: v})
+		case map[string]any:
+			spec.ForwardEnv = append(spec.ForwardEnv, model.ForwardVar{Name: str(v, "name"), Remote: str(v, "source") == "remote"})
+		}
+	}
+	return model.NewLaunch(spec)
+}
+
+// rawPairs is a table of strings, sorted by key.
+func rawPairs(t map[string]any, key string) [][2]string {
+	m, _ := t[key].(map[string]any)
+	out := make([][2]string, 0, len(m))
+	for _, k := range sortedKeys(m) {
+		out = append(out, [2]string{k, scalar(m[k])})
+	}
+	return out
 }
 
 func codexTransport(t map[string]any) model.Transport {

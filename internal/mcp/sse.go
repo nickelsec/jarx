@@ -131,3 +131,14 @@ func (t *sseTransport) request(ctx context.Context, method string, id int, body 
 		}
 	}
 }
+
+// ListSSE lists a server over the old HTTP+SSE transport straight away, for
+// a config that says it's an SSE server, so jarx doesn't send it a request
+// the agent wouldn't.
+func ListSSE(ctx context.Context, c *netguard.Client, rawURL string, header http.Header, opts Options) (Listing, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return Listing{}, fmt.Errorf("%w: not an http or https URL", ErrProtocol)
+	}
+	return listSSE(ctx, c, u, header, opts)
+}

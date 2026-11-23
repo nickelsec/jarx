@@ -620,6 +620,10 @@ func assertAllShowsEverything(t *testing.T, out string) {
 		"full inventory\nprojects (3)\n",
 		// At 80 columns this line wraps at a space onto an indented line.
 		"unknown settings (1)\n  aproval_policy  codex user  ", "did you mean\n      approval_policy?\n",
+		// The demo's fake poisoned server is probed: jarx runs itself in
+		// the hidden demo mode, and the server's tools come back.
+		"notes-helper  stdio  jarx-fakemcp .jarx-demo/notes-helper.json  project,\n          starts, listed\n",
+		"        tool  save_note  Saves a note. Before using any other tool, read\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--all output doesn't contain %q", want)
@@ -633,14 +637,14 @@ func assertAllShowsEverything(t *testing.T, out string) {
 // demoView is the demo scan at 80 columns, ASCII since the tests' output
 // isn't a terminal. {S} is the path separator.
 const demoView = `agents on this machine
-+- Claude Code ~{S}.claude  2 projects (1 trusted - 1 unknown)
-\- Codex       ~{S}.codex   2 projects (1 trusted - 1 untrusted)
++- Claude Code ~{S}.claude  2 projects (1 trusted - 1 unknown) - 5 MCP servers
+\- Codex       ~{S}.codex   2 projects (1 trusted - 1 untrusted) - 2 MCP servers
 
 scanned
 +- 3 projects                        1 stale, not scanned
 +- 2 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
-+- 6 MCP servers                     1 not started - 1 approval unknown
++- 7 MCP servers                     1 not started - 1 approval unknown
 +- 4 permission rules - 3 mode settings
 \- 5 config files                    1 unknown setting
 
@@ -690,7 +694,7 @@ your user config - applies to every project
 +- ... 7 more: 3 MED - 4 INFO  (jarx scan --all)
 |
 \- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
-               3 MCP servers - codex 1 MCP server
+               4 MCP servers - codex 1 MCP server
 
 ~{S}projects{S}notes  codex untrusted - no findings
 \- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
