@@ -90,6 +90,9 @@ func unsafeRune(r rune) bool {
 type Printer struct {
 	Out *Stream
 	Err *Stream
+	// Style is how the scan report looks. Its zero value is what piped
+	// output gets.
+	Style Style
 
 	scrub *redact.Scrubber
 }

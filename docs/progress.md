@@ -160,6 +160,18 @@ stale ones marked.
   snapshot
   - Not covered yet: servers, tools, prompts and resources (phase 4),
     verdicts (phase 5), the snapshot picker (phase 7), and named baselines
+    (38873d0)
+- [x] `report`: redesign the terminal output so a scan is easy to read,
+  instead of every section printed in full. A header, the agents, what was
+  scanned, one summary line, then findings grouped by project, worst first,
+  with user-level problems once on their own. Short paths, at most 10
+  findings per project but every high one, `--all` for everything, width
+  and color and charset from `platform.DetectTerm`, and lines cut instead of
+  wrapped. Also rule titles cut to 42 chars with the rest in `Detail`, and
+  the banner with the version on every run
+  - Not covered yet: MCP servers and agent versions in the agents block
+    (phase 4 and the versions work), and the last line pointing to the
+    dashboard instead of `--all` (phase 7)
 
 **Run it:** `jarx scan --home testdata/demo` shows instruction files, skills,
 hooks, permissions and the planted findings. Change a demo file and the diff

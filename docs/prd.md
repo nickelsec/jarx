@@ -834,21 +834,39 @@ The CLI stays small: three commands and a version flag.
 
 | Command | What it does |
 |---|---|
-| `jarx scan [path...]` | full scan, prints a summary grouped by severity plus what changed since the last scan. Extra paths are scanned for this run only. |
+| `jarx scan [path...]` | full scan, prints what it checked, then the findings grouped by project, worst first, plus what changed since the last scan. Extra paths are scanned for this run only. |
 | `jarx ui` | start the dashboard |
 | `jarx setup` | show jarx's own settings: extra repo paths, and whether the LLM is set up |
 | `jarx setup repo add\|rm <path>` | add or remove an extra project path |
 | `jarx setup llm` | set base URL, model, and key or env var name |
-| `jarx --version` | print version and advisory data date |
+| `jarx --version` | print the banner, version and advisory data date |
 
 Flags:
 
 | Flag | On | What it does |
 |---|---|---|
 | `--home <dir>` | `scan`, `ui`, `setup` | treat `<dir>` as the home dir instead of the real one (see [Demo home](#demo-home)) |
+| `--all` | `scan` | show every finding with its full reason and fix, what jarx resolved about the machine, and the full inventory |
 | `--no-probe` | `scan` | skip MCP probing |
 | `--no-history` | `scan` | skip session history |
 | `--llm` | `scan` | run the LLM review after showing the preview |
+
+### Terminal output
+
+A scan should be readable at a glance in any terminal: PowerShell, Windows
+PowerShell 5.1, cmd, Windows Terminal, macOS Terminal, iTerm2 and Linux
+terminals.
+
+- It shows what jarx checked first, then what it found. Findings are grouped
+  by project, worst first, and user-level problems show once on their own.
+- Long lists stop at 10 findings per project, but every high or critical
+  one shows. The rest are counted. `--all` shows everything.
+- Lines fit the terminal's width and never wrap. Paths are short: from `~`
+  or the project.
+- Color is the basic 16 only and never the only way something is said. It
+  turns off when output is piped, with `NO_COLOR`, and with `TERM=dumb`.
+  Piped output is plain ASCII.
+- Every run starts with a banner and the version next to it.
 
 ### Demo home
 

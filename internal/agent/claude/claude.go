@@ -35,6 +35,12 @@ type Adapter struct{}
 // Agent returns claude.
 func (Adapter) Agent() model.Agent { return model.AgentClaude }
 
+// Name is how the scan names the agent.
+func (Adapter) Name() string { return "Claude Code" }
+
+// ConfigDir is ~/.claude, or CLAUDE_CONFIG_DIR.
+func (Adapter) ConfigDir(env platform.Env) string { return claudeDir(env) }
+
 // Projects returns the paths in the projects map of ~/.claude.json.
 func (Adapter) Projects(c agent.Context) ([]model.Project, []finding.Finding) {
 	file := configFile(c.Env)

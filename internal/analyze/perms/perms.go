@@ -16,57 +16,57 @@ import (
 	"github.com/nickelsec/jarx/internal/redact"
 )
 
-func rule(id string, sev finding.Severity, title, fix string) finding.Rule {
-	return finding.Rule{ID: id, Severity: sev, Title: title, Fix: fix}
+func rule(id string, sev finding.Severity, title, detail, fix string) finding.Rule {
+	return finding.Rule{ID: id, Severity: sev, Title: title, Detail: detail, Fix: fix}
 }
 
 func bypassMode() finding.Rule {
-	return rule("JARX-PERMS-001", finding.High, "Claude starts in bypassPermissions, so it skips prompts and safety checks",
+	return rule("JARX-PERMS-001", finding.High, "Claude starts in bypassPermissions", "Claude starts in bypassPermissions, so it skips prompts and safety checks",
 		"use a narrower default mode, or set permissions.disableBypassPermissionsMode")
 }
 
 func noSandbox() finding.Rule {
-	return rule("JARX-PERMS-002", finding.High, "Codex runs with no sandbox",
+	return rule("JARX-PERMS-002", finding.High, "Codex runs with no sandbox", "",
 		"use workspace-write or a permission profile, or run it inside a container you trust")
 }
 
 func neverAsk() finding.Rule {
-	return rule("JARX-PERMS-003", finding.Medium, "Codex never asks for approval, so only the sandbox stands in the way",
+	return rule("JARX-PERMS-003", finding.Medium, "Codex never asks for approval", "Codex never asks for approval, so only the sandbox stands in the way",
 		"use approval_policy = \"on-request\" for interactive work")
 }
 
 func everyCommand() finding.Rule {
-	return rule("JARX-PERMS-004", finding.High, "an allow rule lets the agent run every command without a prompt",
+	return rule("JARX-PERMS-004", finding.High, "an allow rule runs every command", "an allow rule lets the agent run every command without a prompt",
 		"allow the specific commands you need instead")
 }
 
 func credentialGrant() finding.Rule {
-	return rule("JARX-PERMS-005", finding.High, "a grant covers credential files, so the agent can reach them without asking",
+	return rule("JARX-PERMS-005", finding.High, "a grant covers credential files", "a grant covers credential files, so the agent can reach them without asking",
 		"narrow the grant, or add deny rules for the credential paths")
 }
 
 func allProjectServers() finding.Rule {
-	return rule("JARX-PERMS-006", finding.Medium, "every MCP server in the repo's .mcp.json starts without a prompt",
+	return rule("JARX-PERMS-006", finding.Medium, "every repo MCP server starts unasked", "every MCP server in the repo's .mcp.json starts without a prompt",
 		"approve servers one by one instead of enableAllProjectMcpServers")
 }
 
 func retiredPolicy() finding.Rule {
-	return rule("JARX-PERMS-007", finding.Info, "Codex's approval_policy is set to a value it no longer supports",
+	return rule("JARX-PERMS-007", finding.Info, "Codex approval_policy is retired", "Codex's approval_policy is set to a value it no longer supports",
 		"use on-request for interactive runs or never for non-interactive ones")
 }
 
 func runsAnything() finding.Rule {
-	return rule("JARX-PERMS-008", finding.High, "an allow rule that looks narrow lets the agent run any code",
+	return rule("JARX-PERMS-008", finding.High, "a narrow-looking allow runs any code", "an allow rule that looks narrow lets the agent run any code",
 		"allow the exact commands instead of the interpreter or runner with any args")
 }
 
 func runsRepoCode() finding.Rule {
-	return rule("JARX-PERMS-009", finding.Medium, "an allow rule runs code the repo defines, so whoever can push to it decides what runs",
+	return rule("JARX-PERMS-009", finding.Medium, "an allow runs code the repo defines", "an allow rule runs code the repo defines, so whoever can push to it decides what runs",
 		"keep the allow only for repos you trust, or approve these runs each time")
 }
 
 func hasEscape() finding.Rule {
-	return rule("JARX-PERMS-010", finding.Medium, "an allow rule covers a tool that has a way to run any command",
+	return rule("JARX-PERMS-010", finding.Medium, "an allow covers a tool that runs anything", "an allow rule covers a tool that has a way to run any command",
 		"allow the specific subcommands you need instead")
 }
 

@@ -484,13 +484,151 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
    previous one. **drift** sends changed tools back through **poison**.
 8. **report** prints the result. **ui** serves the same snapshot.
 
+## Terminal output
+
+This is jarx's output style. Every command in every phase follows it. New
+output goes into the blocks and the tree format below. It doesn't get a
+new layout of its own. When something really fits no block, ask before
+adding one, and add it here.
+
+### A run, top to bottom
+
+Every run starts with the pixel `JARX` banner, with the version next to
+its last row, then the tagline. Then `jarx scan` shows what it checked,
+then what it found, in this order:
+
+1. a header: fake home or this machine, and the OS
+2. **agents on this machine**: one row per agent, with its config dir and
+   its project counts by trust, or "not found"
+3. **scanned**: counts of what was read, with notes on what wasn't
+4. one summary line: findings by severity, then what changed since the
+   last scan
+5. **changed since the last scan**, only when something did
+6. **your user config**: user-level problems, once, since they apply to
+   every project
+7. one group per project, worst project first: its findings, then what
+   the agents load there
+8. a pointer to `jarx scan --all`
+
+Where later phases go:
+
+- Facts about an agent (MCP servers, the installed version) go on its row
+  in the agents block.
+- New things jarx reads (MCP servers and tools, credential locations,
+  history sessions) become rows of counts in the scanned block, with
+  skips as notes.
+- Findings from new analyzers join the same groups: the project a file is
+  in, or the user config group. They never get a block of their own.
+- Per-project facts that aren't findings (an MCP server's tools, a
+  credential's reach) are a line in the project's group, like "loads
+  here", and in full under `--all`.
+- Full lists and views go in the `--all` inventory, after the findings.
+
+### Blocks
+
+- A block is a bold heading in plain lowercase words, then a tree. Blocks
+  are one blank line apart.
+- There are no other heading styles: no underlines, boxes, rules, caps
+  or emoji.
+- A group heading may add facts after the name, joined by the list
+  separator, like `~/projects/app  claude trusted · codex trusted`.
+
+### Trees
+
+- The glyphs are `├─ │ └─` on a terminal that shows UTF-8, and `+- | \-`
+  otherwise. Nothing else draws structure.
+- An entry is one line, or a title line plus detail lines. The first
+  detail line hangs off the title on its own branch (`└─`), and later ones
+  are indented under it.
+- When the entries in a tree have more than one line, a line with just the
+  tree bar sits between them. Trees of one-line entries stay tight.
+- A long tree stops at a cap and ends in a count of the rest, like
+  `… 6 more: 2 MED · 4 INFO  (jarx scan --all)`. Anything a user has to
+  act on (critical and high findings) is never hidden by a cap.
+
+### Findings
+
+```
+├─ HIGH  An @import pulls in a credential file  CLAUDE-002
+│  └─ .env  an @import in CLAUDE.md points at a credential file; jarx…
+│
+└─ MED   A skill runs shell before Claude sees it  CLAUDE-003
+   └─ .claude/skills/release/SKILL.md  release runs 1 shell command…
+```
+
+- The title line is the severity (`CRIT`, `HIGH`, `MED `, `INFO`, four
+  wide so titles line up), two spaces, the rule's title with a capital
+  first letter, two spaces, then the rule ID without `JARX-`. When the
+  line has no room for the ID, it moves down next to the file.
+- The detail line is the file, with `:line` when known, then the
+  evidence. Under 80 columns the evidence gets its own line.
+- A rule's `Title` is at most 42 chars, so the title line fits 80 columns.
+  `NewRegistry` refuses a longer one. The longer reason goes in `Detail`,
+  which `--all` shows as `why:`, with the rule's `Fix` as `fix:`.
+- Findings are sorted worst first. A group shows at most 10, but every
+  critical and high one always shows.
+
+### Text
+
+- Paths are relative to the project, or start from `~`. Evidence gets the
+  same treatment, so absolute paths don't fill the line.
+- Inline lists are joined with ` · `, or ` - ` in ASCII.
+- Counts read as words with the right plural: `1 project`, `2 projects`.
+- A note next to a count (what was skipped, why it wasn't read) is dim
+  and sits in a column. When one note doesn't fit, every note in that
+  tree moves to its own line, so they stay lined up.
+- Words are plain and lowercase, with no em dashes.
+- Text from a file is always escaped before it's printed, and only jarx
+  picks colors, so a file can't color or move the terminal.
+
+### Width, color and charset
+
+- Lines never wrap. Each one is cut to the terminal's width with an
+  ellipsis. `--all` wraps long evidence and reasons at spaces instead of
+  cutting them.
+- Colors are the basic 16 only, and the words always say the same thing,
+  so nothing depends on color. Headings are bold. Notes, file names and
+  rule IDs are dim. `CRIT` is bright red, `HIGH` red, `MED` yellow and
+  `INFO` cyan. Trust is green for trusted, yellow for untrusted, and dim
+  for unknown.
+- `platform.DetectTerm` decides the rest. Color needs a terminal that
+  takes ANSI escapes (on Windows, jarx turns on virtual terminal
+  processing through `x/sys`), no `NO_COLOR`, and `TERM` other than
+  `dumb`. Box drawing needs a terminal showing UTF-8 (the console's output
+  code page on Windows, the locale elsewhere). Piped output is always
+  ASCII with no color, because Windows PowerShell 5.1 re-encodes what a
+  program prints. The width is the terminal's, then `COLUMNS`, then 80.
+- Output has to look right in PowerShell, Windows PowerShell 5.1, cmd,
+  Windows Terminal, macOS Terminal, iTerm2 and Linux terminals.
+
+### The banner
+
+- The banner is the same on every run, so two scans still diff cleanly.
+- A version too long to sit next to it, like a dev build's, gets its own
+  line instead of being cut.
+
+### `--all`
+
+`--all` is the same report with nothing held back: no caps, the evidence
+wrapped instead of cut, each finding's `why:` and `fix:`, what platform
+resolved about the machine before the report, and the full inventory
+after it.
+
+### Building on it
+
+New output uses `report`'s pieces instead of printing around them:
+`Style`, `line` and `seg` for text and tone, `emit` to cut a line to the
+width, `tree` and `spacedTree` for blocks, and `branch` for title and
+detail lines. Tests pin the layout with an exact expected view of the
+demo scan at 80 columns, so a layout change shows up as a test change.
+
 ## Package layout
 
 | Package | Job | PRD section |
 |---|---|---|
 | `cmd/jarx` | main, wiring only | CLI |
 | `internal/cli` | subcommands with stdlib `flag` | CLI |
-| `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`). Registry reads land here in phase 3 (macOS plists aren't read, see Limits in the PRD). Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
+| `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`), and terminal facts for the report (a terminal or not, width, ANSI, UTF-8). Registry reads land here in phase 3 (macOS plists aren't read, see Limits in the PRD). Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
 | `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. Refuses network paths (and symlinks to them), anything that isn't a regular file, and content reads of credential locations (see "What an @import can point at"). | Walking a repo |
 | `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
 | `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. A `Text` keeps the kind and fingerprint of what it masked, never the value. | Promise 4, Secrets |
@@ -517,7 +655,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/history` | cursor, jsonl, zstd and read-only sqlite readers (observed formats) | Session history |
 | `internal/analyze/versions` | installs, PATH winner, advisory match, catalog age warning | Agent installs and versions |
 | `internal/analyze/unknown` | the unknown settings report | Unknown settings report |
-| `internal/report` | the only output writer: `Out` and `Err` streams that take a literal format and `redact.Text` values, and an `Error` that scrubs error text. Grows into the terminal report in phase 2. | CLI |
+| `internal/report` | the only output writer: `Out` and `Err` streams that take a literal format and `redact.Text` values, and an `Error` that scrubs error text. Also the scan report (see "Terminal output"), laid out for the terminal's width, colors and charset, and the banner. | CLI |
 | `internal/ui` | server, middleware (host, token, CSRF, CSP), templates, embedded static files | Dashboard |
 | `internal/keystore` | go-keyring for jarx's own entry, or an env var name | Optional LLM review |
 | `internal/llm` | OpenAI-compatible client over netguard, preview, schema check and retry, quote check, cache | Optional LLM review |
@@ -559,7 +697,8 @@ Stdlib plus these, and depguard enforces the list:
 - `github.com/zalando/go-keyring`
 - `github.com/klauspost/compress` (zstd)
 - `modernc.org/sqlite`
-- `golang.org/x/sys` (Windows job objects)
+- `golang.org/x/sys` (Windows job objects, the console mode and terminal
+  size)
 
 `go.mod` targets the latest stable Go (1.27.4 right now). jarx needs at least
 1.25 for `http.CrossOriginProtection` and `os.Root`.
@@ -674,7 +813,8 @@ The Claude adapter, then the Codex adapter: settings with precedence and
 trust, instruction files (parent folders, subfolders, `@` imports), memory,
 output styles, skills, commands and hooks. Then `catalog` (secret patterns),
 `analyze/secrets`, `analyze/poison`, `analyze/perms`, `analyze/unknown`, and
-`snapshot` with diff.
+`snapshot` with diff. Last, the scan report gets its terminal layout, since
+by then there's enough output to need one.
 
 - Claude goes first because it has the most surface and the most precedence
   rules. Codex right after is what proves the model really is agent-neutral,

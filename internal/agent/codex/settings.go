@@ -60,7 +60,8 @@ func RepoDropsPermissions() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CODEX-001",
 		Severity: finding.High,
-		Title:    "a repository's sandbox_mode turns off your permission profile",
+		Title:    "a repo sandbox_mode drops your profile",
+		Detail:   "a repository's sandbox_mode turns off your permission profile",
 		Fix:      "remove sandbox_mode from the project's .codex/config.toml, or untrust the project",
 	}
 }
@@ -71,7 +72,8 @@ func RepoWidensProfile() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CODEX-002",
 		Severity: finding.Medium,
-		Title:    "a repository changes one of your permission profiles",
+		Title:    "a repo changes your permission profile",
+		Detail:   "a repository changes one of your permission profiles",
 		Fix:      "check what the project's [permissions] entries add or replace",
 	}
 }
@@ -82,7 +84,8 @@ func LegacyManagedConfig() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CODEX-003",
 		Severity: finding.Info,
-		Title:    "a legacy managed_config.toml overrides your config and CLI flags at startup",
+		Title:    "a legacy managed_config.toml overrides you",
+		Detail:   "a legacy managed_config.toml overrides your config and CLI flags at startup",
 		Fix:      "settings in this file win over config.toml and --config each time Codex starts",
 	}
 }
@@ -93,7 +96,8 @@ func LegacyProfiles() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CODEX-004",
 		Severity: finding.Info,
-		Title:    "legacy profiles in config.toml are ignored",
+		Title:    "legacy profiles are ignored",
+		Detail:   "legacy profiles in config.toml are ignored",
 		Fix:      "move each [profiles.<name>] table to ~/.codex/<name>.config.toml and use --profile <name>",
 	}
 }
@@ -104,7 +108,8 @@ func OwnSandboxModeWins() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CODEX-005",
 		Severity: finding.Medium,
-		Title:    "sandbox_mode makes Codex ignore your permission profile",
+		Title:    "sandbox_mode turns off your profile",
+		Detail:   "sandbox_mode makes Codex ignore your permission profile",
 		Fix:      "set either sandbox_mode or default_permissions, not both",
 	}
 }
@@ -123,7 +128,8 @@ func WorkspaceIgnored() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CODEX-007",
 		Severity: finding.Info,
-		Title:    "[sandbox_workspace_write] does nothing, because Codex uses permission profiles here",
+		Title:    "[sandbox_workspace_write] does nothing",
+		Detail:   "[sandbox_workspace_write] does nothing, because Codex uses permission profiles here",
 		Fix:      "move what you need into the permission profile and remove the table",
 	}
 }
@@ -135,7 +141,8 @@ func WorkspaceRestrictionIgnored() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CODEX-008",
 		Severity: finding.Medium,
-		Title:    "a [sandbox_workspace_write] restriction does nothing, because Codex uses permission profiles here",
+		Title:    "a sandbox restriction does nothing",
+		Detail:   "a [sandbox_workspace_write] restriction does nothing, because Codex uses permission profiles here",
 		Fix:      "set the restriction in the permission profile instead",
 	}
 }

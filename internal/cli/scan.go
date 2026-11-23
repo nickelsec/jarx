@@ -22,6 +22,7 @@ import (
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/jarxdir"
+	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
@@ -45,6 +46,7 @@ func scanHelp(s *report.Stream) { s.Printf(scanUsage) }
 func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	fs := newFlagSet("scan")
 	home := fs.String("home", "", "")
+	all := fs.Bool("all", false, "")
 	if code, ok := parse(p, plain, fs, args, scanHelp); !ok {
 		return code
 	}
@@ -69,44 +71,78 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		return exitError
 	}
 
-	printEnv(p.Out, scrub, env, files)
+	adapters := []agent.Adapter{claude.Adapter{}, codex.Adapter{}}
 	res := discover.Run(
 		agent.Context{Env: env, Files: files, Scrub: scrub},
-		[]agent.Adapter{claude.Adapter{}, codex.Adapter{}, discover.Saved(configPath(env), cfg.Repos)},
+		append(slices.Clone(adapters), discover.Saved(configPath(env), cfg.Repos)),
 		fs.Args(),
 	)
-	perms.Settle(scrub, res.Projects)
-	permFindings, err := perms.Analyze(scrub, env, res.Projects)
+	findings, err := analyze(scrub, env, res)
 	if err != nil {
 		p.Error(err)
 		return exitError
 	}
-	p.Out.Printf("\n")
-	p.Projects(res.Projects)
-	p.Unknown(res.Unknown)
-	p.Instructions(res.Instructions)
-	findings := slices.Concat(
+	if *all {
+		// What platform resolved, in full, and before the scan saves its
+		// snapshot, so the state dir shows as it was.
+		p.Wrapped(model.Path{}, func() { printEnv(p.Out, scrub, env, files) })
+		p.Out.Printf("\n")
+	}
+	view := report.ScanView{
+		Fake: env.Fake(), Home: model.NewPath(scrub, env.Home), GOOS: env.GOOS,
+		Agents:   agentInfo(env, files, scrub, adapters),
+		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown,
+		Findings: findings, Rules: rules, All: *all,
+	}
+	view.Since, view.Note, view.Changes, view.SaveErr = saveSnapshot(env, scrub, snapshot.Input{
+		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
+	})
+	p.Scan(view)
+	return exitOK
+}
+
+// analyze settles what's in effect and runs every analyzer.
+func analyze(scrub *redact.Scrubber, env platform.Env, res discover.Result) ([]finding.Finding, error) {
+	perms.Settle(scrub, res.Projects)
+	permFindings, err := perms.Analyze(scrub, env, res.Projects)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // perms names what failed
+	}
+	return slices.Concat(
 		res.Findings,
 		secrets.Analyze(scrub, res.Projects, res.Instructions),
 		poison.Analyze(scrub, res.Projects, res.Instructions),
 		permFindings,
 		unknown.Analyze(scrub, res.Unknown),
-	)
-	p.Findings(findings, rules)
-	saveSnapshot(p, env, scrub, snapshot.Input{
-		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
-	})
-	return exitOK
+	), nil
 }
 
-// saveSnapshot compares this scan with the last snapshot, prints what
-// changed, and saves this one. A snapshot problem is said in the changes
-// section and never fails the scan.
-func saveSnapshot(p *report.Printer, env platform.Env, scrub *redact.Scrubber, in snapshot.Input) {
+// agentInfo names each agent and whether its config dir is there.
+func agentInfo(env platform.Env, files *fsys.FS, scrub *redact.Scrubber, adapters []agent.Adapter) []report.AgentInfo {
+	var out []report.AgentInfo
+	for _, a := range adapters {
+		d, ok := a.(agent.Describer)
+		if !ok {
+			continue
+		}
+		dir := d.ConfigDir(env)
+		info, err := files.Stat(dir)
+		out = append(out, report.AgentInfo{
+			Agent: a.Agent(), Name: d.Name(), ConfigDir: model.NewPath(scrub, dir), Found: err == nil && info.IsDir(),
+		})
+	}
+	return out
+}
+
+// saveSnapshot compares this scan with the last snapshot and saves this
+// one. It returns when the last one was taken (zero for none), a note when
+// there's nothing to compare against for another reason than a first scan,
+// what changed, and any error saving. A snapshot problem never fails the
+// scan.
+func saveSnapshot(env platform.Env, scrub *redact.Scrubber, in snapshot.Input) (time.Time, string, []snapshot.Change, error) {
 	d, err := jarxdir.Open(env)
 	if err != nil {
-		p.Changes(time.Time{}, "couldn't open jarx's state dir", nil, err)
-		return
+		return time.Time{}, "couldn't open jarx's state dir", nil, fmt.Errorf("state dir: %w", err)
 	}
 	defer func() { _ = d.Close() }()
 	prev, note, err := snapshot.Latest(d, scrub)
@@ -118,7 +154,10 @@ func saveSnapshot(p *report.Printer, env platform.Env, scrub *redact.Scrubber, i
 	if !prev.Taken.IsZero() {
 		changes = snapshot.Diff(scrub, prev, cur)
 	}
-	p.Changes(prev.Taken, note, changes, snapshot.Save(d, cur))
+	if err := snapshot.Save(d, cur); err != nil {
+		return prev.Taken, note, changes, fmt.Errorf("write: %w", err)
+	}
+	return prev.Taken, note, changes, nil
 }
 
 // emptyHome reports --home given with no value.

@@ -15,8 +15,9 @@ import (
 func Key() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-UNKNOWN-001", Severity: finding.Info,
-		Title: "a settings key isn't in the agent's docs",
-		Fix:   "check the spelling against the docs, or remove the key if nothing reads it",
+		Title:  "a settings key isn't in the docs",
+		Detail: "a settings key isn't in the agent's docs",
+		Fix:    "check the spelling against the docs, or remove the key if nothing reads it",
 	}
 }
 
@@ -24,8 +25,9 @@ func Key() finding.Rule {
 func Typo() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-UNKNOWN-002", Severity: finding.Medium,
-		Title: "a settings key looks like a typo, so the setting it was meant to be isn't set",
-		Fix:   "fix the spelling",
+		Title:  "a settings key looks like a typo",
+		Detail: "a settings key looks like a typo, so the setting it was meant to be isn't set",
+		Fix:    "fix the spelling",
 	}
 }
 
@@ -34,8 +36,9 @@ func Typo() finding.Rule {
 func SafetyTypo() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-UNKNOWN-003", Severity: finding.High,
-		Title: "a safety setting is misspelled, so the protection it was meant to add isn't on",
-		Fix:   "fix the spelling, then check the setting applies",
+		Title:  "a safety setting is misspelled",
+		Detail: "a safety setting is misspelled, so the protection it was meant to add isn't on",
+		Fix:    "fix the spelling, then check the setting applies",
 	}
 }
 

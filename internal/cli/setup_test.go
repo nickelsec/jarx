@@ -77,7 +77,13 @@ func TestSetupRepoAddSavesItAndScanFindsIt(t *testing.T) {
 	if got := run("setup", "--home", home); !strings.Contains(got.stdout, "repos (1)\n  "+dir+"  (exists)\n") {
 		t.Errorf("setup = %q, want the repo listed", got.stdout)
 	}
-	if got := run("scan", "--home", home); !strings.Contains(got.stdout, "  "+dir+"  jarx  0 files (walk)\n") {
+	// The full inventory lists it, from ~ when it's in the home dir.
+	shown := dir
+	if rel, err := filepath.Rel(home, dir); err == nil && filepath.IsLocal(rel) {
+		shown = "~" + string(filepath.Separator) + rel
+	}
+	t.Setenv("COLUMNS", "400") // a long temp path, read in full
+	if got := run("scan", "--all", "--home", home); !strings.Contains(got.stdout, "  "+shown+"  jarx  0 files (walk)\n") {
 		t.Errorf("scan = %q, want the saved repo listed as from jarx", got.stdout)
 	}
 }

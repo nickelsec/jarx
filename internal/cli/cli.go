@@ -9,6 +9,7 @@ import (
 	"io"
 	"runtime/debug"
 
+	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
 )
@@ -46,6 +47,12 @@ func Run(args []string, stdout, stderr io.Writer, ldflagsVersion string) int {
 		panic("redact.New with no patterns failed: " + err.Error())
 	}
 	p := report.New(stdout, stderr, plain)
+	t := platform.DetectTerm(stdout)
+	p.Style = report.Style{Width: t.Width, Color: t.Color, Unicode: t.Unicode}
+	info, _ := debug.ReadBuildInfo() // nil when not available
+	version := versionFrom(ldflagsVersion, info)
+	// Every run starts with the banner, which has the version.
+	p.Banner(scrubbed(plain, version))
 
 	fs := newFlagSet("jarx")
 	showVersion := fs.Bool("version", false, "")
@@ -53,8 +60,6 @@ func Run(args []string, stdout, stderr io.Writer, ldflagsVersion string) int {
 		return code
 	}
 	if *showVersion {
-		info, _ := debug.ReadBuildInfo() // nil when not available
-		p.Out.Printf("jarx %s\n", scrubbed(plain, versionFrom(ldflagsVersion, info)))
 		return exitOK
 	}
 

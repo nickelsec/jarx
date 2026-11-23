@@ -26,6 +26,13 @@ type Adapter interface {
 	Projects(c Context) ([]model.Project, []finding.Finding)
 }
 
+// Describer is an adapter for an agent installed on the machine, which the
+// scan names with the dir its config lives in.
+type Describer interface {
+	Name() string
+	ConfigDir(env platform.Env) string
+}
+
 // SettingsReader is an adapter that reads settings. Settings stores each
 // project's result on it (only projects with status ok are read) and returns
 // the keys it didn't recognize, once per file.

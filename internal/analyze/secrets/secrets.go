@@ -18,7 +18,8 @@ func Seen() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-SECRET-001",
 		Severity: finding.High,
-		Title:    "a secret is in text the agent loads, so it's already in the agent's context",
+		Title:    "a secret is in text the agent loads",
+		Detail:   "a secret is in text the agent loads, so it's already in the agent's context",
 		Fix:      "take it out of the file and rotate it, since the agent has already had it",
 	}
 }
@@ -28,7 +29,8 @@ func PlainText() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-SECRET-002",
 		Severity: finding.Medium,
-		Title:    "a secret is written in plain text in a config file or hook",
+		Title:    "a secret is in a config file or hook",
+		Detail:   "a secret is written in plain text in a config file or hook",
 		Fix:      "move it to an env var or a secret store, and rotate it if the file was shared or committed",
 	}
 }
@@ -39,7 +41,8 @@ func Placeholder() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-SECRET-003",
 		Severity: finding.Info,
-		Title:    "a value that looks like a placeholder sits where a secret would go",
+		Title:    "looks like a placeholder secret",
+		Detail:   "a value that looks like a placeholder sits where a secret would go",
 		Fix:      "check that it isn't real. If it is, treat it like JARX-SECRET-001 or 002",
 	}
 }

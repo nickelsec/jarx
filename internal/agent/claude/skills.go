@@ -27,7 +27,8 @@ func ShellInjection() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CLAUDE-003",
 		Severity: finding.Medium,
-		Title:    "a skill runs shell commands before Claude sees it",
+		Title:    "a skill runs shell before Claude sees it",
+		Detail:   "a skill runs shell commands before Claude sees it",
 		Fix:      "check each !`command` in it, or set disableSkillShellExecution in managed settings",
 	}
 }
@@ -39,7 +40,8 @@ func RepoSkillGrants() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CLAUDE-004",
 		Severity: finding.Medium,
-		Title:    "a repository skill grants tools or adds hooks without the trust check",
+		Title:    "a repo skill grants tools without trust",
+		Detail:   "a repository skill grants tools or adds hooks without the trust check",
 		Fix:      "review its allowed-tools and hooks before running Claude in this repository",
 	}
 }

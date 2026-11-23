@@ -45,7 +45,8 @@ func RepoChangesInstructions() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CODEX-006",
 		Severity: finding.Medium,
-		Title:    "a repository changes which instructions Codex loads",
+		Title:    "a repo changes which instructions load",
+		Detail:   "a repository changes which instructions Codex loads",
 		Fix:      "check the project's project_doc_max_bytes and project_doc_fallback_filenames",
 	}
 }

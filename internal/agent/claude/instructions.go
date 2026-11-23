@@ -62,7 +62,8 @@ func ImportsCredential() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CLAUDE-002",
 		Severity: finding.High,
-		Title:    "an instruction file pulls a credential file into Claude's context",
+		Title:    "an @import pulls in a credential file",
+		Detail:   "an instruction file pulls a credential file into Claude's context",
 		Fix:      "remove the @import or symlink; Claude would load the secret as instructions",
 	}
 }

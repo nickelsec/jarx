@@ -554,7 +554,8 @@ func AliasIgnored() finding.Rule {
 	return finding.Rule{
 		ID:       "JARX-CLAUDE-005",
 		Severity: finding.Info,
-		Title:    "a key alias is ignored because the same file sets the canonical key",
+		Title:    "a key alias is ignored",
+		Detail:   "a key alias is ignored because the same file sets the canonical key",
 		Fix:      "keep one spelling and move the alias's value into it",
 	}
 }

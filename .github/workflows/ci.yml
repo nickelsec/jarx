@@ -134,8 +134,8 @@ jobs:
           out=$(offline strace -f -qq -o "$RUNNER_TEMP/jarx.trace" -e trace="$NET_SYSCALLS" \
             "$RUNNER_TEMP/jarx" scan --home testdata/demo)
           echo "$out"
-          grep -q '^projects (3)$' <<<"$out"
-          grep -q 'JARX-SECRET-001' <<<"$out"
+          grep -qF -- '+- 3 projects ' <<<"$out"
+          grep -q ' SECRET-001$' <<<"$out"
           if grep -E "^[0-9]+ +(${NET_SYSCALLS//,/|})\(" "$RUNNER_TEMP/jarx.trace"; then
             echo "jarx made the network syscalls above during an offline scan"
             exit 1
@@ -156,7 +156,7 @@ jobs:
             echo "$wrote"
             exit 1
           fi
-          grep -q '^changes: no earlier snapshot$' <<<"$out"
+          grep -q '   changes: first scan$' <<<"$out"
           # The snapshot is masked and keeps texts only as hashes.
           for planted in demo-not-a-real-token your-api-key-here "Deploy with"; do
             if grep -rqF "$planted" testdata/demo/.jarx-state/snapshots; then
@@ -165,23 +165,19 @@ jobs:
             fi
           done
           # A second scan reuses the key, so the fingerprints don't change,
-          # and finds nothing changed. Only the state dir line and the
-          # changes line may differ.
+          # and finds nothing changed. Only the summary line, which says
+          # what changed, may differ.
           key=$(sha256sum testdata/demo/.jarx-state/fingerprint.key)
           again=$(offline "$RUNNER_TEMP/jarx" scan --home testdata/demo)
           if [ "$key" != "$(sha256sum testdata/demo/.jarx-state/fingerprint.key)" ]; then
             echo "a second scan changed the fingerprint key"
             exit 1
           fi
-          if ! grep -q '^  state dir .*(exists)$' <<<"$again"; then
-            echo "the second scan doesn't show the state dir as existing"
-            exit 1
-          fi
-          if ! grep -qE '^changes since [0-9-]+ [0-9:]+ UTC: none$' <<<"$again"; then
+          if ! grep -qE '   changes: none since [0-9-]+ [0-9:]+ UTC$' <<<"$again"; then
             echo "the second scan should find no changes"
             exit 1
           fi
-          if ! diff <(grep -v '^  state dir \|^changes' <<<"$out") <(grep -v '^  state dir \|^changes' <<<"$again"); then
+          if ! diff <(grep -v 'changes: ' <<<"$out") <(grep -v 'changes: ' <<<"$again"); then
             echo "a second scan printed something different (diff above)"
             exit 1
           fi

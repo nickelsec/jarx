@@ -25,6 +25,12 @@ type Adapter struct{}
 // Agent returns codex.
 func (Adapter) Agent() model.Agent { return model.AgentCodex }
 
+// Name is how the scan names the agent.
+func (Adapter) Name() string { return "Codex" }
+
+// ConfigDir is ~/.codex, or CODEX_HOME.
+func (Adapter) ConfigDir(env platform.Env) string { return codexHome(env) }
+
 func configFile(env platform.Env) string {
 	if dir, ok := env.Lookup("CODEX_HOME"); ok && dir != "" {
 		return filepath.Join(env.MapPath(dir), "config.toml")

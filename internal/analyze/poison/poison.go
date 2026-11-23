@@ -13,73 +13,73 @@ import (
 	"github.com/nickelsec/jarx/internal/redact"
 )
 
-func rule(id string, sev finding.Severity, title, fix string) finding.Rule {
-	return finding.Rule{ID: id, Severity: sev, Title: title, Fix: fix}
+func rule(id string, sev finding.Severity, title, detail, fix string) finding.Rule {
+	return finding.Rule{ID: id, Severity: sev, Title: title, Detail: detail, Fix: fix}
 }
 
 // The rules, by number.
 func tagChars() finding.Rule {
-	return rule("JARX-POISON-001", finding.High, "invisible tag characters spell out text the agent reads but you can't see",
+	return rule("JARX-POISON-001", finding.High, "invisible tag characters hide text", "invisible tag characters spell out text the agent reads but you can't see",
 		"delete the tag characters; check who added them and what the text asks for")
 }
 
 func bidi() finding.Rule {
-	return rule("JARX-POISON-002", finding.Medium, "bidi control characters make the text read differently than it looks",
+	return rule("JARX-POISON-002", finding.Medium, "bidi controls reorder the text", "bidi control characters make the text read differently than it looks",
 		"delete the bidi controls, or check the text in an editor that shows them")
 }
 
 func zeroWidth() finding.Rule {
-	return rule("JARX-POISON-003", finding.Info, "zero-width characters hide inside the text",
+	return rule("JARX-POISON-003", finding.Info, "zero-width characters in the text", "zero-width characters hide inside the text",
 		"delete them unless they're part of an emoji or a script that needs them")
 }
 
 func terminal() finding.Rule {
-	return rule("JARX-POISON-004", finding.Medium, "terminal control sequences can hide or rewrite text when it's printed",
+	return rule("JARX-POISON-004", finding.Medium, "terminal escapes can rewrite the text", "terminal control sequences can hide or rewrite text when it's printed",
 		"delete the escape sequences and carriage returns")
 }
 
 func comment() finding.Rule {
-	return rule("JARX-POISON-005", finding.Info, "an HTML comment the agent reads is hidden in the rendered view",
+	return rule("JARX-POISON-005", finding.Info, "an HTML comment is hidden from view", "an HTML comment the agent reads is hidden in the rendered view",
 		"read the comment; move notes for the agent into plain text so people see them too")
 }
 
 func aimed() finding.Rule {
-	return rule("JARX-POISON-006", finding.Medium, "text tells the agent to override its instructions or keep things from you",
+	return rule("JARX-POISON-006", finding.Medium, "text tells the agent to override or hide", "text tells the agent to override its instructions or keep things from you",
 		"remove the line, and check who added it")
 }
 
 func hiddenAimed() finding.Rule {
-	return rule("JARX-POISON-007", finding.High, "hidden text tells the agent something you can't see in the file",
+	return rule("JARX-POISON-007", finding.High, "hidden text aimed at the agent", "hidden text tells the agent something you can't see in the file",
 		"remove the hidden text and treat the file as tampered with")
 }
 
 func exfil() finding.Rule {
-	return rule("JARX-POISON-008", finding.Medium, "text has the agent download and run code, or send data somewhere",
+	return rule("JARX-POISON-008", finding.Medium, "text downloads and runs, or sends data", "text has the agent download and run code, or send data somewhere",
 		"remove it, or pin the download and check what it sends")
 }
 
 func sensitivePath() finding.Rule {
-	return rule("JARX-POISON-009", finding.Info, "text points the agent at a credential or key file",
+	return rule("JARX-POISON-009", finding.Info, "points the agent at a credential file", "text points the agent at a credential or key file",
 		"check why the agent needs that file; deny reads of it if it doesn't")
 }
 
 func hookNetwork() finding.Rule {
-	return rule("JARX-POISON-010", finding.Info, "a hook makes network calls each time it runs",
+	return rule("JARX-POISON-010", finding.Info, "a hook makes network calls", "a hook makes network calls each time it runs",
 		"check where it sends data and what it includes")
 }
 
 func hookDownloadRun() finding.Rule {
-	return rule("JARX-POISON-011", finding.High, "a hook downloads code and runs it each time it fires",
+	return rule("JARX-POISON-011", finding.High, "a hook downloads and runs code", "a hook downloads code and runs it each time it fires",
 		"replace it with a pinned, checked script in the repo")
 }
 
 func hookStartup() finding.Rule {
-	return rule("JARX-POISON-012", finding.High, "a hook writes to a shell startup file or another place that runs at login",
+	return rule("JARX-POISON-012", finding.High, "a hook writes to a startup file", "a hook writes to a shell startup file or another place that runs at login",
 		"remove the write; a hook shouldn't change what runs outside the agent")
 }
 
 func hookTemp() finding.Rule {
-	return rule("JARX-POISON-013", finding.Medium, "a hook runs a program from a temp dir, where anyone on the machine can swap it",
+	return rule("JARX-POISON-013", finding.Medium, "a hook runs a program from a temp dir", "a hook runs a program from a temp dir, where anyone on the machine can swap it",
 		"move the program into the repo or a dir only you can write")
 }
 

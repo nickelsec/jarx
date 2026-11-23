@@ -26,7 +26,7 @@ func TestScanNeverRunsWhatHooksSkillsAndPluginsDeclare(t *testing.T) {
 	home := t.TempDir()
 	writeCanaryHome(t, home, srv.URL)
 
-	got := run("scan", "--home", home)
+	got := run("scan", "--all", "--home", home)
 
 	if got.code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
