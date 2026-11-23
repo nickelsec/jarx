@@ -521,6 +521,11 @@ func demoCopy(t *testing.T) string {
 	if err := os.CopyFS(demo, os.DirFS(filepath.Join("..", "..", "testdata", "demo"))); err != nil {
 		t.Fatal(err)
 	}
+	// A local demo run leaves jarx's state in the repo's demo dir (it's
+	// gitignored). The copy starts without it, like a fresh checkout.
+	if err := os.RemoveAll(filepath.Join(demo, ".jarx-state")); err != nil {
+		t.Fatal(err)
+	}
 	return demo
 }
 
@@ -588,7 +593,7 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 	t.Helper()
 	// The demo's planted secrets are made up to dodge push protection, and
 	// jarx still has to mask every one.
-	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here"} {
+	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here", "demo-0000-not-a-real-token"} {
 		if strings.Contains(out, planted) {
 			t.Errorf("output contains the planted %q", planted)
 		}
@@ -606,8 +611,8 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 18 {
-		t.Errorf("--all shows %d findings, want all 18", len(titles))
+	if len(titles) != 19 {
+		t.Errorf("--all shows %d findings, want all 19", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
@@ -635,10 +640,11 @@ scanned
 +- 3 projects                        1 stale, not scanned
 +- 2 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
++- 4 MCP servers                     1 approval unknown
 +- 4 permission rules - 3 mode settings
-\- 4 config files                    1 unknown setting
+\- 5 config files                    1 unknown setting
 
-18 findings   8 HIGH - 6 MED - 4 INFO   changes: first scan
+19 findings   8 HIGH - 7 MED - 4 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -678,12 +684,13 @@ your user config - applies to every project
 +- MED   Text tells the agent to override or hide  POISON-006
 |  \- .claude{S}skills{S}release{S}SKILL.md:8  "ignore your previous instructions"
 |
-+- ... 6 more: 2 MED - 4 INFO  (jarx scan --all)
++- ... 7 more: 3 MED - 4 INFO  (jarx scan --all)
 |
 \- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
+               3 MCP servers
 
 ~{S}projects{S}notes  codex untrusted - no findings
-\- loads here: claude 1 instruction
+\- loads here: claude 1 instruction - 1 MCP server
 
 ~{S}projects{S}old  claude unknown - stale, not scanned
 

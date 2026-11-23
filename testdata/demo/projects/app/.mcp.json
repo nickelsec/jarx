@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "deploy": {
+      "command": "npx",
+      "args": ["-y", "deploy-helper-mcp@latest"]
+    },
+    "tickets": {
+      "type": "http",
+      "url": "https://tickets.example.com/mcp?api_token=demo-0000-not-a-real-token"
+    },
+    "scratch": {
+      "command": "node",
+      "args": ["tools/scratch-server.js"]
+    }
+  }
+}

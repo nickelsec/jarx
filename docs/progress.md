@@ -179,7 +179,26 @@ shows it.
 
 ## Phase 4: MCP
 
-- [ ] MCP config in the Claude adapter, with the "would it start" logic
+- [x] MCP config in the Claude adapter, with the "would it start" logic.
+  User and local servers from `~/.claude.json`, `.mcp.json`, plugin servers,
+  `managed-mcp.json` and `managedMcpServers`, each as a `model.Server` with
+  a start state (starts, may start, not started, approval unknown). The
+  policy follows the managed-mcp page: exclusive control, the denylist from
+  every admin source, the allowlist with the managed-only lock, and
+  `serverName`, `serverCommand` and `serverUrl` matching. Also `.mcp.json`
+  approval with trust, the `/mcp` toggles, same-name precedence with "may
+  start" when the winner won't start, plugin servers matched by endpoint,
+  reserved names, servers in snapshots, a row in the scanned block and the
+  loads line, the full list in `--all`, the demo's `.mcp.json`, and the demo
+  test's copy starting without the local jarx state
+  - Not covered yet: inline `mcpServers` in subagent frontmatter (no YAML
+    parser), servers on the agents row (they come with probe status),
+    `${VAR}` expansion when matching list entries (a reference there makes
+    the server "may start"), user and local servers reaching the secrets
+    scan (only `.mcp.json` does), unknown keys inside server entries,
+    claude.ai connectors with `disableClaudeAiConnectors` and
+    `allowAllClaudeAiMcps`, Claude in Chrome next to `managed-mcp.json`, and
+    two plugins defining the same endpoint
 - [ ] MCP config in the Codex adapter, with the "would it start" logic
 - [ ] `fakemcp`: scripted stdio and HTTP server
 - [ ] `proc`: job objects on Windows, process groups on unix, baseline env.

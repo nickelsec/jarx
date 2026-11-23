@@ -7,6 +7,7 @@ package snapshot
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ const (
 	KindRule        Kind = "rule"
 	KindOption      Kind = "setting"
 	KindConfig      Kind = "config file"
+	KindServer      Kind = "mcp server"
 )
 
 // Item is one thing a scan found. Project, Kind and Key say which thing it
@@ -134,6 +136,9 @@ func (b *builder) project(p model.Project) {
 			InEffect: h.Origin.InEffect, Why: h.Origin.Why, Hash: hash(h.ScriptText),
 		})
 	}
+	for _, s := range p.Servers {
+		b.server(dir, s)
+	}
 	for _, perm := range p.Permissions {
 		b.permissions(dir, perm)
 	}
@@ -187,4 +192,24 @@ func (b *builder) join(parts ...string) redact.Text {
 	}
 	t, _ := b.s.Scrub(strings.Join(nonEmpty, " "))
 	return t
+}
+
+// server keeps an MCP server definition by its name and file, with whether
+// it starts as the value and its whole masked definition as a hash, so a
+// changed command, URL or header shows as "content changed".
+func (b *builder) server(dir redact.Text, s model.Server) {
+	parts := make([]string, 0, 4+len(s.Args)+len(s.Env)+len(s.Headers))
+	parts = append(parts, string(s.Transport), s.Command.String())
+	for _, a := range s.Args {
+		parts = append(parts, a.String())
+	}
+	parts = append(parts, s.URL.String(), s.HeadersHelper.String())
+	for _, kv := range append(slices.Clone(s.Env), s.Headers...) {
+		parts = append(parts, kv.Key.String()+"="+kv.Value.String())
+	}
+	b.add(Item{
+		Project: dir, Kind: KindServer,
+		Key:      b.join(string(s.Origin.Agent), string(s.Origin.Scope), s.Name.String(), "in", s.Origin.File.Text().String()),
+		InEffect: s.Origin.InEffect, Why: s.Origin.Why, Value: b.join(string(s.Start)), Hash: hash(b.join(strings.Join(parts, "\x00"))),
+	})
 }

@@ -80,6 +80,18 @@ type layer struct {
 	managedHooks   *bool // allowManagedHooksOnly
 	skillShellOff  *bool // disableSkillShellExecution
 	enabledPlugins map[string]bool
+
+	// What the MCP reader needs. hkcu marks a layer from the HKCU registry,
+	// which isn't an admin source.
+	hkcu           bool
+	mcpEnableAll   *bool    // enableAllProjectMcpServers
+	mcpEnabled     []string // enabledMcpjsonServers
+	mcpRejected    []string // disabledMcpjsonServers
+	mcpAllow       *[]policyEntry
+	mcpDeny        []policyEntry
+	mcpManagedOnly *bool // allowManagedMcpServersOnly
+	mcpStrict      bool  // strictPluginOnlyCustomization locks mcp
+	managedServers json.RawMessage
 }
 
 // disable takes a whole layer out of effect.
@@ -471,6 +483,7 @@ func (r *layerReader) permission(sub string, raw json.RawMessage) {
 func (r *layerReader) allowedKey(key string, raw json.RawMessage) {
 	r.instructionKey(key, raw)
 	r.extensionKey(key, raw)
+	r.mcpKey(key, raw)
 	switch key {
 	case lockAuto:
 		r.lock(key, raw) // also accepted at the top level

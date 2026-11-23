@@ -41,7 +41,7 @@ type hookHandler struct {
 // run is what a handler runs, as written.
 func (h hookHandler) run() string {
 	switch h.Type {
-	case "http":
+	case typeHTTP:
 		return h.URL
 	case "mcp_tool":
 		return strings.TrimSpace(h.Server + " " + h.Tool)
@@ -119,6 +119,10 @@ var _ agent.ExtensionReader = Adapter{}
 func (Adapter) Extensions(c agent.Context, projects []model.Project) []finding.Finding {
 	all := loadSettings(c)
 	var findings []finding.Finding
+	sh := loadMCPShared(c, func(o model.Origin, why string) {
+		t, _ := c.Scrub.Scrub(why)
+		findings = append(findings, finding.UnreadableRecord().New(o, t))
+	})
 	for i := range projects {
 		p := &projects[i]
 		if p.Status != model.ProjectOK {
@@ -130,6 +134,7 @@ func (Adapter) Extensions(c agent.Context, projects []model.Project) []finding.F
 		e.skills(claudeDir(c.Env))
 		e.subagents(claudeDir(c.Env))
 		e.plugins(claudeDir(c.Env))
+		e.servers(sh)
 		findings = append(findings, e.findings...)
 	}
 	return findings

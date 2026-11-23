@@ -153,6 +153,65 @@ type Project struct {
 	// Configs are the settings and config files the agents read for this
 	// project, each scrubbed whole, so the secrets scan sees them.
 	Configs []Config
+	// Servers are the MCP server definitions that apply here, from every
+	// scope, with whether the agent would start each one.
+	Servers []Server
+}
+
+// Transport is how the agent talks to an MCP server.
+type Transport string
+
+// Transports. Claude's streamable-http is an alias for http.
+const (
+	TransportStdio   Transport = "stdio"
+	TransportHTTP    Transport = "http"
+	TransportSSE     Transport = "sse"
+	TransportWS      Transport = "ws"
+	TransportUnknown Transport = "unknown"
+)
+
+// StartState says whether the agent would start a server next session.
+type StartState string
+
+// Start states.
+const (
+	StartYes StartState = "starts"
+	// StartMaybe is for when the docs leave it open, like a definition below
+	// one with the same name that won't start itself. Note says why.
+	StartMaybe StartState = "may start"
+	StartNo    StartState = "not started"
+	// StartUnknown is a server that waits on an approval jarx can't see,
+	// like a project server no settings file approves.
+	StartUnknown StartState = "approval unknown"
+)
+
+// Pair is one name and value, like an env var or a header. Values are
+// scrubbed like any other text.
+type Pair struct {
+	Key   redact.Text
+	Value redact.Text
+}
+
+// Server is one MCP server definition from one file. jarx only reads it:
+// whether it's started is decided by probe, and only for StartYes and
+// StartMaybe.
+type Server struct {
+	Name      redact.Text
+	Transport Transport
+	Command   redact.Text
+	Args      []redact.Text
+	URL       redact.Text
+	Env       []Pair
+	Headers   []Pair
+	// HeadersHelper is a command the agent runs to get headers, as written.
+	HeadersHelper redact.Text
+	Plugin        redact.Text // the plugin it comes from, if any
+	// Start says whether the agent would start it. Origin.InEffect is true
+	// for StartYes and StartMaybe, and Origin.Why says why not otherwise.
+	Start StartState
+	// Note says what jarx can't settle about starting it.
+	Note   redact.Text
+	Origin Origin
 }
 
 // Config is one settings or config file, scrubbed. Origin says whose and

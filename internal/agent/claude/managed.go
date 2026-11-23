@@ -134,6 +134,9 @@ func readManaged(c agent.Context) managed {
 	files := add(fileSource(c))
 	hkcu := add(registrySource(c, platform.HKCU))
 	hkcu.present = false // never an admin document
+	for _, l := range hkcu.layers {
+		l.hkcu = true
+	}
 
 	m.choose(c, []*source{hklm, files}, hkcu)
 	for _, s := range []*source{hklm, files, hkcu} {
@@ -299,7 +302,7 @@ func (r *layerReader) managedKey(key string, raw json.RawMessage) {
 		}
 		r.l.behavior = v
 	case "policyHelper":
-		r.l.helper = string(raw) != "null"
+		r.l.helper = string(raw) != jsonNull
 	case "allowManagedPermissionRulesOnly":
 		var v bool
 		if err := json.Unmarshal(raw, &v); err != nil {
@@ -313,5 +316,5 @@ func (r *layerReader) managedKey(key string, raw json.RawMessage) {
 // isPolicyKey says whether key set to raw counts as a policy key: any key
 // but the two control keys, set to something other than null.
 func isPolicyKey(key string, raw json.RawMessage) bool {
-	return key != keyWSLInherits && key != keyManagedBehavior && string(raw) != "null"
+	return key != keyWSLInherits && key != keyManagedBehavior && string(raw) != jsonNull
 }

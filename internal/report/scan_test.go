@@ -252,3 +252,43 @@ func TestTheVersionSitsNextToTheBanner(t *testing.T) {
 		t.Errorf("banner =\n%s\nwant the long version on its own line", out)
 	}
 }
+
+func (f scanFixture) server(name string, start model.StartState) model.Server {
+	o := model.Origin{Agent: model.AgentClaude, Scope: model.ScopeProject, File: f.path("app/.mcp.json"), InEffect: start == model.StartYes || start == model.StartMaybe}
+	return model.Server{Name: f.text(name), Transport: model.TransportStdio, Command: f.text("node"), Start: start, Origin: o}
+}
+
+func TestServersAreCountedAndLoaded(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.Projects[0].Servers = []model.Server{
+		f.server("db", model.StartYes), f.server("feed", model.StartMaybe),
+		f.server("evil", model.StartUnknown), f.server("old", model.StartNo),
+	}
+
+	out := render(Style{Width: 80}, v)
+
+	if !strings.Contains(out, "4 MCP servers") || !strings.Contains(out, "1 not started - 1 approval unknown") {
+		t.Errorf("output =\n%s\nwant the servers counted with the ones that don't start noted", out)
+	}
+	if !strings.Contains(out, "claude 2 MCP servers") {
+		t.Errorf("output =\n%s\nwant the two servers that may start in what claude loads", out)
+	}
+}
+
+func TestTheInventoryListsEveryServer(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.All = true
+	old := f.server("old", model.StartNo)
+	old.Origin.Why = f.text("blocked by deniedMcpServers")
+	v.Projects[0].Servers = []model.Server{f.server("db", model.StartYes), old}
+
+	out := render(Style{Width: 200}, v)
+
+	for _, want := range []string{"claude MCP servers", "db  stdio  node  project, starts", "old  stdio  node  project, not started  not in effect: blocked by deniedMcpServers"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output =\n%s\nwant it to contain %q", out, want)
+		}
+	}
+}
