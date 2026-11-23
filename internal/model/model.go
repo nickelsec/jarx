@@ -477,6 +477,12 @@ type PermissionRule struct {
 	// empty for a rule that covers a whole tool, like Bash.
 	Target redact.Text
 	Origin Origin
+	// ToolUnknown marks a Claude rule naming a tool that's neither built in,
+	// by the catalog, nor an MCP tool: a typo, or a tool newer than the
+	// catalog. Claude has no such tool to apply the rule to. NearTool is the
+	// built-in tool it's most likely a typo of.
+	ToolUnknown bool
+	NearTool    redact.Text
 }
 
 // Permissions is one agent's permission settings for a project. Layers and

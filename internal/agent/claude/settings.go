@@ -461,7 +461,11 @@ func (r *layerReader) permission(sub string, raw json.RawMessage) {
 	switch sub {
 	case "allow", "ask", "deny":
 		for _, rule := range r.strings(full, raw) {
-			r.l.rules = append(r.l.rules, model.PermissionRule{Action: model.RuleAction(sub), Rule: rule, Target: r.scrub(ruleArg(rule.String())), Origin: o})
+			pr := model.PermissionRule{Action: model.RuleAction(sub), Rule: rule, Target: r.scrub(ruleArg(rule.String())), Origin: o}
+			if tool := ruleTool(rule.String()); !knownTool(tool) {
+				pr.ToolUnknown, pr.NearTool = true, r.scrub(nearTool(tool))
+			}
+			r.l.rules = append(r.l.rules, pr)
 		}
 	case "additionalDirectories":
 		r.l.dirs = append(r.l.dirs, r.strings(full, raw)...)

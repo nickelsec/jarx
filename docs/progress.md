@@ -360,8 +360,25 @@ and flags it.
     GnuPG's Windows default dir (both in Limits), the files inside gcloud's
     config dir (not documented), `--kubeconfig` and other per-run flags,
     aws `credential_process` and kube `exec` commands (named, never run),
-    and the per-project reach line (item 5)
-- [ ] built-in tools catalog
+    and the per-project reach line (item 5) (3d7d47b)
+- [x] built-in tools catalog. `catalog/tools.tsv` with Claude's 53 tools
+  from the tools reference (what each does in our own words, whether it
+  prompts, its channel, and which rule's specifier covers it, like Read for
+  Grep), the `Task` alias for `Agent` and the removed `TaskOutput`, and
+  Codex's `shell`, `apply_patch`, `update_plan`, `view_image` and web search
+  from the Codex prompting guide and CLI features page. Each agent has a
+  stamp (Claude 2.1.330, Codex 0.171.0, checked 2026-11-24) and
+  `catalog.Covers` says whether an installed version is covered, newer or
+  unknown. The Claude adapter marks rules naming a tool the catalog doesn't
+  know, with the closest real name, and two new rules raise them:
+  `JARX-PERMS-011` (high) for a misspelled deny or ask and `JARX-PERMS-012`
+  (info) for the rest. The demo gains a misspelled deny
+  - Not covered yet: the "newer than the catalog" warning on the agents row
+    and the installed version it needs (item 7), "not reachable by the tools
+    jarx knows" in the verdicts (items 3 to 5), tool names in skill
+    `allowed-tools` and hook matchers (they only grant, so a typo is the
+    safe direction), and whether Codex's `view_image`, `update_plan` and web
+    search ask first, which the docs don't say
 - [ ] `analyze/reach`: Claude channels and verdicts
 - [ ] `analyze/reach`: Codex channels and the legacy `sandbox_mode` switch
 - [ ] credential view

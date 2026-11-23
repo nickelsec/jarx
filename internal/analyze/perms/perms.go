@@ -104,6 +104,7 @@ func Rules() []finding.Rule {
 	return []finding.Rule{
 		bypassMode(), noSandbox(), neverAsk(), everyCommand(), credentialGrant(),
 		allProjectServers(), retiredPolicy(), runsAnything(), runsRepoCode(), hasEscape(),
+		misspelledTool(), unknownTool(),
 	}
 }
 
@@ -257,6 +258,7 @@ func (a *analysis) claudeRules(p model.Project, perm model.Permissions, samples 
 		if !r.Origin.InEffect {
 			continue
 		}
+		a.toolName(r)
 		switch {
 		case isSandboxRule(r) && (r.Action == model.RuleRead || r.Action == model.RuleWrite):
 			a.grant(pathMatcher(a.env, p.Path.Raw(), r.Target.String()), r.Origin, r.Rule.String(), samples)

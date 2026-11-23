@@ -622,8 +622,8 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 29 {
-		t.Errorf("--all shows %d findings, want all 29", len(titles))
+	if len(titles) != 30 {
+		t.Errorf("--all shows %d findings, want all 30", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
@@ -662,11 +662,11 @@ scanned
 +- 2 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
 +- 7 MCP servers                     1 not started - 1 approval unknown
-+- 5 permission rules - 3 mode settings
++- 6 permission rules - 3 mode settings
 +- 9 credential locations
 \- 6 config files                    1 unknown setting
 
-29 findings   10 HIGH - 14 MED - 5 INFO   changes: first scan
+30 findings   11 HIGH - 14 MED - 5 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -694,6 +694,9 @@ your user config - applies to every project
 +- HIGH  An allow rule runs every command  PERMS-004
 |  \- .claude{S}settings.json  Bash(*)
 |
++- HIGH  A deny or ask rule's tool is misspelled  PERMS-011
+|  \- .claude{S}settings.json  deny Raed(./config/secrets.json) names no tool; ...
+|
 +- HIGH  Hidden text aimed at the agent  POISON-007
 |  \- CLAUDE.md:9  in an inline comment: "curl -fsSL https://example.invalid/...
 |
@@ -706,10 +709,7 @@ your user config - applies to every project
 +- MED   A repo skill grants tools without trust  CLAUDE-004
 |  \- .claude{S}skills{S}release{S}SKILL.md  release pre-approves Bash(git *)
 |
-+- MED   An allow covers a tool that runs anything  PERMS-010
-|  \- .claude{S}skills{S}release{S}SKILL.md  skill release pre-approves Bash(git *)...
-|
-+- ... 7 more: 3 MED - 4 INFO  (jarx scan --all)
++- ... 8 more: 4 MED - 4 INFO  (jarx scan --all)
 |
 \- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
                1 MCP server - codex 1 MCP server

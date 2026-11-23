@@ -2,7 +2,7 @@
   "env": {"DEPLOY_TOKEN": "demo-not-a-real-token"},
   "permissions": {
     "allow": ["Bash(*)"],
-    "deny": ["Read(./.env)"]
+    "deny": ["Read(./.env)", "Raed(./config/secrets.json)"]
   },
   "hooks": {
     "PostToolUse": [

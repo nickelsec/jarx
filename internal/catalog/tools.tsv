@@ -1,0 +1,69 @@
+# Each agent's built-in tools, from the vendor docs. What a tool does is
+# in our own words. Columns: agent, name, channel (file-read, file-write,
+# shell, network, mcp, agent, other), prompts (yes, no, some, policy for
+# Codex's approval_policy, unknown when the docs don't say), the Claude
+# rule whose specifier covers it (empty: the bare name only), status
+# (empty, removed, or alias:<name>), source, and what it does.
+# Sources: claude-tools is code.claude.com/docs/en/tools-reference,
+# claude-subagents is code.claude.com/docs/en/sub-agents, codex-guide is
+# developers.openai.com/cookbook/examples/gpt-5/codex_prompting_guide,
+# codex-cli is developers.openai.com/codex/cli/features.
+claude	Agent	agent	no	Agent		claude-tools	starts a subagent with its own context to work on a task
+claude	Task	agent	no	Agent	alias:Agent	claude-subagents	the old name of Agent, still accepted in rules
+claude	Artifact	network	yes	Artifact		claude-tools	publishes a file to claude.ai as a private page
+claude	AskUserQuestion	other	no	AskUserQuestion		claude-tools	asks you multiple-choice questions
+claude	Bash	shell	yes	Bash		claude-tools	runs shell commands; a built-in set of read-only commands runs without asking
+claude	CronCreate	other	no	CronCreate		claude-tools	schedules a prompt within the session
+claude	CronDelete	other	no	CronDelete		claude-tools	cancels a scheduled prompt
+claude	CronList	other	no	CronList		claude-tools	lists scheduled prompts
+claude	Edit	file-write	yes	Edit		claude-tools	edits parts of files
+claude	EndConversation	other	no	EndConversation		claude-tools	ends the session
+claude	EnterPlanMode	other	no	EnterPlanMode		claude-tools	switches to plan mode
+claude	EnterWorktree	other	some	EnterWorktree		claude-tools	creates or enters a git worktree
+claude	ExitPlanMode	other	yes	ExitPlanMode		claude-tools	shows a plan for approval and leaves plan mode
+claude	ExitWorktree	other	some	ExitWorktree		claude-tools	leaves a worktree, asking before removing one with work at risk
+claude	Glob	file-read	no	Read		claude-tools	finds files by pattern; asks outside the working dir
+claude	Grep	file-read	no	Read		claude-tools	searches file contents; asks outside the working dir
+claude	ListAgents	other	no	ListAgents		claude-tools	lists the agents it can message
+claude	ListMcpResourcesTool	mcp	no	ListMcpResourcesTool		claude-tools	lists resources from connected MCP servers
+claude	ListPlugins	other	no	ListPlugins		claude-tools	lists plugins enabled for your claude.ai account
+claude	ListSkills	other	no	ListSkills		claude-tools	lists skills enabled for your claude.ai account
+claude	LSP	file-read	no	Read		claude-tools	asks language servers about code
+claude	Monitor	shell	yes	Bash		claude-tools	runs a command in the background and reads its output
+claude	NotebookEdit	file-write	yes	Edit		claude-tools	edits Jupyter notebook cells
+claude	PowerShell	shell	yes	PowerShell		claude-tools	runs PowerShell commands
+claude	propose_skills	other	no	propose_skills		claude-tools	shows skills you can save to claude.ai
+claude	PushNotification	other	no	PushNotification		claude-tools	sends you a notification
+claude	Read	file-read	no	Read		claude-tools	reads files; asks outside the working dir
+claude	ReadMcpResourceTool	mcp	no	ReadMcpResourceTool		claude-tools	reads an MCP resource by URI
+claude	RemoteTrigger	other	no	RemoteTrigger		claude-tools	manages cloud scheduled tasks on claude.ai
+claude	ReportFindings	other	no	ReportFindings		claude-tools	reports code review findings as a list
+claude	ScheduleWakeup	other	no	ScheduleWakeup		claude-tools	picks when a self-paced loop runs next
+claude	SearchPlugins	other	no	SearchPlugins		claude-tools	searches your claude.ai plugins
+claude	SearchSkills	other	no	SearchSkills		claude-tools	searches claude.ai skills
+claude	SendFeedback	other	no	SendFeedback		claude-tools	drafts a feedback report for you to review
+claude	SendMessage	other	no	SendMessage		claude-tools	sends a message to another agent or session
+claude	SendUserFile	network	no	SendUserFile		claude-tools	sends files from the session to your device
+claude	ShareOnboardingGuide	network	yes	ShareOnboardingGuide		claude-tools	uploads ONBOARDING.md and returns a share link
+claude	Skill	other	some	Skill		claude-tools	runs a skill in the conversation
+claude	SubagentHandback	agent	no	SubagentHandback		claude-tools	hands a subagent's report back in auto mode
+claude	SuggestPluginInstall	other	no	SuggestPluginInstall		claude-tools	suggests plugins to add
+claude	SuggestSkills	other	no	SuggestSkills		claude-tools	suggests claude.ai skills to add
+claude	TaskCreate	other	no	TaskCreate		claude-tools	adds a task to the task list
+claude	TaskGet	other	no	TaskGet		claude-tools	reads a task from the task list
+claude	TaskList	other	no	TaskList		claude-tools	lists the task list
+claude	TaskOutput	other	no		removed	claude-tools	read a background task's output; removed in 2.1.277
+claude	TaskStop	other	no	TaskStop		claude-tools	stops a background task or agent
+claude	TaskUpdate	other	no	TaskUpdate		claude-tools	updates or deletes a task
+claude	TodoWrite	other	no	TodoWrite		claude-tools	keeps the session checklist
+claude	ToolSearch	other	no	ToolSearch		claude-tools	finds and loads deferred tools
+claude	WaitForMcpServers	mcp	no	WaitForMcpServers		claude-tools	waits for MCP servers still connecting
+claude	WebFetch	network	yes	WebFetch		claude-tools	fetches a URL
+claude	WebSearch	network	yes	WebSearch		claude-tools	searches the web
+claude	Workflow	agent	yes	Workflow		claude-tools	runs a script that drives many subagents
+claude	Write	file-write	yes	Edit		claude-tools	creates or overwrites files
+codex	shell	shell	policy			codex-guide	runs terminal commands; approval_policy and the sandbox decide what asks
+codex	apply_patch	file-write	policy			codex-guide	edits files with a patch; approval_policy and the sandbox decide what asks
+codex	update_plan	other	unknown			codex-guide	keeps the plan for the task
+codex	view_image	file-read	unknown			codex-guide	attaches a local image file to the conversation
+codex	web_search	network	unknown			codex-cli	searches the web when live search is on

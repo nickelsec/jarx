@@ -722,6 +722,14 @@ Rules that depend on an agent's precedence live in its adapter:
   command, like `Bash(git *)` (`git -c` and aliases).
 - Skill and command `allowed-tools` count as allows for 004, 005 and 008 to
   010. Only grants in effect count.
+- `JARX-PERMS-011` (high): a deny or ask rule whose tool is misspelled, like
+  `Raed(./.env)`. Claude has no such tool, so the rule applies to nothing
+  and the protection it was meant to add is off. The same idea as a
+  misspelled safety setting (`JARX-UNKNOWN-003`).
+- `JARX-PERMS-012` (info): any other rule naming a tool the built-in tools
+  catalog doesn't know: an allow typo, or a tool newer than the catalog.
+  MCP tools (`mcp__...`), old names the docs still accept (`Task` for
+  `Agent`) and removed tools aren't flagged.
 - Codex `sandbox_mode` silently overriding permission profiles: high when a
   project file does it (a repository turning off your deny rules), medium
   when it's your own layers.
@@ -813,9 +821,25 @@ tool it records what it does, whether it prompts by default, and which
 channel it belongs to. The channel verdicts and the effective permissions view
 use it.
 
-The catalog is stamped with the agent version it was built against. If an
-installed agent is newer than that, jarx shows a warning that the agent may
-have tools the catalog doesn't know about.
+The catalog is stamped with the agent version it was built against: the
+newest release on the day the docs were checked. If an installed agent is
+newer than that, jarx shows a warning that the agent may have tools the
+catalog doesn't know about. A version jarx can't find or read counts the
+same as newer. jarx never fetches the catalog at runtime; a refresh means
+checking the docs again and moving the stamp.
+
+The catalog can only make a verdict worse, never better. While the agent is
+newer than the catalog, or its version is unknown, jarx won't call a
+credential "not reachable" outright: it says "not reachable by the tools
+jarx knows" and names the catalog's version in the why trail. A rule naming
+a tool the catalog lacks is the other sign of a newer agent (or a typo),
+and works without any version (`JARX-PERMS-011`, `JARX-PERMS-012`). An agent
+older than the catalog may lack some listed tools, which only overstates
+reach.
+
+Where the docs don't say whether a tool asks first, the catalog says
+"unknown" instead of guessing. Codex's built-in tools have no permission
+rules of their own: `approval_policy` and the sandbox decide.
 
 ## Effective permissions view
 
