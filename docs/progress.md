@@ -330,7 +330,7 @@ shows it.
     unknown); Codex `auto` and `approve`, whose meaning the docs don't
     give; allow rules on a tool's input, which Claude doesn't match for MCP;
     shadowing across agents or with built-in tools; and drift on servers
-    whose file or name changed, which counts as a new server
+    whose file or name changed, which counts as a new server (2867b2e)
 
 **Run it:** `jarx scan --home testdata/demo` probes the fake poisoned server
 and flags it.
