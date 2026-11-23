@@ -1,0 +1,1 @@
+{"command": "npx", "args": ["--package", "server-files", "server"]}

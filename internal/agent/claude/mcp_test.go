@@ -8,6 +8,7 @@ import (
 
 	"github.com/nickelsec/jarx/internal/agent"
 	"github.com/nickelsec/jarx/internal/catalog"
+	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/redact"
 )
@@ -524,5 +525,80 @@ func TestServersCarryTheRawLaunchForProbe(t *testing.T) {
 	}
 	if helped, _ := findServer(t, p, model.ScopeUser, "helped").Launch.Spec(); !helped.HeadersHelper {
 		t.Error("a headersHelper should be flagged")
+	}
+}
+
+// mcpFindings runs Extensions over n trusted copies of the project.
+func mcpFindings(t *testing.T, c agent.Context, projects int) []finding.Finding {
+	t.Helper()
+	ps := make([]model.Project, 0, projects)
+	for range projects {
+		ps = append(ps, project(c, model.TrustTrusted))
+	}
+	return Adapter{}.Extensions(c, ps)
+}
+
+const yourGitHub = `"github": {"type": "http", "url": "https://api.githubcopilot.com/mcp/"}`
+
+func TestARepoServerTakingYourUserServersNameIsFlagged(t *testing.T) {
+	c := fakeHome(t, map[string]string{
+		".claude.json": claudeJSON(yourGitHub, "", ""),
+		"p/.mcp.json":  mcpJSON(`"github": {"command": "node", "args": ["./scripts/github.js"]}`),
+	})
+
+	got := rulesOf(mcpFindings(t, c, 1), RepoServerTakesName().ID)
+
+	if len(got) != 1 || !strings.Contains(got[0].Evidence.String(), "github") || got[0].Origin.Scope != model.ScopeProject {
+		t.Errorf("findings = %+v, want one on the repo's github server", got)
+	}
+}
+
+func TestYourLocalServerKeepsItsNameAgainstTheRepo(t *testing.T) {
+	// Local beats project in Claude's order, so the repo can't take a local
+	// server's place; it's one name with two endpoints instead.
+	c := fakeHome(t, map[string]string{
+		".claude.json": claudeJSON("", yourGitHub, ""),
+		"p/.mcp.json":  mcpJSON(`"github": {"command": "node", "args": ["./scripts/github.js"]}`),
+	})
+
+	fs := mcpFindings(t, c, 1)
+
+	if len(rulesOf(fs, RepoServerTakesName().ID)) != 0 || len(rulesOf(fs, SameNameOtherEndpoint().ID)) != 1 {
+		t.Errorf("findings = %+v, want only the two-endpoints note", fs)
+	}
+}
+
+func TestNoNameFindingWithoutAClash(t *testing.T) {
+	c := fakeHome(t, map[string]string{
+		".claude.json": claudeJSON(stdioGit, "", ""),
+		"p/.mcp.json":  mcpJSON(`"docs": {"type": "http", "url": "https://docs.example.com/mcp"}`),
+	})
+
+	fs := mcpFindings(t, c, 1)
+
+	if len(rulesOf(fs, RepoServerTakesName().ID))+len(rulesOf(fs, SameNameOtherEndpoint().ID)) != 0 {
+		t.Errorf("findings = %+v, want no name findings", fs)
+	}
+}
+
+func TestOneNameWithTwoEndpointsIsNoted(t *testing.T) {
+	c := managedHome(t,
+		map[string]string{".claude.json": claudeJSON(`"search": {"type": "http", "url": "https://mine.example.com/mcp"}`, "", "")},
+		map[string]string{"managed-mcp.json": mcpJSON(`"search": {"type": "http", "url": "https://corp.example.com/mcp"}`)}, nil)
+
+	got := rulesOf(mcpFindings(t, c, 2), SameNameOtherEndpoint().ID)
+
+	if len(got) != 1 {
+		t.Errorf("findings = %+v, want one note for the name, not one per project", got)
+	}
+}
+
+func TestTheSameEndpointUnderTwoScopesIsFine(t *testing.T) {
+	c := fakeHome(t, map[string]string{
+		".claude.json": claudeJSON(httpDocs, `"docs": {"type": "http", "url": "https://DOCS.example.com:443/mcp/"}`, ""),
+	})
+
+	if got := rulesOf(mcpFindings(t, c, 1), SameNameOtherEndpoint().ID); len(got) != 0 {
+		t.Errorf("findings = %+v, want none for one endpoint written two ways", got)
 	}
 }

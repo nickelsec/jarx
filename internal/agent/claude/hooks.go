@@ -119,6 +119,7 @@ var _ agent.ExtensionReader = Adapter{}
 func (Adapter) Extensions(c agent.Context, projects []model.Project) []finding.Finding {
 	all := loadSettings(c)
 	var findings []finding.Finding
+	seen := map[string]bool{}
 	sh := loadMCPShared(c, func(o model.Origin, why string) {
 		t, _ := c.Scrub.Scrub(why)
 		findings = append(findings, finding.UnreadableRecord().New(o, t))
@@ -129,7 +130,7 @@ func (Adapter) Extensions(c agent.Context, projects []model.Project) []finding.F
 			continue
 		}
 		layers, _, _ := all.forProject(c, *p)
-		e := &extReader{c: c, project: p, layers: layers}
+		e := &extReader{c: c, project: p, layers: layers, seen: seen}
 		e.settingsHooks()
 		e.skills(claudeDir(c.Env))
 		e.subagents(claudeDir(c.Env))
@@ -146,6 +147,7 @@ type extReader struct {
 	project  *model.Project
 	layers   []*layer
 	findings []finding.Finding
+	seen     map[string]bool // findings already given in another project
 }
 
 func (e *extReader) text(s string) redact.Text {

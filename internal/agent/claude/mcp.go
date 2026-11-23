@@ -434,6 +434,7 @@ func (e *extReader) servers(sh mcpShared) {
 
 	pol := e.mcpPolicy(sh, local.disabled)
 	pol.decide(defs)
+	e.nameFindings(defs)
 	for _, d := range defs {
 		e.project.Servers = append(e.project.Servers, e.toModel(d))
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/nickelsec/jarx/internal/agent"
+	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/redact"
 )
@@ -55,6 +56,7 @@ func (e *extensions) servers() {
 	for i, d := range defs {
 		e.project.Servers = append(e.project.Servers, e.server(d, defs, winners, i))
 	}
+	e.redefineFindings(defs, winners)
 }
 
 func (e *extensions) server(d serverDef, defs []serverDef, winners map[string]int, i int) model.Server {
@@ -362,4 +364,74 @@ func boolMatch(b bool) matchResult {
 		return matchYes
 	}
 	return matchNo
+}
+
+// RepoRedefinesServerToken is a trusted repository's [mcp_servers.<id>]
+// that redefines one of your servers while your layer sends it a credential
+// the repository's doesn't set. If Codex merges the tables, your token goes
+// to wherever the repository points the server.
+func RepoRedefinesServerToken() finding.Rule {
+	return finding.Rule{
+		ID: "JARX-CODEX-009", Severity: finding.High, Title: "A repo can redirect your server's token",
+		Detail: "a trusted repository's .codex/config.toml redefines one of your MCP servers, and your own config sends that server a credential the repository's version doesn't set; the docs don't say whether Codex merges the two tables, and if it does, your credential goes to the URL or command the repository chose",
+		Fix:    "rename your server, or drop the repository's [mcp_servers] entry; check where the server points before trusting the project",
+	}
+}
+
+// RepoRedefinesServer is the same with no credential involved: the
+// repository's server takes your server's id, and the tool approval settings
+// you keyed on it.
+func RepoRedefinesServer() finding.Rule {
+	return finding.Rule{
+		ID: "JARX-CODEX-010", Severity: finding.Medium, Title: "A repo redefines one of your MCP servers",
+		Detail: "a trusted repository's .codex/config.toml defines an MCP server with the id of one of yours, so Codex uses the repository's definition there",
+		Fix:    "rename your server, or drop the repository's [mcp_servers] entry",
+	}
+}
+
+// credentialKeys are the server fields that send a credential.
+//
+//nolint:gochecknoglobals // fixed list, read only
+var credentialKeys = []string{"bearer_token_env_var", "env_http_headers", "http_headers", "env"}
+
+// yourCredentials says whether one of your loaded layers below the
+// repository's server defines the same id, and which credential fields it
+// sets that the repository's doesn't.
+func yourCredentials(repo serverDef, lower []serverDef) (bool, []string) {
+	mine := false
+	var keys []string
+	for _, d := range lower {
+		if d.id != repo.id || !d.layer.origin.InEffect || d.layer.origin.Scope == model.ScopeProject {
+			continue
+		}
+		mine = true
+		for _, k := range credentialKeys {
+			_, set := d.table[k]
+			_, repoSets := repo.table[k]
+			if set && !repoSets && !slices.Contains(keys, k) {
+				keys = append(keys, k)
+			}
+		}
+	}
+	return mine, keys
+}
+
+// redefineFindings flags a trusted repository's server that wins over one
+// of your own with the same id.
+func (e *extensions) redefineFindings(defs []serverDef, winners map[string]int) {
+	for _, id := range sortedKeys(winners) {
+		w := defs[winners[id]]
+		if w.layer.origin.Scope != model.ScopeProject {
+			continue
+		}
+		mine, yours := yourCredentials(w, defs[winners[id]+1:])
+		switch {
+		case len(yours) > 0:
+			e.findings = append(e.findings, RepoRedefinesServerToken().New(w.layer.origin, e.v.s.text(
+				"the repository redefines mcp_servers."+id+", and your config sets "+strings.Join(yours, ", ")+" for it")))
+		case mine:
+			e.findings = append(e.findings, RepoRedefinesServer().New(w.layer.origin, e.v.s.text(
+				"the repository redefines mcp_servers."+id+", one of your servers")))
+		}
+	}
 }

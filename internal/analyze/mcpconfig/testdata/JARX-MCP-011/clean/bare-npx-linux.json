@@ -1,0 +1,1 @@
+{"scope": "project", "goos": "linux", "command": "npx", "args": ["a & b"]}

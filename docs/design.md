@@ -884,6 +884,7 @@ demo scan at 80 columns, so a layout change shows up as a test change.
 | `internal/analyze/secrets` | findings from what the scrubber masked: seen, plain text or placeholder | Secrets |
 | `internal/analyze/poison` | text rules over every text the agent reads | Detection rules |
 | `internal/analyze/perms` | effective permissions with origin and in-effect reason | Effective permissions view |
+| `internal/analyze/mcpconfig` | rules on one MCP server definition: how it's installed and started and what its config hands it. Its own folder because none of the other analyzers is about server configs, and it isn't named `mcp` so it can't be mixed up with the client | MCP supply chain and config |
 | `internal/analyze/reach` | per-channel verdicts, observed modes, credential view | Reachability verdicts, Credential view |
 | `internal/netguard` | the one HTTP client. Blocks link-local, cloud metadata (including AWS over IPv6 and Alibaba's `100.100.100.200`), unspecified addresses and every IPv6 form that wraps a blocked IPv4 (mapped, compatible, NAT64, 6to4; Teredo and local-use NAT64 outright). Separate dial paths by scheme: https goes through the block then TLS, plain http also has to reach loopback. No proxy, no redirects, a 10 MiB body cap, 64 KiB headers, a 20s ceiling, no compression. | Network calls |
 | `internal/proc` | `proc_windows.go` job objects, `proc_unix.go` process groups, baseline env | How a stdio server is started |

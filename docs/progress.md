@@ -291,11 +291,22 @@ shows it.
     and 8), the PRD's "allowed by the token" layer (it stays unknown), Codex
     plugin servers, and `${CLAUDE_PLUGIN_DATA}`, whose dir the docs don't
     name
-- [ ] MCP supply chain and config rules. Includes the rules item 1, 2 and 4
+- [x] MCP supply chain and config rules. Includes the rules item 1, 2 and 4
   set up: a repo server that takes your server's name, one name in two
   scopes with different endpoints, a repo redefining a Codex server whose
   lower layer sends a token, and `cmd.exe` metacharacters in the args of a
-  `.bat` or `.cmd` server
+  `.bat` or `.cmd` server. Twelve rules on one definition in a new
+  `analyze/mcpconfig` (`JARX-MCP-001` to `012`, with 71 poisoned and clean
+  fixtures), and four in the adapters, which know the precedence:
+  `JARX-CLAUDE-006` and `007`, `JARX-CODEX-009` and `010`. Rules run on
+  servers that start, may start or wait on approval. The demo now flags its
+  unpinned `npx` server, its repo script and the repo that redefines your
+  Codex `search` server
+  - Not covered yet: a local server can't be taken over (Claude ranks local
+    above project), so CLAUDE-006 is user servers only; tokens in URLs and
+    secrets in headers stay with `JARX-SECRET-002`; "forwarding the whole
+    env" has no documented config key to check; and poison rules on what
+    servers offer, lying annotations and tool shadowing come with item 8
 - [ ] `analyze/capability` and `analyze/drift`
 
 **Run it:** `jarx scan --home testdata/demo` probes the fake poisoned server

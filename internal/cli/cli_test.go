@@ -611,8 +611,8 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 20 {
-		t.Errorf("--all shows %d findings, want all 20", len(titles))
+	if len(titles) != 23 {
+		t.Errorf("--all shows %d findings, want all 23", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
@@ -648,7 +648,7 @@ scanned
 +- 4 permission rules - 3 mode settings
 \- 5 config files                    1 unknown setting
 
-20 findings   8 HIGH - 8 MED - 4 INFO   changes: first scan
+23 findings   9 HIGH - 10 MED - 4 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -666,6 +666,9 @@ your user config - applies to every project
 |
 +- HIGH  A repo sandbox_mode drops your profile  CODEX-001
 |  \- .codex{S}config.toml  .codex{S}config.toml sets sandbox_mode = danger-full-...
+|
++- HIGH  A repo can redirect your server's token  CODEX-009
+|  \- .codex{S}config.toml  the repository redefines mcp_servers.search, and yo...
 |
 +- HIGH  Codex runs with no sandbox  PERMS-002
 |  \- .codex{S}config.toml  sandbox_mode = danger-full-access in project config
@@ -685,13 +688,10 @@ your user config - applies to every project
 +- MED   A repo skill grants tools without trust  CLAUDE-004
 |  \- .claude{S}skills{S}release{S}SKILL.md  release pre-approves Bash(git *)
 |
-+- MED   An allow covers a tool that runs anything  PERMS-010
-|  \- .claude{S}skills{S}release{S}SKILL.md  skill release pre-approves Bash(git *)...
++- MED   An MCP server runs an unpinned package  MCP-001
+|  \- .mcp.json  deploy runs npx -y deploy-helper-mcp@latest, and deploy-help...
 |
-+- MED   Text tells the agent to override or hide  POISON-006
-|  \- .claude{S}skills{S}release{S}SKILL.md:8  "ignore your previous instructions"
-|
-+- ... 7 more: 3 MED - 4 INFO  (jarx scan --all)
++- ... 10 more: 6 MED - 4 INFO  (jarx scan --all)
 |
 \- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
                4 MCP servers - codex 1 MCP server
@@ -723,7 +723,8 @@ func TestScanShowsWhatChangedSinceTheLastScan(t *testing.T) {
 	if !strings.Contains(first.stdout, "   changes: first scan\n") {
 		t.Errorf("first scan = %q, want a first scan", first.stdout)
 	}
-	if !regexp.MustCompile(`   changes: none since \d{4}-\d\d-\d\d \d\d:\d\d UTC\n`).MatchString(second.stdout) {
+	// "changes" shares the summary line when it fits, or takes its own.
+	if !regexp.MustCompile(`(   |\n)changes: none since \d{4}-\d\d-\d\d \d\d:\d\d UTC\n`).MatchString(second.stdout) {
 		t.Errorf("second scan = %q, want no changes", second.stdout)
 	}
 	sep := string(filepath.Separator)

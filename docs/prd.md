@@ -608,33 +608,56 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 
 ### MCP supply chain and config
 
-- Unpinned `npx`/`uvx` (`@latest` or no version).
-- Docker images on `latest`.
-- `sh -c` style commands.
-- Binaries in temp or download dirs.
-- Server commands that install from a git branch ref (`git+https://...#main`,
-  `github:owner/repo` with no pinned commit), since the code can change under
-  the same config.
-- Server commands that run a script from inside the repo (`node ./scripts/x.js`,
-  `python tools/server.py`). Anyone who can push to the repo controls that
-  server.
-- Codex `env_vars` forwarding secret-looking vars into a server.
-- Plain `http://` remote URLs.
-- Tokens in the URL.
-- Secrets in headers.
-- Forwarding the whole env.
-- `headersHelper` / `http_headers_helper` (runs a command at connect).
-- Broad filesystem args (a server given `/` or `~`).
-- A repository's `.mcp.json` server that takes the name of one of your user
-  or local servers, so your permission rules for that name apply to the
-  repository's server once it's approved.
-- The same server name in two scopes with different endpoints.
-- A server whose command is a `.bat` or `.cmd` file (or a bare name like
-  `npx` that's one on Windows) with `cmd.exe` metacharacters in its args.
-  `cmd.exe` reads them as syntax when the agent starts the server, so the
-  config can run a command it never names. High when a repository's config
-  does it, medium in your own. This is a finding of its own, apart from the
-  "failed to start" status jarx gives the server.
+Rules on one server's definition live in `analyze/mcpconfig`. They run on
+every server the agent would start, may start, or waits to approve, since
+one waiting to be approved is the one a repository wants started.
+
+- `JARX-MCP-001` (medium): an unpinned package runner (`npx`, `bunx`,
+  `pnpm dlx`, `npm exec`, `uvx`, `pipx run`, `uv tool run`) with `@latest`,
+  a range or no version.
+- `JARX-MCP-002` (medium): a container image (`docker`, `podman` or
+  `nerdctl run`) with no tag or `latest`.
+- `JARX-MCP-003` (medium): a server started through a shell's `-c`
+  (`sh -c`, `cmd /c`, `powershell -Command`).
+- `JARX-MCP-004` (high): a server program in a temp or downloads dir.
+- `JARX-MCP-005` (medium): an install from a git branch or default ref
+  (`git+https://...#main`, `github:owner/repo`) instead of a commit, since
+  the code can change under the same config.
+- `JARX-MCP-006` (medium): a repository's server that runs a script from the
+  repo (`node ./scripts/x.js`, `python tools/server.py`). Anyone who can push
+  to the repo controls that server.
+- `JARX-MCP-007` (medium): Codex `env_vars` forwarding a secret-looking var
+  into a server.
+- `JARX-MCP-008` (medium): a plain `http://` URL to a host that isn't
+  loopback.
+- `JARX-MCP-009` (info): `headersHelper` / `http_headers_helper`, which runs
+  a command at connect.
+- `JARX-MCP-010` (medium): broad filesystem args (a server given `/`, `~`,
+  your home dir or a drive root).
+- `JARX-MCP-011` (high) and `JARX-MCP-012` (medium): a server whose command
+  is a `.bat` or `.cmd` file (or a bare name like `npx` that's one on
+  Windows) with `cmd.exe` metacharacters in its args. `cmd.exe` reads them
+  as syntax when the agent starts the server, so the config can run a
+  command it never names. 011 when a repository's or plugin's config does
+  it, 012 in your own. This is a finding of its own, apart from the "failed
+  to start" status jarx gives the server.
+- Tokens in a URL and secrets in headers are the secrets rules' job
+  (`JARX-SECRET-002`).
+
+Rules that depend on an agent's precedence live in its adapter:
+
+- `JARX-CLAUDE-006` (high): a repository's `.mcp.json` server that takes the
+  name of one of your user servers, so your permission rules for that name
+  apply to the repository's server once it's approved. A local server wins
+  over the project's, so it can't be replaced this way.
+- `JARX-CLAUDE-007` (info): the same server name in two scopes with
+  different endpoints.
+- `JARX-CODEX-009` (high): a trusted repository's `[mcp_servers.<id>]` that
+  redefines one of your servers while your config sends it a credential
+  (`bearer_token_env_var`, `env_http_headers`, `http_headers`, `env`) the
+  repository's doesn't set. If Codex merges the tables, your credential goes
+  where the repository points the server.
+- `JARX-CODEX-010` (medium): the same with no credential involved.
 
 ### Permissions and auto-approval
 

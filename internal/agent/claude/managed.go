@@ -55,7 +55,7 @@ func PolicyHelperSet() finding.Rule {
 
 // Rules returns the rules the Claude adapter owns.
 func Rules() []finding.Rule {
-	return []finding.Rule{PolicyHelperSet(), ImportsCredential(), ShellInjection(), RepoSkillGrants(), AliasIgnored()}
+	return []finding.Rule{PolicyHelperSet(), ImportsCredential(), ShellInjection(), RepoSkillGrants(), AliasIgnored(), RepoServerTakesName(), SameNameOtherEndpoint()}
 }
 
 // managedDirFor is the system dir Claude reads managed settings files from.
