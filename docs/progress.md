@@ -202,7 +202,20 @@ shows it.
     connectors with `disableClaudeAiConnectors` and `allowAllClaudeAiMcps`,
     Claude in Chrome next to `managed-mcp.json`, and two plugins defining
     the same endpoint (c3f9aef)
-- [ ] MCP config in the Codex adapter, with the "would it start" logic
+- [x] MCP config in the Codex adapter, with the "would it start" logic.
+  `[mcp_servers.<id>]` from every config layer, with the layer's trust and
+  profile rules, `enabled`, the stdio and streamable HTTP shapes, and the
+  `requirements.toml` allowlist (id and identity, string and matcher forms,
+  exact, prefix and whole-value regex, empty list turns everything off).
+  Also every Codex field in the model (env_vars, cwd, bearer and header env
+  vars, auth, enabled and disabled tools, approval modes), the same id in
+  two layers with a note on fields that may merge in, `agent.Pair` shared by
+  both adapters for masking by name, the new fields in the snapshot hash,
+  and the demo's user server that a trusted repo redefines
+  - Not covered yet: Codex plugin servers (`plugins.<plugin>.mcp_servers`,
+    with Codex plugins), `environment_id` and remote executors,
+    `startup_readiness` and `required`, and unknown values for
+    `approval_mode` (the open item in the PRD)
 - [ ] `fakemcp`: scripted stdio and HTTP server
 - [ ] `proc`: job objects on Windows, process groups on unix, baseline env.
   First check whether Go 1.27 fixed golang/go#79927 (design.md says the fix

@@ -205,6 +205,20 @@ type Server struct {
 	Headers   []Pair
 	// HeadersHelper is a command the agent runs to get headers, as written.
 	HeadersHelper redact.Text
+	// What Codex adds: the working dir, env var names it forwards
+	// (env_vars), the env var that holds a bearer token, headers filled
+	// from env vars (header to var name), and the auth it tries.
+	Cwd        redact.Text
+	ForwardEnv []redact.Text
+	BearerVar  redact.Text
+	HeaderVars []Pair
+	Auth       redact.Text
+	// Tool policy: Codex's enabled_tools (nil when unset, so every tool) and
+	// disabled_tools, and approval modes, the server default under the
+	// empty key and per tool under the tool's name.
+	EnabledTools  []redact.Text
+	DisabledTools []redact.Text
+	Approvals     []Pair
 	Plugin        redact.Text // the plugin it comes from, if any
 	// Start says whether the agent would start it. Origin.InEffect is true
 	// for StartYes and StartMaybe, and Origin.Why says why not otherwise.

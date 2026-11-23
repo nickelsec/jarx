@@ -640,7 +640,7 @@ scanned
 +- 3 projects                        1 stale, not scanned
 +- 2 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
-+- 4 MCP servers                     1 approval unknown
++- 6 MCP servers                     1 not started - 1 approval unknown
 +- 4 permission rules - 3 mode settings
 \- 5 config files                    1 unknown setting
 
@@ -690,10 +690,10 @@ your user config - applies to every project
 +- ... 7 more: 3 MED - 4 INFO  (jarx scan --all)
 |
 \- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
-               3 MCP servers
+               3 MCP servers - codex 1 MCP server
 
 ~{S}projects{S}notes  codex untrusted - no findings
-\- loads here: claude 1 instruction - 1 MCP server
+\- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
 
 ~{S}projects{S}old  claude unknown - stale, not scanned
 

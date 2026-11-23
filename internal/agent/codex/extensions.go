@@ -71,6 +71,7 @@ func (Adapter) Extensions(c agent.Context, projects []model.Project) []finding.F
 		e := &extensions{v: v, project: p}
 		e.skills()
 		e.hooks()
+		e.servers()
 	}
 	return nil // parse problems come from Settings
 }

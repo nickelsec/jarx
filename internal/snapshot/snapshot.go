@@ -7,7 +7,6 @@ package snapshot
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -198,18 +197,37 @@ func (b *builder) join(parts ...string) redact.Text {
 // it starts as the value and its whole masked definition as a hash, so a
 // changed command, URL or header shows as "content changed".
 func (b *builder) server(dir redact.Text, s model.Server) {
-	parts := make([]string, 0, 4+len(s.Args)+len(s.Env)+len(s.Headers))
-	parts = append(parts, string(s.Transport), s.Command.String())
-	for _, a := range s.Args {
-		parts = append(parts, a.String())
+	// Each field is labeled, so a value moving from one field to another is
+	// a change too.
+	parts := []string{
+		"transport " + string(s.Transport), "command " + s.Command.String(), "args " + texts(s.Args),
+		"url " + s.URL.String(), "helper " + s.HeadersHelper.String(), "env " + pairs(s.Env),
+		"headers " + pairs(s.Headers), "cwd " + s.Cwd.String(), "forward " + texts(s.ForwardEnv),
+		"bearer " + s.BearerVar.String(), "header vars " + pairs(s.HeaderVars), "auth " + s.Auth.String(),
+		"approvals " + pairs(s.Approvals), "disabled " + texts(s.DisabledTools),
 	}
-	parts = append(parts, s.URL.String(), s.HeadersHelper.String())
-	for _, kv := range append(slices.Clone(s.Env), s.Headers...) {
-		parts = append(parts, kv.Key.String()+"="+kv.Value.String())
+	if s.EnabledTools != nil {
+		parts = append(parts, "enabled "+texts(s.EnabledTools))
 	}
 	b.add(Item{
 		Project: dir, Kind: KindServer,
 		Key:      b.join(string(s.Origin.Agent), string(s.Origin.Scope), s.Name.String(), "in", s.Origin.File.Text().String()),
 		InEffect: s.Origin.InEffect, Why: s.Origin.Why, Value: b.join(string(s.Start)), Hash: hash(b.join(strings.Join(parts, "\x00"))),
 	})
+}
+
+func texts(ts []redact.Text) string {
+	out := make([]string, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, t.String())
+	}
+	return strings.Join(out, "\x01")
+}
+
+func pairs(ps []model.Pair) string {
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, p.Key.String()+"="+p.Value.String())
+	}
+	return strings.Join(out, "\x01")
 }

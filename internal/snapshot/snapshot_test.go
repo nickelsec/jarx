@@ -287,3 +287,31 @@ func TestServerItemsHoldNoHeaderValue(t *testing.T) {
 		t.Errorf("snapshot holds the header value: %s", out)
 	}
 }
+
+func TestCodexServerFieldsAreInTheDefinitionHash(t *testing.T) {
+	f := newFixture(t)
+	base := func() Input {
+		return f.withServer(f.input(instructionBody), "https://docs.example.com/mcp", model.StartYes)
+	}
+	old := Build(f.s, time.Unix(100, 0), base())
+
+	for name, change := range map[string]func(*model.Server){
+		"bearer var":     func(s *model.Server) { s.BearerVar = f.text("OTHER_TOKEN") },
+		"forwarded env":  func(s *model.Server) { s.ForwardEnv = []redact.Text{f.text("AWS_SECRET_ACCESS_KEY")} },
+		"header var":     func(s *model.Server) { s.HeaderVars = []model.Pair{{Key: f.text("X-Key"), Value: f.text("KEY")}} },
+		"enabled tools":  func(s *model.Server) { s.EnabledTools = []redact.Text{f.text("delete")} },
+		"disabled tools": func(s *model.Server) { s.DisabledTools = []redact.Text{f.text("read")} },
+		"approvals":      func(s *model.Server) { s.Approvals = []model.Pair{{Key: f.text(""), Value: f.text("approve")}} },
+		"auth":           func(s *model.Server) { s.Auth = f.text("chatgpt") },
+		"cwd":            func(s *model.Server) { s.Cwd = f.text("/elsewhere") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := base()
+			change(&in.Projects[0].Servers[0])
+			changes := Diff(f.s, old, Build(f.s, time.Unix(200, 0), in))
+			if len(changes) != 1 || !strings.Contains(changes[0].What.String(), "content changed") {
+				t.Errorf("Diff() = %+v, want the server's content changed", changes)
+			}
+		})
+	}
+}

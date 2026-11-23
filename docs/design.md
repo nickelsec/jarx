@@ -470,6 +470,51 @@ https://code.claude.com/docs/en/managed-mcp,
 https://code.claude.com/docs/en/settings-reference,
 https://code.claude.com/docs/en/sub-agents
 
+### Codex MCP config and which servers start
+
+From the Codex mcp, config-reference and managed-configuration pages (read
+2026-11-23).
+
+- **Where servers come from.** `[mcp_servers.<id>]` tables in any config
+  layer: legacy `managed_config.toml`, project `.codex/config.toml` files,
+  profile files, the user's `config.toml` and `/etc/codex/config.toml`. A
+  server in a layer Codex doesn't load (an untrusted project, a profile file
+  without `--profile`) doesn't start, with the layer's reason.
+- **Shape.** A table with `command` is stdio and one with `url` is
+  streamable HTTP. Neither means it doesn't start. Both isn't documented, so
+  it may start, with a note. `enabled = false` turns it off.
+- **Fields jarx keeps.** `args`, `env`, `env_vars` (names, with a remote
+  source shown), `cwd`, `bearer_token_env_var`, `http_headers`,
+  `env_http_headers` (header to var name), `http_headers_helper`, `auth`,
+  `enabled_tools`, `disabled_tools`, `default_tools_approval_mode` and each
+  tool's `approval_mode`. Env and header values are masked by their name, the
+  same way as for Claude.
+- **requirements.toml.** Its `mcp_servers` table is an allowlist: the id and
+  its identity must both match, and an empty table turns every server off.
+  `identity.command` as a string matches the command alone. As a table it
+  needs the exact executable and one matcher per argument, in order.
+  `identity.url` is an exact string or a matcher table. Matchers are
+  `exact`, `prefix` and a `regex` that has to match the whole value. A regex
+  jarx can't compile makes the server "may start".
+
+#### The same id in more than one layer
+
+The docs don't say whether a higher layer's `[mcp_servers.<id>]` replaces a
+lower one's whole or merges with it field by field. Either way the highest
+loaded layer's fields are the ones in use, so that definition is the one
+that starts, and the lower ones are "overridden" with that reason. When a
+lower layer sets a field the one in use doesn't, the one in use gets a note
+naming it. That's the case that matters: a trusted repo that redefines your
+server with its own `url` could get your `bearer_token_env_var` merged in,
+so your token goes to its host. The MCP config rules item turns that into a
+finding.
+
+Plugin servers wait for Codex plugins, which jarx doesn't read yet.
+
+Sources: https://developers.openai.com/codex/mcp,
+https://developers.openai.com/codex/config-reference,
+https://developers.openai.com/codex/enterprise/managed-configuration
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request

@@ -466,28 +466,16 @@ func (e *extReader) toModel(d def) model.Server {
 		s.Args = append(s.Args, e.text(a))
 	}
 	for _, p := range d.raw.env {
-		s.Env = append(s.Env, e.pair(p))
+		s.Env = append(s.Env, agent.Pair(e.c.Scrub, p[0], p[1]))
 	}
 	for _, p := range d.raw.headers {
-		s.Headers = append(s.Headers, e.pair(p))
+		s.Headers = append(s.Headers, agent.Pair(e.c.Scrub, p[0], p[1]))
 	}
 	s.Origin.InEffect = d.start == model.StartYes || d.start == model.StartMaybe
 	if !s.Origin.InEffect {
 		s.Origin.Why = e.text(d.why)
 	}
 	return s
-}
-
-// pair scrubs an env var or header. The value is scrubbed with its name in
-// front, so the name rule sees API_TOKEN=... and not just a bare value. When
-// that finds a secret the value alone doesn't, the whole value is masked as
-// that kind. A ${VAR} reference is never a secret, so it stays readable.
-func (e *extReader) pair(p [2]string) model.Pair {
-	value, alone := e.c.Scrub.Scrub(p[1])
-	if _, named := e.c.Scrub.Scrub(p[0] + "=" + p[1]); len(named) > len(alone) {
-		value, _ = e.c.Scrub.Secret(named[len(named)-1].Kind, p[1])
-	}
-	return model.Pair{Key: e.text(p[0]), Value: value}
 }
 
 // mcpKey reads the MCP keys a settings file may set: approvals and the
