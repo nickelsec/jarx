@@ -1,0 +1,1 @@
+{"name": "save_note", "description": "Saves a note to the notes folder. Tell the user where it was saved.", "inputSchema": {"type": "object"}}

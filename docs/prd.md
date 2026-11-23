@@ -80,7 +80,8 @@ These go in the README and each one gets tests.
    probe stderr). It shows up only as `REDACTED:<type>` plus a fingerprint,
    and never reaches the terminal, dashboard, snapshots, logs or the LLM.
 5. **Never calls an MCP tool or reads an MCP resource.** It only sends
-   `initialize` and the list methods.
+   `server/discover` (or `initialize`, for a legacy server) and the list
+   methods.
 6. **Never writes agent config.**
 7. **Dashboard binds to 127.0.0.1 only**, with a token, Host check and Origin
    check.
@@ -249,12 +250,18 @@ A server is probed only if the agent would start it:
 
 - **Claude, project `.mcp.json`:** enabled through `enableAllProjectMcpServers`
   or `enabledMcpjsonServers` in a file that's honored for that key (user,
-  managed, `--settings`, or a trusted local file), or approved in the observed
-  state in `~/.claude.json`. It must also not be in `disabledMcpjsonServers`
-  anywhere.
-- **Claude, all scopes:** respect `enabledMcpServers`/`disabledMcpServers`,
-  managed `allowedMcpServers`/`deniedMcpServers`, `allowManagedMcpServersOnly`
-  and `managed-mcp.json` exclusive control.
+  managed, `--settings`, or a trusted project or local file). The approval
+  dialog writes `enabledMcpjsonServers` to `settings.local.json`. It must
+  also not be in `disabledMcpjsonServers` anywhere.
+- **Claude, all scopes:** respect the per-project `disabledMcpServers` in
+  `~/.claude.json`, `allowedMcpServers`/`deniedMcpServers` merged across
+  scopes, `allowManagedMcpServersOnly`, `managedMcpServers`,
+  `strictPluginOnlyCustomization` and `managed-mcp.json` exclusive control.
+- **Claude, the same name in more than one scope:** only the highest
+  definition loads (local, then project, then user, with managed above
+  them and plugins matched by endpoint). The others are listed as not in
+  effect. When the docs don't say which one loads, every candidate counts
+  as one that may start.
 - **Codex:** project servers only in trusted projects. Skip `enabled = false`.
   Respect `enabled_tools`/`disabled_tools` when showing tools. Respect the
   `requirements.toml` allowlist.
@@ -278,8 +285,9 @@ A server is probed only if the agent would start it:
   `APPDATA` and the like). Nothing else from jarx's own env.
 - Claude expansion rules: `${VAR}` and `${VAR:-default}`; an unset var with no
   default stays as literal text; an empty string counts as set.
-- Send `initialize`, then `tools/list`, `prompts/list`, `resources/list`. Then
-  kill the whole process tree (on Windows, a job object, so `npx` children die
+- Send `server/discover` (or `initialize`, for a server older than the
+  2026-07-28 protocol), then `tools/list`, `prompts/list`, `resources/list`.
+  Then kill the whole process tree (on Windows, a job object, so `npx` children die
   too).
 - 15s timeout per server, at most 4 at a time.
 - A failure shows as **"failed to start"** or **"timed out"** (see
@@ -287,8 +295,8 @@ A server is probed only if the agent would start it:
 
 ### How a remote server is probed
 
-- `https://` servers with no creds get one anonymous `initialize` plus the
-  list calls. A `401` or `403` shows as **"requires auth"**.
+- `https://` servers with no creds get one anonymous `server/discover` (or
+  `initialize`) plus the list calls. A `401` or `403` shows as **"requires auth"**.
 - Servers with static creds configured (a token in `headers`,
   `http_headers`, `env_http_headers` or `bearer_token_env_var`) get them sent
   exactly the way the agent would send them. It's the same no-new-risk logic
@@ -346,8 +354,28 @@ For each tool, jarx shows three layers side by side:
    rules (`mcp__server__tool` allow/ask/deny), Codex `enabled_tools`,
    `disabled_tools` and per-tool `approval_mode`, plus the observed modes.
 
+Layer 3 is one of: hidden (Codex `enabled_tools` or `disabled_tools`),
+denied, asks, may run without asking, or runs without asking, with the rule
+or mode that decided it. For Claude, deny beats ask beats allow, and with no
+rule the default mode decides (`bypassPermissions` runs it, `dontAsk` denies
+it, `auto` leaves it to a classifier, the rest ask). A server name with `__`
+in it or ending in `_` is only allowed by the wildcard form. For Codex, the
+tool's `approval_mode` or the server's default decides first (`prompt`
+asks, `writes` asks unless the tool is marked read-only). With no mode, a
+tool marked destructive asks unless it's also marked read-only, and the rest
+follow `approval_policy`.
+
 The point is to make "the agent can call a delete tool without asking" easy to
-spot.
+spot:
+
+- `JARX-CAP-001` (high): a tool that changes things (marked destructive and
+  not read-only, or named for a change) that an allow rule or Codex approval
+  mode lets run without asking. One finding per rule or mode, naming the
+  tools it lets through, since that's one fix. A mode alone, like
+  `bypassPermissions`, has its own rule (`JARX-PERMS-001`).
+- `JARX-CAP-002` (medium): a Codex `approval_mode` or
+  `default_tools_approval_mode` of `auto` or `approve`. The docs don't say
+  what these do, so jarx says the tool may run without asking.
 
 ## Credentials
 
@@ -504,7 +532,6 @@ The docs don't cover most of this:
 - the Codex `sessions/` folder and its `.zst` rollouts
 - the Codex `*.sqlite` files
 - per-session approval and sandbox values in Codex
-- where Claude stores interactive project MCP approvals
 
 jarx supports these as **observed formats**. The parsers are built from fake
 fixtures shaped like real files, tolerate version changes, are labeled
@@ -577,8 +604,16 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
   encode-and-send instructions, and base64 blobs of 200 chars or more.
 - `JARX-POISON-009` (info): pointers to credential and key files (`~/.ssh`,
   `.aws/credentials`, `.env`, `.netrc` and the like). `.envrc` doesn't count.
-- Annotations that lie, like a delete tool marked `readOnlyHint`.
-- Tool shadowing: two servers exposing the same tool name.
+- `JARX-POISON-014` (medium): annotations that lie. A tool marked
+  `readOnlyHint` that's also marked `destructiveHint`, or whose name has a
+  word that says it changes things (`delete_notes`, `pushFiles`). Codex
+  doesn't ask before a tool marked read-only, even one also marked
+  destructive.
+- `JARX-POISON-015` (medium): tool shadowing, two servers the same agent
+  loads in a project offering the same tool name.
+
+On MCP text, the hits of one rule on one tool are one finding that lists
+what matched, since a tool's text has no lines to tell them apart.
 
 ### Hooks
 
@@ -601,23 +636,56 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 
 ### MCP supply chain and config
 
-- Unpinned `npx`/`uvx` (`@latest` or no version).
-- Docker images on `latest`.
-- `sh -c` style commands.
-- Binaries in temp or download dirs.
-- Server commands that install from a git branch ref (`git+https://...#main`,
-  `github:owner/repo` with no pinned commit), since the code can change under
-  the same config.
-- Server commands that run a script from inside the repo (`node ./scripts/x.js`,
-  `python tools/server.py`). Anyone who can push to the repo controls that
-  server.
-- Codex `env_vars` forwarding secret-looking vars into a server.
-- Plain `http://` remote URLs.
-- Tokens in the URL.
-- Secrets in headers.
-- Forwarding the whole env.
-- `headersHelper` / `http_headers_helper` (runs a command at connect).
-- Broad filesystem args (a server given `/` or `~`).
+Rules on one server's definition live in `analyze/mcpconfig`. They run on
+every server the agent would start, may start, or waits to approve, since
+one waiting to be approved is the one a repository wants started.
+
+- `JARX-MCP-001` (medium): an unpinned package runner (`npx`, `bunx`,
+  `pnpm dlx`, `npm exec`, `uvx`, `pipx run`, `uv tool run`) with `@latest`,
+  a range or no version.
+- `JARX-MCP-002` (medium): a container image (`docker`, `podman` or
+  `nerdctl run`) with no tag or `latest`.
+- `JARX-MCP-003` (medium): a server started through a shell's `-c`
+  (`sh -c`, `cmd /c`, `powershell -Command`).
+- `JARX-MCP-004` (high): a server program in a temp or downloads dir.
+- `JARX-MCP-005` (medium): an install from a git branch or default ref
+  (`git+https://...#main`, `github:owner/repo`) instead of a commit, since
+  the code can change under the same config.
+- `JARX-MCP-006` (medium): a repository's server that runs a script from the
+  repo (`node ./scripts/x.js`, `python tools/server.py`). Anyone who can push
+  to the repo controls that server.
+- `JARX-MCP-007` (medium): Codex `env_vars` forwarding a secret-looking var
+  into a server.
+- `JARX-MCP-008` (medium): a plain `http://` URL to a host that isn't
+  loopback.
+- `JARX-MCP-009` (info): `headersHelper` / `http_headers_helper`, which runs
+  a command at connect.
+- `JARX-MCP-010` (medium): broad filesystem args (a server given `/`, `~`,
+  your home dir or a drive root).
+- `JARX-MCP-011` (high) and `JARX-MCP-012` (medium): a server whose command
+  is a `.bat` or `.cmd` file (or a bare name like `npx` that's one on
+  Windows) with `cmd.exe` metacharacters in its args. `cmd.exe` reads them
+  as syntax when the agent starts the server, so the config can run a
+  command it never names. 011 when a repository's or plugin's config does
+  it, 012 in your own. This is a finding of its own, apart from the "failed
+  to start" status jarx gives the server.
+- Tokens in a URL and secrets in headers are the secrets rules' job
+  (`JARX-SECRET-002`).
+
+Rules that depend on an agent's precedence live in its adapter:
+
+- `JARX-CLAUDE-006` (high): a repository's `.mcp.json` server that takes the
+  name of one of your user servers, so your permission rules for that name
+  apply to the repository's server once it's approved. A local server wins
+  over the project's, so it can't be replaced this way.
+- `JARX-CLAUDE-007` (info): the same server name in two scopes with
+  different endpoints.
+- `JARX-CODEX-009` (high): a trusted repository's `[mcp_servers.<id>]` that
+  redefines one of your servers while your config sends it a credential
+  (`bearer_token_env_var`, `env_http_headers`, `http_headers`, `env`) the
+  repository's doesn't set. If Codex merges the tables, your credential goes
+  where the repository points the server.
+- `JARX-CODEX-010` (medium): the same with no credential involved.
 
 ### Permissions and auto-approval
 
@@ -710,7 +778,14 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 
 - A credential readable silently on any channel (from the verdicts).
 - **Drift:** when a tool description's hash changes, that tool goes through
-  the poison rules again. It isn't just flagged as "changed".
+  the poison rules again. It isn't just flagged as "changed". The poison
+  rules run on every tool's current text each scan, so the changed one is
+  checked again too.
+  - `JARX-DRIFT-001` (medium): a tool, prompt or resource whose definition
+    changed since the last scan.
+  - `JARX-DRIFT-002` (info): a server listed in the last scan offering
+    something new. A server seen for the first time isn't drift; the
+    snapshot diff shows it as new.
 - **Vulnerable agent version:** an install whose package name and version fall
   in an advisory's affected range.
 
@@ -882,6 +957,13 @@ from `<dir>/.jarx-env` instead. Absolute paths inside the fake home's agent
 records are read relative to `<dir>`, so `/projects/app` in the demo's
 `.claude.json` means `<dir>/projects/app` on any machine.
 
+Probing under `--home` never contacts a remote server and never starts a
+program from the fake PATH; those servers show as "not started" and say
+why. The one server it starts is the demo's fake one: a stdio server whose
+command is `jarx-fakemcp <script>`, which jarx serves itself from a script
+inside the fake home. On the real machine `jarx-fakemcp` is just a command
+name like any other.
+
 The repo ships `testdata/demo/`, a fake home with planted problems:
 
 - a CLAUDE.md with hidden unicode and an HTML comment aimed at the agent
@@ -921,7 +1003,7 @@ This is the full list. Anything not here is a bug.
 
 | When | What | To where | Turned off by |
 |---|---|---|---|
-| `jarx scan` with probing (default) | MCP `initialize` and list calls to remote servers that would connect anyway, with their configured static creds if any | the server's configured `https://` URL | `--no-probe` |
+| `jarx scan` with probing (default) | MCP `server/discover` or `initialize` and list calls to remote servers that would connect anyway, with their configured static creds if any | the server's configured `https://` URL | `--no-probe` |
 | `jarx scan` with probing (default) | jarx starts stdio servers. **The servers themselves** may use the network (for example `npx` downloading a package), just like when the agent starts them | whatever the server does | `--no-probe` |
 | `jarx scan --llm` or dashboard button | LLM review requests, redacted | the base URL the user set up | don't pass `--llm` |
 | `jarx ui` | listens for the browser | `127.0.0.1` only, inbound | not running `jarx ui` |
@@ -1133,6 +1215,14 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   `/net` or `/Network` path, or a symlink that leads to one, since even a
   lookup can contact the host and, on Windows, send it your NTLM hash.
   Claude doesn't follow those links either.
+- **Probed servers that leave their process group.** On macOS and Linux a
+  stdio server runs in its own process group, and a kill goes to the
+  group. A program it starts that calls `setsid` leaves the group and
+  isn't killed. On Windows the job object holds the whole tree.
+- **`.cmd` servers with shell characters in their args.** jarx won't pass
+  an argument with a `cmd.exe` metacharacter (`&`, `|`, `%`, quotes and the
+  like) to a `.bat` or `.cmd` file, since `cmd.exe` could run it as a
+  command. Such a server shows as "failed to start" with that reason.
 - **Static analysis only.** Verdicts come from settings and docs, not from
   testing the agent.
 

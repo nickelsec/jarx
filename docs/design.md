@@ -44,17 +44,38 @@ Source: https://www.agwa.name/blog/post/preventing_server_side_request_forgery_i
 ### Windows process trees: suspended start plus a job object
 
 Calling `AssignProcessToJobObject` after `cmd.Start` is racy. The child can
-spawn grandchildren before it's in the job (golang/go#79927). The fix for
-that in `SysProcAttr` isn't in Go 1.25. jarx does this instead:
+spawn grandchildren before it's in the job (golang/go#79927). That issue
+asks for a job list in `SysProcAttr`. It's still an open proposal: the
+change landed on Go's tip in November 2026 and was reverted on 2026-11-20,
+and Go 1.27.4's `SysProcAttr` has no such field (checked 2026-11-23). jarx
+does this instead:
 
 1. Create a job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. The handle is not
    inheritable.
 2. Start the server with `CREATE_SUSPENDED`.
-3. Assign it to the job.
-4. Resume it with `NtResumeProcess`.
-5. On timeout or when done, close the job, which kills the whole tree.
+3. Assign it to the job. If that fails, kill the still-suspended process,
+   which never ran.
+4. Resume its main thread: a Toolhelp32 thread snapshot finds it (a
+   suspended process can't start more), then `ResumeThread`. Those calls are
+   documented and in `x/sys/windows`, unlike ntdll's `NtResumeProcess`.
+5. On timeout or when done, `TerminateJobObject` and close the job, which
+   kills the whole tree.
 
-On unix, the same thing is `Setpgid` plus `kill(-pgid, SIGKILL)`.
+On unix, the same thing is `Setpgid` plus `kill(-pgid, SIGKILL)`. A child
+that leaves the group on purpose (`setsid`) gets away; that's in Limits.
+
+The server's env is never jarx's own. It's a short baseline (PATH, home, temp
+dirs, and what Windows needs to start a program) plus what the config
+declares, and an empty env is passed as empty, never as nil, since nil would
+hand over everything.
+
+**`.bat` and `.cmd` files.** On Windows `npx` and many launchers are `.cmd`
+files, and a `.cmd` always runs through `cmd.exe`. Go quotes arguments for
+`CreateProcess`, not for `cmd.exe`, so an argument with `&`, `|`, `%` or a
+quote could make `cmd` run something the config never named, which the
+agent's own launcher might quote safely. `proc` refuses to pass an argument
+with a `cmd.exe` metacharacter to a `.bat` or `.cmd` file, and the server
+shows as "failed to start" with that reason.
 
 This makes `golang.org/x/sys/windows` a direct dependency. It was already an
 indirect one through go-keyring and modernc sqlite.
@@ -102,18 +123,53 @@ never runs git at all, so the demo and the tests never start a binary from a
 fake PATH. Tests prove each real defense with throwaway repos whose config
 writes a marker file if it ever runs.
 
-### MCP client covers four protocol revisions
+### MCP client speaks both protocol eras
 
-Revision 2026-07-28 removed protocol sessions and the GET stream from
-Streamable HTTP. The client:
+Revision 2026-07-28 has no handshake at all. There's no `initialize`, no
+session and no GET stream. Every request names its protocol version in
+`_meta` (`io.modelcontextprotocol/protocolVersion`), and on HTTP also in a
+`Mcp-Protocol-Version` header that has to match. The spec calls that
+"modern" and everything up to 2025-11-25 "legacy". The client works with
+both:
 
-- offers every version it knows in `initialize` (2024-11-05 through
-  2026-07-28)
-- falls back to legacy SSE only when a POST gets `400`, `404` or `405`
-  without a modern JSON-RPC error body (that's the spec's own rule)
-- follows `nextCursor` on the list calls, up to 50 pages
+- **stdio:** send `server/discover` first, with 2026-07-28 in `_meta`. A
+  `DiscoverResult` means a modern server. A `-32022`
+  (`UnsupportedProtocolVersionError`) means modern but another version, so
+  the client picks one from its `supported` list. Any other error, or no
+  answer, means legacy, and the client falls back to `initialize`
+  (2025-11-25 down to 2024-11-05).
+- **streamable HTTP:** the same probe as a POST. A `400` without a modern
+  error body means legacy, so `initialize` next. A `400`, `404` or `405`
+  without a JSON-RPC body on that means the old HTTP+SSE transport.
+- **lists:** follows `nextCursor` up to 50 pages. A list call answered with
+  an `InputRequiredResult` (the server asking the client to run sampling or
+  elicitation for it) gives no items, and the client never answers it.
+- The client never answers anything the server sends it. The 2026-07-28
+  stdio binding forbids server requests on stdout, but a hostile server
+  sends them anyway, and `fakemcp` tests that. Requests, notifications,
+  replies to ids it never sent and lines that aren't JSON are skipped and
+  counted, so probe can say how noisy a server was.
+- **HTTP headers:** modern requests carry `Mcp-Protocol-Version` and the
+  required `Mcp-Method`. A legacy server gets the version header from
+  2025-06-18 on, and its `Mcp-Session-Id` back. The configured headers
+  (like a token) go on every request, the SSE GET included.
+- **The old SSE endpoint** has to be on the same scheme and host as the
+  configured URL. A server that names another origin could otherwise get
+  the configured token sent to it, so the client refuses.
+- **Limits:** one message is at most 10 MiB, and at most 32 MiB of list
+  items is kept per server. Each list checks the server's capabilities
+  first. A list method the server says doesn't exist is a note, not a
+  failure.
 
-Source: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
+`fakemcp` speaks both eras and both HTTP transports, so the client is tested
+against each kind of server. A test also reads the `mcp` package's own
+source and fails on any MCP method string but discovery and the lists, and
+the request builder refuses every other method at run time.
+
+Sources: https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning,
+https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio,
+https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http,
+https://modelcontextprotocol.io/specification/2024-11-05/basic/transports
 
 ### Claude managed settings and trust
 
@@ -371,6 +427,191 @@ showing a real secret.
   length, so under 8 chars every value scores below 3 bits, and a real
   short password would always look fake.
 
+### Claude MCP config and which servers start
+
+From the mcp, managed-mcp, settings-reference and sub-agents pages (read
+2026-11-23).
+
+Where servers come from:
+
+- **User scope:** top-level `mcpServers` in `~/.claude.json`.
+- **Local scope:** `projects["<path>"].mcpServers` in `~/.claude.json`. The
+  same entry holds `disabledMcpServers` and `enabledMcpServers`, the
+  per-project `/mcp` toggles. `disabledMcpServers` turns off user, plugin and
+  managed servers. `enabledMcpServers` only turns on built-in servers that
+  default to off, so jarx ignores it for configured servers, like Claude
+  does.
+- **Project scope:** `.mcp.json` at the project root.
+- **Plugins:** `.mcp.json` at the plugin root, or `mcpServers` in
+  `plugin.json`, started when the plugin is enabled.
+- **Managed:** `managed-mcp.json` in the managed dir (same format as
+  `.mcp.json`), and `managedMcpServers` in managed settings (remote servers
+  only: `https://`, no `command`, no `headersHelper`, no `${VAR}`). Claude
+  never reads `managedMcpServers` from HKCU or from user, project or local
+  files.
+- **Subagents:** `mcpServers` in agent frontmatter. A string is a reference
+  to a configured server. An inline definition in a project
+  `.claude/agents/` file loads only once the folder is trusted. One in
+  `~/.claude/agents/` or a managed agent doesn't wait. Plugin agents ignore
+  the field.
+
+How `.mcp.json` servers get approved is documented, so it's not an observed
+format. `enableAllProjectMcpServers` and `enabledMcpjsonServers`
+count from user, managed and `--settings` files right away, from the project
+file only once the folder is trusted, and from `settings.local.json` under
+the same trust rule as local allows. The approval dialog writes to
+`settings.local.json`. `disabledMcpjsonServers` in any file rejects the
+server. A project server with no approval is "approval unknown, not probed",
+since jarx can't tell whether a `-p` or SDK run would load it without
+asking.
+
+Managed policy, in the documented order:
+
+1. A `managed-mcp.json` takes full control: only its servers and
+   `managedMcpServers` load. User, project, local and plugin servers are
+   not in effect, with that reason. A `strictPluginOnlyCustomization` that
+   locks `mcp` stops `~/.claude.json` and `.mcp.json` servers but keeps
+   plugin ones.
+2. `deniedMcpServers` from every scope merges, and a match by name, command
+   or URL blocks the server. Nothing overrides a deny.
+3. `allowedMcpServers` merges from every scope, or only from managed when
+   `allowManagedMcpServersOnly` is on. Unset allows everything, `[]` allows
+   nothing. A remote server needs a `serverUrl` match (a `serverName` match
+   only counts when there's no `serverUrl` entry), and stdio works the same
+   with `serverCommand`. `managedMcpServers` and `managed-mcp.json` servers
+   with no `${VAR}` outside `env` skip this check.
+
+`serverCommand` matches the exact command and args. `serverUrl` takes `*`
+wildcards, a case-insensitive host, and the default port unless the host has
+a `*` or a port is given. Both sides expand `${VAR}` before matching. jarx
+expands the server's side from the injected env and the policy side from the
+startup env plus managed `env`, which under `--home` is just `.jarx-env`.
+
+#### The same server name in more than one scope
+
+The docs say Claude connects to one definition, the whole entry from the
+highest source, with no merging of fields:
+
+1. a `managed-mcp.json` entry, then `managedMcpServers` (by name)
+2. local, then project, then user (by name)
+3. plugin servers, then claude.ai connectors, matched to the servers above
+   by endpoint, not by name. Two URLs are the same endpoint when they differ
+   only in scheme or host case, the default port or a trailing slash. A
+   `managedMcpServers` entry also wins over a plugin with the same URL.
+
+jarx keeps every definition, each with its own origin, and marks the ones
+that lose as not in effect: "overridden by the local server with the same
+name". Two choices on top of that:
+
+- **When the winner itself won't start.** The docs don't say whether a
+  definition that's denied, rejected or waiting on approval still hides a
+  lower one with the same name. jarx doesn't guess either way: the lower
+  definition is "may start" with a note saying why, and probe treats it as
+  one that starts, since it would start on its own if the higher one
+  weren't there. Saying a server can't load when it might is the worse
+  mistake.
+- **Names carry rules.** Permission rules (`mcp__github__*`), `serverName`
+  entries and hook matchers are keyed by name. So a repository's `.mcp.json`
+  that reuses the name of one of your user servers, once approved, replaces
+  it, and your allows for that name now apply to the repository's server.
+  The MCP config rules item flags that, and also two scopes defining one
+  name with different endpoints, which Claude only warns about.
+
+A name Claude reserves for its built-in servers (`workspace`,
+`claude-in-chrome`, `computer-use`, `Claude Preview`, `Claude Browser`) is
+skipped at load, so jarx marks it not in effect.
+
+Sources: https://code.claude.com/docs/en/mcp,
+https://code.claude.com/docs/en/managed-mcp,
+https://code.claude.com/docs/en/settings-reference,
+https://code.claude.com/docs/en/sub-agents
+
+### Codex MCP config and which servers start
+
+From the Codex mcp, config-reference and managed-configuration pages (read
+2026-11-23).
+
+- **Where servers come from.** `[mcp_servers.<id>]` tables in any config
+  layer: legacy `managed_config.toml`, project `.codex/config.toml` files,
+  profile files, the user's `config.toml` and `/etc/codex/config.toml`. A
+  server in a layer Codex doesn't load (an untrusted project, a profile file
+  without `--profile`) doesn't start, with the layer's reason.
+- **Shape.** A table with `command` is stdio and one with `url` is
+  streamable HTTP. Neither means it doesn't start. Both isn't documented, so
+  it may start, with a note. `enabled = false` turns it off.
+- **Fields jarx keeps.** `args`, `env`, `env_vars` (names, with a remote
+  source shown), `cwd`, `bearer_token_env_var`, `http_headers`,
+  `env_http_headers` (header to var name), `http_headers_helper`, `auth`,
+  `enabled_tools`, `disabled_tools`, `default_tools_approval_mode` and each
+  tool's `approval_mode`. Env and header values are masked by their name, the
+  same way as for Claude.
+- **requirements.toml.** Its `mcp_servers` table is an allowlist: the id and
+  its identity must both match, and an empty table turns every server off.
+  `identity.command` as a string matches the command alone. As a table it
+  needs the exact executable and one matcher per argument, in order.
+  `identity.url` is an exact string or a matcher table. Matchers are
+  `exact`, `prefix` and a `regex` that has to match the whole value. A regex
+  jarx can't compile makes the server "may start".
+
+#### The same id in more than one layer
+
+The docs don't say whether a higher layer's `[mcp_servers.<id>]` replaces a
+lower one's whole or merges with it field by field. Either way the highest
+loaded layer's fields are the ones in use, so that definition is the one
+that starts, and the lower ones are "overridden" with that reason. When a
+lower layer sets a field the one in use doesn't, the one in use gets a note
+naming it. That's the case that matters: a trusted repo that redefines your
+server with its own `url` could get your `bearer_token_env_var` merged in,
+so your token goes to its host. The MCP config rules item turns that into a
+finding.
+
+Plugin servers wait for Codex plugins, which jarx doesn't read yet.
+
+Sources: https://developers.openai.com/codex/mcp,
+https://developers.openai.com/codex/config-reference,
+https://developers.openai.com/codex/enterprise/managed-configuration
+
+### How probe starts and reaches servers
+
+- **Raw launch data, kept out of every output.** Probe has to start a server
+  with the real env values and send the real configured tokens, as the agent
+  would. The adapters put those on `model.Server` as a `model.Launch`, a
+  leaf type built like `Path`: its contents are unexported, only probe reads
+  them (through `Spec`, which lint bans everywhere else), and it prints as `[launch]` for every fmt verb and
+  encodes as JSON `null`. Snapshots, the report and the analyzers never see
+  it, and a test proves it never prints or encodes a value.
+- **Once per definition.** A server that applies in several projects, like a
+  user server, is probed once and the result goes on every copy. A stdio
+  server runs in its project's dir, so for those the project is part of the
+  identity.
+- **Claude's credential variables.** The docs list examples of variables that
+  read as empty in a remote server's URL and headers, and the families they
+  come from, not a full list. jarx reads those examples and the families
+  (`ANTHROPIC_*`, `CLAUDE_CODE_*`, the cloud providers' prefixes, `*_PROXY`)
+  as empty, except `*_BASE_URL`, so it never sends a credential Claude would
+  hold back. The cost is a possible 401 where Claude would get in.
+- **Codex `auth`.** The docs make `oauth` the default, and without stored
+  credentials Codex connects with none. So only an explicit `oauth` or
+  `chatgpt` makes a server "requires auth".
+- **Reasons don't quote errors.** A status reason never includes an error's
+  text, since a URL in it can hold a token. It names the kind of failure.
+
+#### Under --home
+
+Probe never contacts a remote server and never starts a program from the
+fake PATH. Both show as "not started" with that reason. The one thing it
+starts is the demo home's fake server: a stdio server whose command is
+`jarx-fakemcp <script>`. Probe reads the script through `fsys`, so it has to
+be inside the fake home, and runs the jarx binary itself in a hidden
+`__fakemcp` mode with the script as its argument and a marker variable in
+its env. The hidden mode refuses without the marker. On the real machine
+`jarx-fakemcp` is an ordinary command name, looked up on PATH like any
+other, and a test proves probe never starts jarx for it there. A remote
+server can't use it at all.
+
+So a demo scan probes over stdio pipes only, and the offline CI job keeps
+probing on, which proves the probe makes no network syscall.
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
@@ -391,9 +632,9 @@ a spot in the code that makes breaking it hard.
 
 | Promise | How the code makes breaking it hard |
 |---|---|
-| Secrets never leak | Model text fields are `redact.Text`. Only the `redact` package can build one (unexported field). `report`, `ui`, `snapshot` and `llm` only take `redact.Text`, so there's no way to put a raw string on screen, on disk or on the wire. Anything that matches a secret pattern is always masked. Entropy only flags a match as a likely placeholder, it never decides whether to mask, because showing a real secret is far worse than hiding a fake one. A reflection test walks every type reachable from `model.Inventory` and fails on a raw string anywhere: fields (exported or not), named string types, pointers, slices, arrays, map keys and values, `[]byte`, `[]rune`, interfaces, funcs, chans, embedded and generic types, and structs from other packages that aren't allowlisted. The test has one fixture per hiding spot, so a gap in the walker fails too. `model.Path` keeps the raw path only for fsys reads, and prints and encodes as the masked path for every fmt verb and in JSON. |
+| Secrets never leak | Model text fields are `redact.Text`. Only the `redact` package can build one (unexported field). `report`, `ui`, `snapshot` and `llm` only take `redact.Text`, so there's no way to put a raw string on screen, on disk or on the wire. Anything that matches a secret pattern is always masked. Entropy only flags a match as a likely placeholder, it never decides whether to mask, because showing a real secret is far worse than hiding a fake one. A reflection test walks every type reachable from `model.Inventory` and fails on a raw string anywhere: fields (exported or not), named string types, pointers, slices, arrays, map keys and values, `[]byte`, `[]rune`, interfaces, funcs, chans, embedded and generic types, and structs from other packages that aren't allowlisted. The test has one fixture per hiding spot, so a gap in the walker fails too. `model.Path` keeps the raw path only for fsys reads, and prints and encodes as the masked path for every fmt verb and in JSON. The one exception is `model.Launch`, the raw launch data probe needs to start a server the way the agent would: like `Path` it keeps its contents unexported, it prints as `[launch]` and encodes as `null` (with a test for every fmt verb and JSON), and `forbidigo` bans `Launch.Spec` everywhere but `internal/probe` and tests. |
 | Nothing raw reaches the terminal or a log | Only `report` writes output. `forbidigo` bans `fmt.Print*`, `fmt.Fprint*`, `os.Stdout`, `os.Stderr`, `print`, `println`, `log` and `log/slog` everywhere else (`cmd/jarx` may use `os.Stdout` and `os.Stderr` only to hand them to `report`). `report` takes values only as `redact.Text`, and its format string has an unexported type, so a string variable won't compile as the format. `report.Error` scrubs error text, since a parser error can quote the line it failed on. The limit: a package handed an `io.Writer` could still call `Write` on it, but only `cmd/jarx` can reach the real stdout and stderr, so that needs a new parameter that review would catch. |
-| Never calls a tool | The `mcp` package has constants only for `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
+| Never calls a tool | The `mcp` package has constants only for `server/discover`, `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
 | Only the listed network calls | `netguard` is the only package allowed to make a network connection. golangci `forbidigo` bans `http.Get`, `http.Client`, `http.Transport`, `http.DefaultClient`, `net.Dial*`, `net.Dialer`, `tls.Dial*`, `tls.Client`, DNS lookups (`net.Lookup*`, `net.Resolver`), `net/smtp` and `net/rpc` everywhere else. Inside netguard, every connection is checked in the dialer's `Control` hook, after DNS and right before connect, on the exact IP being connected, so DNS rebinding and reconnects can't get past it. A literal IP host is also checked before dialing, because Go rewrites `0.0.0.0`, `::` and an empty host into a dial to the local machine before `Control` sees it. The tests run with a fake DNS server and a test-only rule that refuses any non-loopback connection, so a broken guard fails its tests instead of reaching a real address. |
 | Only discover runs a process | `forbidigo` bans `exec.Command`, `exec.CommandContext`, `exec.LookPath` (it reads the real PATH), `os.StartProcess` and `syscall.Exec`/`ForkExec` outside `discover`, which only runs hardened git. `proc` joins it in phase 4. git is found through `platform.Env`'s PATH, never under `--home`. |
 | Never reads a credential value | `fsys` refuses content reads of any path `credmeta.Location` calls a credential, checked on the path and on where its symlinks lead, so following an `@import` or a symlinked rule can't open one. Stat still works for existence checks. The phase 5 metadata parsers get their input through an explicit `fsys` method, not by opening files themselves. |
@@ -469,8 +710,8 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
    doesn't recognize go to `model.Unknown`.
 3. **probe** asks the model which servers the agent would start. Up to 4 run
    at once. **proc** spawns stdio servers in a job or process group.
-   **netguard** handles remote servers. **mcp** sends `initialize` and the
-   list calls. Results go through redact and land on `model.Server` with a
+   **netguard** handles remote servers. **mcp** sends `server/discover` (or
+   `initialize` to a legacy server) and the list calls. Results go through redact and land on `model.Server` with a
    status.
 4. **history** loads its cursor and reads only new bytes. It records
    permission modes, cwds and secret fingerprints. Codex sqlite is opened
@@ -481,7 +722,9 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
    validates the JSON (one retry) and checks the quotes. Results are cached by
    hash.
 7. **snapshot** writes the masked JSON, prunes to 20 and diffs against the
-   previous one. **drift** sends changed tools back through **poison**.
+   previous one. **drift**, one of the analyzers in step 5, already read
+   that previous snapshot to flag tools that changed. **poison** runs on
+   every tool's current text, so a changed one is checked again.
 8. **report** prints the result. **ui** serves the same snapshot.
 
 ## Terminal output
@@ -643,6 +886,7 @@ demo scan at 80 columns, so a layout change shows up as a test change.
 | `internal/analyze/secrets` | findings from what the scrubber masked: seen, plain text or placeholder | Secrets |
 | `internal/analyze/poison` | text rules over every text the agent reads | Detection rules |
 | `internal/analyze/perms` | effective permissions with origin and in-effect reason | Effective permissions view |
+| `internal/analyze/mcpconfig` | rules on one MCP server definition: how it's installed and started and what its config hands it. Its own folder because none of the other analyzers is about server configs, and it isn't named `mcp` so it can't be mixed up with the client | MCP supply chain and config |
 | `internal/analyze/reach` | per-channel verdicts, observed modes, credential view | Reachability verdicts, Credential view |
 | `internal/netguard` | the one HTTP client. Blocks link-local, cloud metadata (including AWS over IPv6 and Alibaba's `100.100.100.200`), unspecified addresses and every IPv6 form that wraps a blocked IPv4 (mapped, compatible, NAT64, 6to4; Teredo and local-use NAT64 outright). Separate dial paths by scheme: https goes through the block then TLS, plain http also has to reach loopback. No proxy, no redirects, a 10 MiB body cap, 64 KiB headers, a 20s ceiling, no compression. | Network calls |
 | `internal/proc` | `proc_windows.go` job objects, `proc_unix.go` process groups, baseline env | How a stdio server is started |
@@ -737,8 +981,9 @@ Jobs:
   back to the runner user, so jarx never runs as root. A control step first
   proves both layers work: `curl` has to fail inside the namespace, and
   `strace` has to see `curl`'s connection attempt, so a blind audit can't
-  make the job pass. `--no-probe` and `--no-history` join the command when
-  they exist (phases 4 and 6).
+  make the job pass. The scan runs with probing on: under `--home` probe only
+  starts the demo's fake server, over stdio pipes, so the job proves the
+  probe makes no network syscall. `--no-history` joins the command in phase 6.
 
 The Go version comes from `go.mod`, so CI and local builds match. Every action
 is pinned by SHA with the version in a comment.

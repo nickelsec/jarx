@@ -153,7 +153,149 @@ type Project struct {
 	// Configs are the settings and config files the agents read for this
 	// project, each scrubbed whole, so the secrets scan sees them.
 	Configs []Config
+	// Servers are the MCP server definitions that apply here, from every
+	// scope, with whether the agent would start each one.
+	Servers []Server
 }
+
+// Transport is how the agent talks to an MCP server.
+type Transport string
+
+// Transports. Claude's streamable-http is an alias for http.
+const (
+	TransportStdio   Transport = "stdio"
+	TransportHTTP    Transport = "http"
+	TransportSSE     Transport = "sse"
+	TransportWS      Transport = "ws"
+	TransportUnknown Transport = "unknown"
+)
+
+// StartState says whether the agent would start a server next session.
+type StartState string
+
+// Start states.
+const (
+	StartYes StartState = "starts"
+	// StartMaybe is for when the docs leave it open, like a definition below
+	// one with the same name that won't start itself. Note says why.
+	StartMaybe StartState = "may start"
+	StartNo    StartState = "not started"
+	// StartUnknown is a server that waits on an approval jarx can't see,
+	// like a project server no settings file approves.
+	StartUnknown StartState = "approval unknown"
+)
+
+// Pair is one name and value, like an env var or a header. Values are
+// scrubbed like any other text.
+type Pair struct {
+	Key   redact.Text
+	Value redact.Text
+}
+
+// Server is one MCP server definition from one file. jarx only reads it:
+// whether it's started is decided by probe, and only for StartYes and
+// StartMaybe.
+type Server struct {
+	Name      redact.Text
+	Transport Transport
+	Command   redact.Text
+	Args      []redact.Text
+	URL       redact.Text
+	Env       []Pair
+	Headers   []Pair
+	// HeadersHelper is a command the agent runs to get headers, as written.
+	HeadersHelper redact.Text
+	// What Codex adds: the working dir, env var names it forwards
+	// (env_vars), the env var that holds a bearer token, headers filled
+	// from env vars (header to var name), and the auth it tries.
+	Cwd        redact.Text
+	ForwardEnv []redact.Text
+	BearerVar  redact.Text
+	HeaderVars []Pair
+	Auth       redact.Text
+	// Tool policy: Codex's enabled_tools (nil when unset, so every tool) and
+	// disabled_tools, and approval modes, the server default under the
+	// empty key and per tool under the tool's name.
+	EnabledTools  []redact.Text
+	DisabledTools []redact.Text
+	Approvals     []Pair
+	Plugin        redact.Text // the plugin it comes from, if any
+	// Start says whether the agent would start it. Origin.InEffect is true
+	// for StartYes and StartMaybe, and Origin.Why says why not otherwise.
+	Start StartState
+	// Note says what jarx can't settle about starting it.
+	Note redact.Text
+	// Launch is the raw launch data for probe. It never prints or encodes.
+	Launch Launch
+	// What probe found: one status with its reason, what the server offers,
+	// its instructions and stderr, and notes on what didn't go as asked.
+	Status       ServerStatus
+	StatusWhy    redact.Text
+	Offers       []Offer
+	Instructions redact.Text
+	Stderr       redact.Text
+	ProbeNotes   []redact.Text
+	Origin       Origin
+}
+
+// ServerStatus is the one status a server ends up with after probing.
+type ServerStatus string
+
+// Server statuses, from the PRD's table.
+const (
+	StatusUnprobed          ServerStatus = "" // probe hasn't run
+	StatusListed            ServerStatus = "listed"
+	StatusMissingCredential ServerStatus = "missing credential"
+	StatusFailed            ServerStatus = "failed to start"
+	StatusTimedOut          ServerStatus = "timed out"
+	StatusNotStarted        ServerStatus = "not started"
+	StatusInsecure          ServerStatus = "insecure transport"
+	StatusRequiresAuth      ServerStatus = "requires auth"
+	StatusRejected          ServerStatus = "credential rejected"
+	StatusBlocked           ServerStatus = "blocked"
+	StatusUnreachable       ServerStatus = "unreachable"
+)
+
+// OfferKind is what a server offers.
+type OfferKind string
+
+// Offer kinds.
+const (
+	OfferTool     OfferKind = "tool"
+	OfferPrompt   OfferKind = "prompt"
+	OfferResource OfferKind = "resource"
+)
+
+// Offer is one tool, prompt or resource a server listed, scrubbed.
+type Offer struct {
+	Kind        OfferKind
+	Name        redact.Text // a resource's name, or its URI when it has none
+	Description redact.Text
+	// Hints are the annotation hints the server set true, like
+	// readOnlyHint or destructiveHint.
+	Hints []redact.Text
+	// Text is the whole entry as the server sent it, so the rules and the
+	// drift hash see every field: schemas, param names, enums and defaults.
+	Text redact.Text
+	// Access is whether the agent can call a tool and whether it asks first,
+	// with why, as analyze/capability settles it. What the server's own
+	// credential allows isn't knowable, so it isn't here.
+	Access    ToolAccess
+	AccessWhy redact.Text
+}
+
+// ToolAccess is whether the agent can call a tool and whether you're asked.
+type ToolAccess string
+
+// Tool access.
+const (
+	AccessUnsettled ToolAccess = ""
+	AccessHidden    ToolAccess = "hidden" // the config keeps it from the agent
+	AccessDenied    ToolAccess = "denied" // a rule or mode refuses every call
+	AccessAsks      ToolAccess = "asks"   // you're asked before each call
+	AccessMayNotAsk ToolAccess = "may run without asking"
+	AccessNoAsk     ToolAccess = "runs without asking"
+)
 
 // Config is one settings or config file, scrubbed. Origin says whose and
 // from which scope.

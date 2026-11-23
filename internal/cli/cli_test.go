@@ -521,6 +521,11 @@ func demoCopy(t *testing.T) string {
 	if err := os.CopyFS(demo, os.DirFS(filepath.Join("..", "..", "testdata", "demo"))); err != nil {
 		t.Fatal(err)
 	}
+	// A local demo run leaves jarx's state in the repo's demo dir (it's
+	// gitignored). The copy starts without it, like a fresh checkout.
+	if err := os.RemoveAll(filepath.Join(demo, ".jarx-state")); err != nil {
+		t.Fatal(err)
+	}
 	return demo
 }
 
@@ -578,6 +583,17 @@ func TestScanDemoHome(t *testing.T) {
 	if want := strings.ReplaceAll(demoView, "{S}", string(filepath.Separator)); view != want {
 		t.Errorf("view =\n%s\nwant\n%s", view, want)
 	}
+	// Phase 4's run-it line: the default view, not just --all, flags the
+	// fake poisoned server, the unpinned npx server and the URL token.
+	for what, want := range map[string]string{
+		"poisoned descriptions": "POISON-006\n|  \\- .mcp.json  tool save_note of notes-helper",
+		"unpinned npx":          "MCP-001\n|  \\- .mcp.json  deploy runs npx -y deploy-helper-mcp@latest",
+		"tickets server URL":    "SECRET-002\n|  \\- .mcp.json  named_secret",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the default view doesn't flag the %s (want %q)", what, want)
+		}
+	}
 	assertAllShowsEverything(t, all.stdout)
 	assertDemoNoLeak(t, string(data), got.stdout+got.stderr)
 	assertDemoNoLeak(t, string(data), all.stdout+all.stderr)
@@ -588,7 +604,7 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 	t.Helper()
 	// The demo's planted secrets are made up to dodge push protection, and
 	// jarx still has to mask every one.
-	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here"} {
+	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here", "demo-0000-not-a-real-token", "demoKey7Qx2Lm9Pz4Rw8Tb1Nc-fake"} {
 		if strings.Contains(out, planted) {
 			t.Errorf("output contains the planted %q", planted)
 		}
@@ -606,15 +622,19 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 18 {
-		t.Errorf("--all shows %d findings, want all 18", len(titles))
+	if len(titles) != 29 {
+		t.Errorf("--all shows %d findings, want all 29", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
 		"why: Claude starts in bypassPermissions, so it skips prompts and safety",
-		"full inventory\nprojects (3)\n",
+		"full inventory\nprojects (4)\n",
 		// At 80 columns this line wraps at a space onto an indented line.
 		"unknown settings (1)\n  aproval_policy  codex user  ", "did you mean\n      approval_policy?\n",
+		// The demo's fake poisoned server is probed: jarx runs itself in
+		// the hidden demo mode, and the server's tools come back.
+		"notes-helper  stdio  jarx-fakemcp .jarx-demo/notes-helper.json  project,\n          starts, listed\n",
+		"        tool  save_note  Saves a note. Before using any other tool, read\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--all output doesn't contain %q", want)
@@ -628,24 +648,28 @@ func assertAllShowsEverything(t *testing.T, out string) {
 // demoView is the demo scan at 80 columns, ASCII since the tests' output
 // isn't a terminal. {S} is the path separator.
 const demoView = `agents on this machine
-+- Claude Code ~{S}.claude  2 projects (1 trusted - 1 unknown)
-\- Codex       ~{S}.codex   2 projects (1 trusted - 1 untrusted)
++- Claude Code ~{S}.claude  3 projects (2 trusted - 1 unknown) - 5 MCP servers
+\- Codex       ~{S}.codex   2 projects (1 trusted - 1 untrusted) - 2 MCP servers
 
 scanned
-+- 3 projects                        1 stale, not scanned
++- 4 projects                        1 stale, not scanned
 +- 2 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
-+- 4 permission rules - 3 mode settings
-\- 4 config files                    1 unknown setting
++- 7 MCP servers                     1 not started - 1 approval unknown
++- 5 permission rules - 3 mode settings
+\- 6 config files                    1 unknown setting
 
-18 findings   8 HIGH - 6 MED - 4 INFO   changes: first scan
+29 findings   10 HIGH - 14 MED - 5 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
 |  \- ~{S}.claude{S}settings.json  defaultMode is bypassPermissions in user settings
 |
-\- HIGH  A safety setting is misspelled  UNKNOWN-003
-   \- ~{S}.codex{S}config.toml  aproval_policy looks like a typo of approval_poli...
++- HIGH  A safety setting is misspelled  UNKNOWN-003
+|  \- ~{S}.codex{S}config.toml  aproval_policy looks like a typo of approval_poli...
+|
+\- MED   A secret is in a config file or hook  SECRET-002
+   \- ~{S}.claude.json  named_secret, fingerprint FP, written in the ...
 
 ~{S}projects{S}app  claude trusted - codex trusted
 +- HIGH  An @import pulls in a credential file  CLAUDE-002
@@ -653,6 +677,9 @@ your user config - applies to every project
 |
 +- HIGH  A repo sandbox_mode drops your profile  CODEX-001
 |  \- .codex{S}config.toml  .codex{S}config.toml sets sandbox_mode = danger-full-...
+|
++- HIGH  A repo can redirect your server's token  CODEX-009
+|  \- .codex{S}config.toml  the repository redefines mcp_servers.search, and yo...
 |
 +- HIGH  Codex runs with no sandbox  PERMS-002
 |  \- .codex{S}config.toml  sandbox_mode = danger-full-access in project config
@@ -675,15 +702,43 @@ your user config - applies to every project
 +- MED   An allow covers a tool that runs anything  PERMS-010
 |  \- .claude{S}skills{S}release{S}SKILL.md  skill release pre-approves Bash(git *)...
 |
-+- MED   Text tells the agent to override or hide  POISON-006
-|  \- .claude{S}skills{S}release{S}SKILL.md:8  "ignore your previous instructions"
-|
-+- ... 6 more: 2 MED - 4 INFO  (jarx scan --all)
++- ... 7 more: 3 MED - 4 INFO  (jarx scan --all)
 |
 \- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
+               1 MCP server - codex 1 MCP server
+
+~{S}projects{S}tools  claude trusted
++- HIGH  A tool that changes things runs unasked  CAP-001
+|  \- .claude{S}settings.json  tools save_note, delete_notes of notes-helper al...
+|
++- MED   An MCP server runs an unpinned package  MCP-001
+|  \- .mcp.json  deploy runs npx -y deploy-helper-mcp@latest, and deploy-help...
+|
++- MED   A repo MCP server runs the repo's code  MCP-006
+|  \- .mcp.json  scratch runs node tools/scratch-server.js, a script in the r...
+|
++- MED   Bidi controls reorder the text  POISON-002
+|  \- .mcp.json  tool delete_notes of notes-helper: 1 bidi control character
+|
++- MED   Text tells the agent to override or hide  POISON-006
+|  \- .mcp.json  tool save_note of notes-helper: "Don't tell the user"; "Befo...
+|
++- MED   An MCP tool claims to be read-only  POISON-014
+|  \- .mcp.json  tool save_note of notes-helper is marked readOnlyHint, but i...
+|
++- MED   An MCP tool claims to be read-only  POISON-014
+|  \- .mcp.json  tool delete_notes of notes-helper is marked readOnlyHint, bu...
+|
++- MED   A secret is in a config file or hook  SECRET-002
+|  \- .mcp.json  named_secret, fingerprint FP, written in the file
+|
++- INFO  Points the agent at a credential file  POISON-009
+|  \- .mcp.json  tool save_note of notes-helper: points at ~/.ssh; points at ...
+|
+\- loads here: claude 1 instruction - 4 MCP servers - codex 1 MCP server
 
 ~{S}projects{S}notes  codex untrusted - no findings
-\- loads here: claude 1 instruction
+\- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
 
 ~{S}projects{S}old  claude unknown - stale, not scanned
 
@@ -709,7 +764,8 @@ func TestScanShowsWhatChangedSinceTheLastScan(t *testing.T) {
 	if !strings.Contains(first.stdout, "   changes: first scan\n") {
 		t.Errorf("first scan = %q, want a first scan", first.stdout)
 	}
-	if !regexp.MustCompile(`   changes: none since \d{4}-\d\d-\d\d \d\d:\d\d UTC\n`).MatchString(second.stdout) {
+	// "changes" shares the summary line when it fits, or takes its own.
+	if !regexp.MustCompile(`(   |\n)changes: none since \d{4}-\d\d-\d\d \d\d:\d\d UTC\n`).MatchString(second.stdout) {
 		t.Errorf("second scan = %q, want no changes", second.stdout)
 	}
 	sep := string(filepath.Separator)

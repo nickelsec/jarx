@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -13,6 +15,9 @@ import (
 	"github.com/nickelsec/jarx/internal/agent"
 	"github.com/nickelsec/jarx/internal/agent/claude"
 	"github.com/nickelsec/jarx/internal/agent/codex"
+	"github.com/nickelsec/jarx/internal/analyze/capability"
+	"github.com/nickelsec/jarx/internal/analyze/drift"
+	"github.com/nickelsec/jarx/internal/analyze/mcpconfig"
 	"github.com/nickelsec/jarx/internal/analyze/perms"
 	"github.com/nickelsec/jarx/internal/analyze/poison"
 	"github.com/nickelsec/jarx/internal/analyze/secrets"
@@ -23,13 +28,15 @@ import (
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/jarxdir"
 	"github.com/nickelsec/jarx/internal/model"
+	"github.com/nickelsec/jarx/internal/netguard"
 	"github.com/nickelsec/jarx/internal/platform"
+	"github.com/nickelsec/jarx/internal/probe"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
 	"github.com/nickelsec/jarx/internal/snapshot"
 )
 
-const scanUsage = `usage: jarx scan [--home <dir>] [path...]
+const scanUsage = `usage: jarx scan [--home <dir>] [--all] [--no-probe] [path...]
 
 Scans what Claude Code and Codex can see and reach on this machine.
 
@@ -38,6 +45,8 @@ this run only.
 
 flags:
   --home <dir>  use <dir> as the home dir instead of the real one
+  --all         show every finding in full, and the whole inventory
+  --no-probe    don't start or contact any MCP server
   -h, --help    show this help
 `
 
@@ -47,6 +56,7 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	fs := newFlagSet("scan")
 	home := fs.String("home", "", "")
 	all := fs.Bool("all", false, "")
+	noProbe := fs.Bool("no-probe", false, "")
 	if code, ok := parse(p, plain, fs, args, scanHelp); !ok {
 		return code
 	}
@@ -77,7 +87,11 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		append(slices.Clone(adapters), discover.Saved(configPath(env), cfg.Repos)),
 		fs.Args(),
 	)
-	findings, err := analyze(scrub, env, res)
+	self, _ := os.Executable() // runs the demo server under --home; probe never uses it elsewhere
+	probe.Run(context.Background(), agent.Context{Env: env, Files: files, Scrub: scrub}, res.Projects, probe.Options{
+		Disabled: *noProbe, Client: netguard.New(), Self: self,
+	})
+	findings, err := analyze(scrub, env, res, lastSnapshot(env, files, scrub))
 	if err != nil {
 		p.Error(err)
 		return exitError
@@ -102,8 +116,9 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 }
 
 // analyze settles what's in effect and runs every analyzer.
-func analyze(scrub *redact.Scrubber, env platform.Env, res discover.Result) ([]finding.Finding, error) {
+func analyze(scrub *redact.Scrubber, env platform.Env, res discover.Result, prev snapshot.Snapshot) ([]finding.Finding, error) {
 	perms.Settle(scrub, res.Projects)
+	capability.Settle(scrub, res.Projects) // reads the settled permissions
 	permFindings, err := perms.Analyze(scrub, env, res.Projects)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // perms names what failed
@@ -112,6 +127,9 @@ func analyze(scrub *redact.Scrubber, env platform.Env, res discover.Result) ([]f
 		res.Findings,
 		secrets.Analyze(scrub, res.Projects, res.Instructions),
 		poison.Analyze(scrub, res.Projects, res.Instructions),
+		mcpconfig.Analyze(scrub, env, res.Projects),
+		capability.Analyze(scrub, res.Projects),
+		drift.Analyze(scrub, prev, res.Projects),
 		permFindings,
 		unknown.Analyze(scrub, res.Unknown),
 	), nil
@@ -278,10 +296,29 @@ func plural(n int, one, many string) string {
 // scanRules is every rule a scan can report: finding's own and each
 // adapter's.
 func scanRules() (*finding.Registry, error) {
-	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules())
+	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules(), mcpconfig.Rules(), capability.Rules(), drift.Rules())
 	r, err := finding.NewRegistry(all...)
 	if err != nil {
 		return nil, fmt.Errorf("building the rule registry: %w", err)
 	}
 	return r, nil
+}
+
+// lastSnapshot is the previous scan's snapshot, for drift. Any trouble
+// reading it means nothing to compare, the same as a first scan; saving
+// reports it. It never creates the state dir.
+func lastSnapshot(env platform.Env, files *fsys.FS, scrub *redact.Scrubber) snapshot.Snapshot {
+	if _, err := files.Stat(env.StateDir); err != nil {
+		return snapshot.Snapshot{} // no state dir yet, and opening one would create it
+	}
+	d, err := jarxdir.Open(env)
+	if err != nil {
+		return snapshot.Snapshot{}
+	}
+	defer func() { _ = d.Close() }()
+	prev, _, err := snapshot.Latest(d, scrub)
+	if err != nil {
+		return snapshot.Snapshot{}
+	}
+	return prev
 }

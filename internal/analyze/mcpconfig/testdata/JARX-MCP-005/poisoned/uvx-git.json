@@ -1,0 +1,1 @@
+{"command": "uvx", "args": ["--from", "git+https://github.com/acme/mcp-server@main", "mcp-server"]}

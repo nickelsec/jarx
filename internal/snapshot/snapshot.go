@@ -33,6 +33,8 @@ const (
 	KindRule        Kind = "rule"
 	KindOption      Kind = "setting"
 	KindConfig      Kind = "config file"
+	KindServer      Kind = "mcp server"
+	KindOffer       Kind = "mcp offer"
 )
 
 // Item is one thing a scan found. Project, Kind and Key say which thing it
@@ -134,6 +136,9 @@ func (b *builder) project(p model.Project) {
 			InEffect: h.Origin.InEffect, Why: h.Origin.Why, Hash: hash(h.ScriptText),
 		})
 	}
+	for _, s := range p.Servers {
+		b.server(dir, s)
+	}
 	for _, perm := range p.Permissions {
 		b.permissions(dir, perm)
 	}
@@ -187,4 +192,65 @@ func (b *builder) join(parts ...string) redact.Text {
 	}
 	t, _ := b.s.Scrub(strings.Join(nonEmpty, " "))
 	return t
+}
+
+// server keeps an MCP server definition by its name and file, with whether
+// it starts as the value and its whole masked definition as a hash, so a
+// changed command, URL or header shows as "content changed".
+func (b *builder) server(dir redact.Text, s model.Server) {
+	// Each field is labeled, so a value moving from one field to another is
+	// a change too.
+	parts := []string{
+		"transport " + string(s.Transport), "command " + s.Command.String(), "args " + texts(s.Args),
+		"url " + s.URL.String(), "helper " + s.HeadersHelper.String(), "env " + pairs(s.Env),
+		"headers " + pairs(s.Headers), "cwd " + s.Cwd.String(), "forward " + texts(s.ForwardEnv),
+		"bearer " + s.BearerVar.String(), "header vars " + pairs(s.HeaderVars), "auth " + s.Auth.String(),
+		"approvals " + pairs(s.Approvals), "disabled " + texts(s.DisabledTools),
+	}
+	if s.EnabledTools != nil {
+		parts = append(parts, "enabled "+texts(s.EnabledTools))
+	}
+	b.add(Item{
+		Project: dir, Kind: KindServer,
+		Key:      b.join(string(s.Origin.Agent), string(s.Origin.Scope), s.Name.String(), "in", s.Origin.File.Text().String()),
+		InEffect: s.Origin.InEffect, Why: s.Origin.Why, Value: b.join(string(s.Start)), Hash: hash(b.join(strings.Join(parts, "\x00"))),
+	})
+	// What a listed server offers, each as its own item with a hash of its
+	// whole masked entry, so a changed description shows up (drift).
+	for _, o := range s.Offers {
+		b.add(Item{Project: dir, Kind: KindOffer, Key: OfferKey(b.s, s, o), InEffect: true, Hash: OfferHash(o)})
+	}
+}
+
+// OfferKey is the identity a snapshot gives what a server offers: the
+// server's agent, name and file, and the offer's kind and name. drift uses
+// it to find the same tool in an earlier snapshot.
+func OfferKey(sc *redact.Scrubber, s model.Server, o model.Offer) redact.Text {
+	b := &builder{s: sc}
+	return b.join(string(s.Origin.Agent), s.Name.String(), "in", s.Origin.File.Text().String(), string(o.Kind), o.Name.String())
+}
+
+// ServerKey is the start of OfferKey for every offer of one server.
+func ServerKey(sc *redact.Scrubber, s model.Server) redact.Text {
+	b := &builder{s: sc}
+	return b.join(string(s.Origin.Agent), s.Name.String(), "in", s.Origin.File.Text().String())
+}
+
+// OfferHash is the hash a snapshot keeps of an offer's whole masked entry.
+func OfferHash(o model.Offer) string { return hash(o.Text) }
+
+func texts(ts []redact.Text) string {
+	out := make([]string, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, t.String())
+	}
+	return strings.Join(out, "\x01")
+}
+
+func pairs(ps []model.Pair) string {
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, p.Key.String()+"="+p.Value.String())
+	}
+	return strings.Join(out, "\x01")
 }

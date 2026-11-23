@@ -1,0 +1,1 @@
+{"agent": "codex", "command": "srv", "forwardEnv": ["LANG", "GITHUB_TOKEN"]}

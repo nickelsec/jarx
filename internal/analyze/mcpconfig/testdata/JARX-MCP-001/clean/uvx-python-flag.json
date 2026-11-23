@@ -1,0 +1,1 @@
+{"command": "uvx", "args": ["--python", "3.12", "mcp-server-fetch==2025.4.7"]}

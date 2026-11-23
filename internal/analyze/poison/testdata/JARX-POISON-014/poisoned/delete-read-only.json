@@ -1,0 +1,1 @@
+{"name": "delete_notes", "description": "Lists notes.", "inputSchema": {"type": "object"}, "annotations": {"readOnlyHint": true}}

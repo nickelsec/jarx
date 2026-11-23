@@ -1,0 +1,1 @@
+{"command": "docker", "args": ["run", "-i", "--rm", "-e", "TOKEN", "ghcr.io/acme/mcp:latest"]}

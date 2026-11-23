@@ -19,6 +19,7 @@ type counts struct {
 	skills, hooks, scripts        int
 	rules, modes, configs         int
 	unknowns                      int
+	servers, serversOff, approval int
 	tooLarge, unreadable, partial int
 }
 
@@ -68,6 +69,7 @@ func (k *counter) project(proj model.Project) {
 	for _, perm := range proj.Permissions {
 		k.permissions(perm)
 	}
+	k.servers(proj.Servers)
 	for _, cfg := range proj.Configs {
 		if k.once("config", cfg.Origin.File.Raw()) {
 			k.c.configs++
@@ -157,6 +159,10 @@ func (c counts) rows(sep string) []scanRow {
 			ifPos(c.unread, plural(c.unread, "file not read", "files not read")),
 		)},
 		{[]string{plural(c.skills, "skill", "skills"), plural(c.hooks, "hook", "hooks"), plural(c.scripts, "hook script", "hook scripts")}, nil},
+		{[]string{plural(c.servers, "MCP server", "MCP servers")}, nonEmpty(
+			ifPos(c.serversOff, plural(c.serversOff, "not started", "not started")),
+			ifPos(c.approval, plural(c.approval, "approval unknown", "approval unknown")),
+		)},
 		{[]string{plural(c.rules, "permission rule", "permission rules"), plural(c.modes, "mode setting", "mode settings")}, nil},
 		{[]string{plural(c.configs, "config file", "config files")},
 			nonEmpty(ifPos(c.unknowns, plural(c.unknowns, "unknown setting", "unknown settings")))},
@@ -234,4 +240,22 @@ func join(xs []string, sep, suffix string) string {
 		return ""
 	}
 	return strings.Join(xs, sep) + suffix
+}
+
+// servers counts MCP server definitions once per file and name, with the
+// ones that won't start and the ones waiting on an approval jarx can't see.
+func (k *counter) servers(ss []model.Server) {
+	for _, s := range ss {
+		if !k.once("server", s.Origin.File.Raw(), s.Name.String()) {
+			continue
+		}
+		k.c.servers++
+		switch s.Start {
+		case model.StartNo:
+			k.c.serversOff++
+		case model.StartUnknown:
+			k.c.approval++
+		case model.StartYes, model.StartMaybe:
+		}
+	}
 }

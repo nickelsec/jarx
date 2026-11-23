@@ -14,10 +14,12 @@ import (
 // Path. rawStrings walks a type and returns every place a raw string could
 // hide in it.
 
-// leafTypes are allowed as they are, without looking inside. Both keep their
-// raw value unexported and only ever show the masked form.
+// leafTypes are allowed as they are, without looking inside. Each keeps its
+// raw value unexported: Text and Path only ever show the masked form, and
+// Launch shows nothing (its own test proves it never prints or encodes).
+
 func leafTypes() []reflect.Type {
-	return []reflect.Type{reflect.TypeFor[redact.Text](), reflect.TypeFor[Path]()}
+	return []reflect.Type{reflect.TypeFor[redact.Text](), reflect.TypeFor[Path](), reflect.TypeFor[Launch]()}
 }
 
 // enumTypes are named string types whose values are our own constants.
@@ -27,6 +29,7 @@ func enumTypes() []reflect.Type {
 		reflect.TypeFor[ProjectStatus](), reflect.TypeFor[TrustLevel](), reflect.TypeFor[WalkMethod](),
 		reflect.TypeFor[RuleAction](), reflect.TypeFor[InstructionKind](), reflect.TypeFor[LoadWhen](),
 		reflect.TypeFor[ReadStatus](), reflect.TypeFor[SkillKind](),
+		reflect.TypeFor[Transport](), reflect.TypeFor[StartState](), reflect.TypeFor[ServerStatus](), reflect.TypeFor[OfferKind](), reflect.TypeFor[ToolAccess](),
 	}
 }
 

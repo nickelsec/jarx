@@ -1,0 +1,1 @@
+{"command": "/bin/bash", "args": ["-lc", "npx server"]}

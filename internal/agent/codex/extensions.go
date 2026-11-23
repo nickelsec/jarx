@@ -62,6 +62,7 @@ var _ agent.ExtensionReader = Adapter{}
 func (Adapter) Extensions(c agent.Context, projects []model.Project) []finding.Finding {
 	s := &settings{c: c}
 	s.load()
+	var findings []finding.Finding
 	for i := range projects {
 		p := &projects[i]
 		if p.Status != model.ProjectOK {
@@ -71,13 +72,16 @@ func (Adapter) Extensions(c agent.Context, projects []model.Project) []finding.F
 		e := &extensions{v: v, project: p}
 		e.skills()
 		e.hooks()
+		e.servers()
+		findings = append(findings, e.findings...)
 	}
-	return nil // parse problems come from Settings
+	return findings // parse problems come from Settings
 }
 
 type extensions struct {
-	v       *view
-	project *model.Project
+	v        *view
+	project  *model.Project
+	findings []finding.Finding
 }
 
 func (e *extensions) skills() {

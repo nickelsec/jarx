@@ -1,0 +1,1 @@
+{"command": "npx", "args": ["git+https://github.com/acme/mcp-server.git#main"]}

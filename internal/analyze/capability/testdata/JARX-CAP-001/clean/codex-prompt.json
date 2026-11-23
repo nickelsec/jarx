@@ -1,0 +1,1 @@
+{"agent": "codex", "tool": "drop_table", "hints": ["destructiveHint"], "approvals": [["", "approve"], ["drop_table", "prompt"]]}

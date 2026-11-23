@@ -65,6 +65,12 @@ linters:
       # Messages start with "network:" or "platform:" so the path exclusions
       # below can exempt exactly one group per choke point package.
       forbid:
+        # Only internal/probe may read a server's raw launch spec (real env
+        # values and tokens). model.Launch never prints or encodes it; this
+        # keeps every other package from unwrapping it.
+        - pattern: ^model\.Launch\.Spec$
+          pkg: ^github\.com/nickelsec/jarx/internal/model$
+          msg: "launch: only internal/probe may read a raw launch spec"
         # Only internal/netguard may build HTTP clients, transports or dialers.
         - pattern: ^http\.(Get|Post|Head|PostForm|DefaultClient|DefaultTransport|Client|Transport)$
           pkg: ^net/http$
@@ -82,18 +88,19 @@ linters:
         - pattern: ^(smtp|rpc|jsonrpc)\..*$
           pkg: ^net/(smtp|rpc|rpc/jsonrpc)$
           msg: "network: only internal/netguard may make network calls"
-        # Only internal/discover may run a process (hardened git), plus
-        # internal/proc from phase 4. exec.LookPath reads the real PATH, so it's
-        # banned too; git is found through platform.Env instead.
+        # Only internal/discover (hardened git) and internal/proc (MCP stdio
+        # servers, in a job or process group) may run a process. exec.LookPath
+        # reads the real PATH, so it's banned too; programs are found through
+        # platform.Env instead.
         - pattern: ^exec\.(Command|CommandContext|LookPath)$
           pkg: ^os/exec$
-          msg: "exec: only internal/discover may run commands"
+          msg: "exec: only internal/discover and internal/proc may run commands"
         - pattern: ^os\.StartProcess$
           pkg: ^os$
-          msg: "exec: only internal/discover may run commands"
+          msg: "exec: only internal/discover and internal/proc may run commands"
         - pattern: ^syscall\.(Exec|ForkExec|StartProcess)$
           pkg: ^syscall$
-          msg: "exec: only internal/discover may run commands"
+          msg: "exec: only internal/discover and internal/proc may run commands"
         # Only internal/platform may read the real env and user dirs, so tests
         # and --home never touch the real machine.
         - pattern: ^os\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir|UserConfigDir|UserCacheDir)$
@@ -166,15 +173,19 @@ linters:
         linters:
           - forbidigo
         text: "output: only cmd/jarx may use os.Stdout"
-      - path: ^internal/discover/
+      - path: ^internal/(discover|proc)/
         linters:
           - forbidigo
         text: "exec:"
+      - path: ^internal/probe/
+        linters:
+          - forbidigo
+        text: "launch:"
       # Tests build fixtures in t.TempDir() and check what got written.
       - path: _test\.go$
         linters:
           - forbidigo
-        text: "(read|write|exec):"
+        text: "(read|write|exec|launch):"
 
 # Show every issue on a line. By default golangci-lint keeps one per line,
 # so another linter on the same line (gosec, unused) can hide a forbidigo

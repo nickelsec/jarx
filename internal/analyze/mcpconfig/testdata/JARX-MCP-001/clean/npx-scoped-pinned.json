@@ -1,0 +1,1 @@
+{"command": "npx", "args": ["-y", "@acme/server-files@0.4.1"]}

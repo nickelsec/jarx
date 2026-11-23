@@ -1,0 +1,1 @@
+{"scope": "user", "goos": "windows", "command": "npx", "args": ["-y", "server@1.2.3"]}

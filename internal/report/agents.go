@@ -88,7 +88,24 @@ func (p *Printer) agentRow(v ScanView, a AgentInfo, cols agentColumns) node {
 	if len(parts) > 0 {
 		row = append(row, seg{text: own(" (" + strings.Join(parts, p.sep()) + ")"), tone: dim})
 	}
+	if s := serverCount(v, a.Agent); s > 0 {
+		row = append(row, seg{text: own(p.sep() + plural(s, "MCP server", "MCP servers"))})
+	}
 	return node{row}
+}
+
+// serverCount is how many MCP server definitions agent has, each counted
+// once however many projects it applies in.
+func serverCount(v ScanView, agent model.Agent) int {
+	seen := map[string]bool{}
+	for _, proj := range v.Projects {
+		for _, s := range proj.Servers {
+			if s.Origin.Agent == agent {
+				seen[s.Origin.File.Raw()+"\x00"+s.Name.String()] = true
+			}
+		}
+	}
+	return len(seen)
 }
 
 // alignAgents moves every row's project counts down a line when one row

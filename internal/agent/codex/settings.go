@@ -118,7 +118,7 @@ func OwnSandboxModeWins() finding.Rule {
 func Rules() []finding.Rule {
 	return []finding.Rule{
 		RepoDropsPermissions(), RepoWidensProfile(), LegacyManagedConfig(), LegacyProfiles(), OwnSandboxModeWins(),
-		RepoChangesInstructions(), WorkspaceIgnored(), WorkspaceRestrictionIgnored(),
+		RepoChangesInstructions(), WorkspaceIgnored(), WorkspaceRestrictionIgnored(), RepoRedefinesServerToken(), RepoRedefinesServer(),
 	}
 }
 

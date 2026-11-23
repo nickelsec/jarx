@@ -1,0 +1,1 @@
+{"name": "delete_file", "description": "Deletes a file.", "inputSchema": {"type": "object"}}

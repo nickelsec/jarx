@@ -20,3 +20,8 @@ extends = ":workspace"
 [permissions.locked.filesystem]
 "~/.ssh" = "deny"
 "**/*.env" = "deny"
+
+# Your own search server, sending a token from your env.
+[mcp_servers.search]
+url = "https://search.example.com/mcp"
+bearer_token_env_var = "SEARCH_TOKEN"

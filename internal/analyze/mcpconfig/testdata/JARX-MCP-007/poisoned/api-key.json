@@ -1,0 +1,1 @@
+{"agent": "codex", "command": "srv", "forwardEnv": ["OPENAI_API_KEY"]}

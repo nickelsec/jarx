@@ -179,19 +179,158 @@ shows it.
 
 ## Phase 4: MCP
 
-- [ ] MCP config in the Claude adapter, with the "would it start" logic
-- [ ] MCP config in the Codex adapter, with the "would it start" logic
-- [ ] `fakemcp`: scripted stdio and HTTP server
-- [ ] `proc`: job objects on Windows, process groups on unix, baseline env.
-  First check whether Go 1.27 fixed golang/go#79927 (design.md says the fix
-  "isn't in Go 1.25"). If it did, use the `SysProcAttr` fix instead of the
-  suspended start and update design.md.
-- [ ] `mcp`: list-only client, stdio, streamable HTTP, legacy SSE, paging,
-  `go/ast` method test
-- [ ] `probe`: which servers, env expansion, concurrency, status,
-  `--no-probe`
-- [ ] MCP supply chain and config rules
-- [ ] `analyze/capability` and `analyze/drift`
+- [x] MCP config in the Claude adapter, with the "would it start" logic.
+  User and local servers from `~/.claude.json`, `.mcp.json`, plugin servers,
+  `managed-mcp.json` and `managedMcpServers`, each as a `model.Server` with
+  a start state (starts, may start, not started, approval unknown). The
+  policy follows the managed-mcp page: exclusive control, the denylist from
+  every admin source, the allowlist with the managed-only lock, and
+  `serverName`, `serverCommand` and `serverUrl` matching. Also `.mcp.json`
+  approval with trust, the `/mcp` toggles, same-name precedence with "may
+  start" when the winner won't start, plugin servers matched by endpoint,
+  reserved names, servers in snapshots, a row in the scanned block and the
+  loads line, the full list in `--all`, the demo's `.mcp.json`, and the demo
+  test's copy starting without the local jarx state. A follow-up puts every
+  server's command, args, URL, env and header values through the secrets
+  scan, since most real tokens sit in the user and local servers in
+  `~/.claude.json`, and masks an env or header value by its name
+  (`API_TOKEN=...`) even when it has no known format
+  - Not covered yet: inline `mcpServers` in subagent frontmatter (no YAML
+    parser), servers on the agents row (they come with probe status),
+    `${VAR}` expansion when matching list entries (a reference there makes
+    the server "may start"), unknown keys inside server entries, claude.ai
+    connectors with `disableClaudeAiConnectors` and `allowAllClaudeAiMcps`,
+    Claude in Chrome next to `managed-mcp.json`, and two plugins defining
+    the same endpoint (c3f9aef, 1fb8423)
+- [x] MCP config in the Codex adapter, with the "would it start" logic.
+  `[mcp_servers.<id>]` from every config layer, with the layer's trust and
+  profile rules, `enabled`, the stdio and streamable HTTP shapes, and the
+  `requirements.toml` allowlist (id and identity, string and matcher forms,
+  exact, prefix and whole-value regex, empty list turns everything off).
+  Also every Codex field in the model (env_vars, cwd, bearer and header env
+  vars, auth, enabled and disabled tools, approval modes), the same id in
+  two layers with a note on fields that may merge in, `agent.Pair` shared by
+  both adapters for masking by name, the new fields in the snapshot hash,
+  and the demo's user server that a trusted repo redefines
+  - Not covered yet: Codex plugin servers (`plugins.<plugin>.mcp_servers`,
+    with Codex plugins), `environment_id` and remote executors,
+    `startup_readiness` and `required`, and unknown values for
+    `approval_mode` (the open item in the PRD) (ed1ccde)
+- [x] `fakemcp`: scripted stdio and HTTP server. It speaks both protocol
+  eras (2026-07-28 with `server/discover` and the version in `_meta`, and
+  legacy `initialize`), streamable HTTP with the version header check, and
+  the 2024-11-05 HTTP+SSE transport. Tools, prompts and resources go out
+  byte for byte, and it records every message, so `Forbidden()` proves a
+  client only listed. A script can make it hostile: hang on a method, delay,
+  page forever, write garbage or huge replies, answer with the wrong id
+  first, flood notifications, send the client sampling, roots and
+  elicitation requests, answer lists with an `InputRequiredResult`, print a
+  secret and escapes on stderr, exit early, and over HTTP answer a set
+  status, redirect to the metadata address, or want a bearer token. The doc
+  check for it found 2026-07-28 dropped `initialize`, so design.md and the
+  PRD now say the client sends `server/discover` first and falls back to
+  `initialize` for legacy servers
+  - Not covered yet: the demo's poisoned server (it needs a way to start
+    `fakemcp` under `--home`, which comes with probe), spawning child
+    processes that outlive a kill (that test belongs to `proc`),
+    `subscriptions/listen`, and the `-race` run here (no C compiler on this
+    machine, so CI's linux job covers it) (f50540c)
+- [x] `proc`: job objects on Windows, process groups on unix, baseline env.
+  golang/go#79927 isn't fixed in Go 1.27.4: the proposal is still open,
+  and the change landed on tip and was reverted on 2026-11-20. So it's the
+  suspended start, with the main thread resumed through a Toolhelp32
+  snapshot and `ResumeThread` (documented calls, unlike `NtResumeProcess`).
+  Also the baseline env plus declared vars (never jarx's own env, and
+  empty stays empty), stderr kept up to 64 KiB, `Find` on the env's PATH
+  through fsys with PATHEXT on Windows and never under `--home`, a refusal
+  to pass `cmd.exe` metacharacters to a `.bat` or `.cmd` file, and `proc`
+  added to the lint rule that lets a package run processes. Tests rerun the
+  test binary as a server that starts a grandchild, and check `Kill` takes
+  both
+  - Not covered yet: a server that leaves its process group with `setsid`
+    on unix (in Limits), the Linux `Pdeathsig` backstop if jarx itself
+    dies mid-probe, and the exec-bit and process-group tests, which run
+    only on the linux and mac CI jobs since this machine is Windows
+    (304399a)
+- [x] `mcp`: list-only client, stdio, streamable HTTP, legacy SSE, paging,
+  `go/ast` method test. `server/discover` first and `initialize` when the
+  server is legacy (on stdio also when discover gets no answer), the HTTP
+  fallbacks from modern to legacy streamable HTTP to HTTP+SSE on a 4xx
+  without a JSON-RPC body, and refusals for a server with no version in
+  common and an SSE endpoint on another origin. Paging stops at 50 pages,
+  a repeated cursor or 32 MiB kept, and an `InputRequiredResult` gives no
+  items. Server requests, notifications, wrong ids and garbage are skipped
+  and counted, never answered. The request builder refuses any other
+  method, and a `go/ast` test fails on any other method string in the
+  package. Also `fakemcp` grew a strict modern era (no version in `_meta`
+  is an error) and a `Capabilities` list, so the client's `_meta` and
+  capability checks have something to fail against
+  - Not covered yet: the legacy `Mcp-Session-Id` and the legacy version
+    header aren't checked by `fakemcp`, the 32 MiB cap has no test, and
+    `ttlMs` caching and `subscriptions/listen` aren't used (jarx lists
+    once) (c7475f2)
+- [x] `probe`: which servers, env expansion, concurrency, status,
+  `--no-probe`. Every server that starts gets probed once per definition,
+  4 at a time with 15s each, and ends with one of the PRD's statuses. Claude's
+  `${VAR}` and `${VAR:-default}` with the path variables, its credential
+  variables read as empty toward remote servers (the documented examples and
+  their families), and Codex's `env_vars`, `bearer_token_env_var` and
+  `env_http_headers`. A reference to an unset variable is "missing
+  credential" and starts nothing. OAuth and headers helpers are "requires
+  auth" without contact, a 401 or 403 is "requires auth" or "credential
+  rejected" by whether creds were sent, and netguard's refusals are
+  "blocked" or "insecure transport". Also `model.Launch` for the raw launch
+  data (never printed or encoded, and a lint rule that lets only probe and
+  tests unwrap it), masked offers, instructions and stderr on
+  the server, the status and offers under `--all`, the server count on each
+  agent's row, offers as snapshot items for drift, `ListSSE` for SSE
+  servers, and `platform.LookupReal`. Under `--home` the only thing probe
+  starts is the demo's fake server, jarx itself in a hidden mode, with a
+  test that it never happens on the real machine; the demo gains its
+  poisoned `notes-helper` server
+  - Not covered yet: the probe's own findings on what servers offer (item 7
+    and 8), the PRD's "allowed by the token" layer (it stays unknown), Codex
+    plugin servers, and `${CLAUDE_PLUGIN_DATA}`, whose dir the docs don't
+    name (a350c95)
+- [x] MCP supply chain and config rules. Includes the rules item 1, 2 and 4
+  set up: a repo server that takes your server's name, one name in two
+  scopes with different endpoints, a repo redefining a Codex server whose
+  lower layer sends a token, and `cmd.exe` metacharacters in the args of a
+  `.bat` or `.cmd` server. Twelve rules on one definition in a new
+  `analyze/mcpconfig` (`JARX-MCP-001` to `012`, with 71 poisoned and clean
+  fixtures), and four in the adapters, which know the precedence:
+  `JARX-CLAUDE-006` and `007`, `JARX-CODEX-009` and `010`. Rules run on
+  servers that start, may start or wait on approval. The demo now flags its
+  unpinned `npx` server, its repo script and the repo that redefines your
+  Codex `search` server
+  - Not covered yet: a local server can't be taken over (Claude ranks local
+    above project), so CLAUDE-006 is user servers only; tokens in URLs and
+    secrets in headers stay with `JARX-SECRET-002`; "forwarding the whole
+    env" has no documented config key to check; and poison rules on what
+    servers offer, lying annotations and tool shadowing come with item 8
+    (6206ef4)
+- [x] `analyze/capability` and `analyze/drift`. Each listed tool gets its
+  layer 3 access (hidden, denied, asks, may run without asking, runs
+  without asking) with the rule or mode behind it, shown under `--all`:
+  Claude's `mcp__` rule forms with name normalizing, plugin servers, the
+  `__` name quirk and the default modes, and Codex `enabled_tools`,
+  `disabled_tools`, approval modes, the destructive annotation rule and
+  `approval_policy`. Two rules on it, `JARX-CAP-001` and `002`, and two on
+  drift against the last snapshot, `JARX-DRIFT-001` and `002`. Also the
+  poison rules on what servers offer (instructions and every string in a
+  tool, prompt or resource entry, one finding per rule per tool),
+  `JARX-POISON-014` for lying annotations and `015` for tool shadowing, one
+  change-word list in `model.Offer.ChangeWord`, and CAP-001 as one finding
+  per allow rule or mode, listing its tools. The demo's MCP servers moved
+  to their own `projects/tools`, which allows the poisoned server's tools,
+  so the default view (not just `--all`) shows the poisoned descriptions,
+  the unpinned `npx` server and the URL token, with a test that checks it.
+  A changed demo tool raises DRIFT-001
+  - Not covered yet: layer 2, what the server's token allows (it stays
+    unknown); Codex `auto` and `approve`, whose meaning the docs don't
+    give; allow rules on a tool's input, which Claude doesn't match for MCP;
+    shadowing across agents or with built-in tools; and drift on servers
+    whose file or name changed, which counts as a new server (2867b2e)
 
 **Run it:** `jarx scan --home testdata/demo` probes the fake poisoned server
 and flags it.

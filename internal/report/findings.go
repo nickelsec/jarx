@@ -340,7 +340,7 @@ func chop(w string, width int) []string {
 }
 
 // tally is what one agent loads in a project.
-type tally struct{ instructions, imports, hooks, skills int }
+type tally struct{ instructions, imports, hooks, skills, servers int }
 
 func (t tally) items() []string {
 	return nonEmpty(
@@ -348,6 +348,7 @@ func (t tally) items() []string {
 		ifPos(t.imports, plural(t.imports, "import", "imports")),
 		ifPos(t.hooks, plural(t.hooks, "hook", "hooks")),
 		ifPos(t.skills, plural(t.skills, "skill", "skills")),
+		ifPos(t.servers, plural(t.servers, "MCP server", "MCP servers")),
 	)
 }
 
@@ -372,17 +373,19 @@ func loadTally(proj model.Project) ([]model.Agent, map[model.Agent]*tally) {
 			get(in.Origin.Agent).instructions++
 		}
 	}
-	for _, h := range proj.Hooks {
-		if h.Origin.InEffect {
-			get(h.Origin.Agent).hooks++
-		}
-	}
-	for _, sk := range proj.Skills {
-		if sk.Origin.InEffect {
-			get(sk.Origin.Agent).skills++
-		}
-	}
+	countInEffect(proj.Hooks, func(h model.Hook) model.Origin { return h.Origin }, func(a model.Agent) { get(a).hooks++ })
+	countInEffect(proj.Skills, func(s model.Skill) model.Origin { return s.Origin }, func(a model.Agent) { get(a).skills++ })
+	countInEffect(proj.Servers, func(s model.Server) model.Origin { return s.Origin }, func(a model.Agent) { get(a).servers++ })
 	return order, by
+}
+
+// countInEffect calls add with the agent of each item that's in effect.
+func countInEffect[T any](items []T, origin func(T) model.Origin, add func(model.Agent)) {
+	for _, it := range items {
+		if o := origin(it); o.InEffect {
+			add(o.Agent)
+		}
+	}
 }
 
 // loads says what each agent loads in a project, wrapping onto more lines

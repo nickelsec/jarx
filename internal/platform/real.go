@@ -23,3 +23,7 @@ func Real() (Env, error) {
 	env.registry = realRegistry()
 	return env, nil
 }
+
+// LookupReal reads one variable from the real env, for a process that runs
+// without a home dir, like the demo's fake MCP server checking its marker.
+func LookupReal(name string) (string, bool) { return os.LookupEnv(name) }
