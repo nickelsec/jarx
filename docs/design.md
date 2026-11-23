@@ -339,6 +339,23 @@ adapters.
   `mcp_servers.<id>.env`, and out of `[hooks]`.
 - Whether a typo is a safety typo depends on the key it was meant to be.
 
+### Snapshots keep hashes, not text
+
+A snapshot is jarx's own list of items, not a dump of the model. Each item
+has an identity (its project, its kind and a key like `claude allow Bash(*)
+in <file>`) and a state: in effect and why, a value, and a 16-hex SHA-256 of
+its masked text. The diff matches items by identity, so it says "this allow
+went away", not "line 12 changed".
+
+- Snapshots go through `jarxdir` as `snapshots/<UTC time>-<random>.json`,
+  and each save drops all but the newest 20.
+- Reading one back puts every string through the scrubber again. That's
+  safe because scrubbing is idempotent: a match that overlaps a mask the
+  scrubber writes is left alone. A mask only counts when it's one of the
+  scrubber's own kinds, maybe with a fingerprint, ending at a word boundary,
+  so text dressed up as a mask, like `REDACTED:ghp_<token>`, can't hide the
+  token behind it.
+
 ### Placeholders are info, not unmasked
 
 A pattern match is always masked. Whether it looks like a placeholder only

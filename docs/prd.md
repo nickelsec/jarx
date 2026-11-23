@@ -815,6 +815,15 @@ Results are cached by content hash, so an unchanged artifact isn't sent twice.
   projects, servers, tools, prompts, resources, hooks, skills, instruction
   files, permission changes, verdict changes and tool description hash
   changes.
+- A snapshot keeps each thing a scan found with its state: projects,
+  instruction files, skills, hooks, permission rules and settings, config
+  files, findings and unknown keys. Texts are kept only as a hash of their
+  masked form, so jarx never keeps copies of your instruction and memory
+  files, and a changed secret shows as "content changed" without the value.
+- The diff lists what's new, gone, or changed (now in effect or not, content
+  changed, value changed), scan-wide items first, then by project. The first
+  scan says there's no earlier snapshot. A broken snapshot, or one from a
+  newer jarx, means no diff and a note, never a failed scan.
 - To compare against an older snapshot, use the snapshot picker in the
   dashboard.
 - Named baselines are for later.
@@ -924,8 +933,7 @@ with `--home`):
 - `config.json` with the extra repo paths from `jarx setup repo add`, and
   later the LLM base URL, model and key env var name (never the key). It has
   a version number; a config from a newer jarx is refused, not guessed at.
-  Reading it never creates the state dir, so a scan that saves nothing writes
-  nothing.
+  Reading it never creates the state dir.
 - `fingerprint.key`, the random per-install key behind secret fingerprints.
   It's made the first time a secret is found, and a damaged one is reported,
   never replaced.

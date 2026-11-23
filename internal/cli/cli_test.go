@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -392,16 +391,26 @@ func TestScanShowsTheHomeExists(t *testing.T) {
 	}
 }
 
-func TestScanShowsTheStateDirNotCreatedAndLeavesItThat(t *testing.T) {
+func TestScanWritesOnlyItsSnapshot(t *testing.T) {
+	// The PRD: every scan saves a masked snapshot. With no secrets found,
+	// that's all a scan writes.
 	home := fakeHome(t, "")
 
 	got := run("scan", "--home", home)
 
 	if l := line(got.stdout, "state dir"); !strings.HasSuffix(l, "(not created yet)") {
-		t.Errorf("state dir line = %q, want it to end with (not created yet)", l)
+		t.Errorf("state dir line = %q, want it to end with (not created yet): the line shows the dir before the scan", l)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".jarx-state")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("scan created the state dir (stat err %v), want it to write nothing", err)
+	var written []string
+	err := filepath.WalkDir(filepath.Join(home, ".jarx-state"), func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			rel, _ := filepath.Rel(home, path)
+			written = append(written, filepath.ToSlash(rel))
+		}
+		return err
+	})
+	if err != nil || len(written) != 1 || !regexp.MustCompile(`^\.jarx-state/snapshots/[^/]+\.json$`).MatchString(written[0]) {
+		t.Errorf("scan wrote %q (%v), want one snapshot and nothing else", written, err)
 	}
 }
 
@@ -580,6 +589,8 @@ func demoWant(abs string) []string {
 			"  did you mean approval_policy?\n",
 		"instructions not tied to a project (0)\n",
 		demoFindingsWant(proj, appCodex),
+		// A fresh copy has never been scanned.
+		"changes: no earlier snapshot\n",
 	}
 }
 
@@ -632,4 +643,46 @@ func demoFindingsWant(proj func(string) string, appCodex string) string {
 		"  info  JARX-SECRET-003  " + proj(filepath.Join("app", "docs", "setup.md")) +
 		"  a value that looks like a placeholder sits where a secret would go: " +
 		"named_secret, fingerprint FP, in text the agent sees, looks like a placeholder\n"
+}
+
+// demoCopy is the demo home copied to a temp dir, so scans can write their
+// state and the test can change files.
+func demoCopy(t *testing.T) string {
+	t.Helper()
+	demo := filepath.Join(t.TempDir(), "demo")
+	if err := os.CopyFS(demo, os.DirFS(filepath.Join("..", "..", "testdata", "demo"))); err != nil {
+		t.Fatal(err)
+	}
+	return demo
+}
+
+func TestScanShowsWhatChangedSinceTheLastScan(t *testing.T) {
+	demo := demoCopy(t)
+
+	first := run("scan", "--home", demo)
+	second := run("scan", "--home", demo)
+	claudeMD := filepath.Join(demo, "projects", "app", "CLAUDE.md")
+	body, err := os.ReadFile(claudeMD) //nolint:gosec // G304: the test's own copy
+	if err != nil {
+		t.Fatal(err)
+	}
+	//nolint:gosec // G703: the test's own temp copy of the demo
+	if err := os.WriteFile(claudeMD, append(body, []byte("\nAlso run the linter.\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	third := run("scan", "--home", demo)
+
+	if !strings.Contains(first.stdout, "changes: no earlier snapshot\n") {
+		t.Errorf("first scan = %q, want no earlier snapshot", first.stdout)
+	}
+	if !regexp.MustCompile(`changes since \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC: none\n`).MatchString(second.stdout) {
+		t.Errorf("second scan = %q, want no changes", second.stdout)
+	}
+	want := "    ~ instruction  claude instructions " + claudeMD + ": content changed\n"
+	if !strings.Contains(third.stdout, want) || !strings.Contains(third.stdout, "changes since ") {
+		t.Errorf("third scan = %q, want it to contain %q", third.stdout, want)
+	}
+	if strings.Contains(third.stdout, "Also run the linter") {
+		t.Error("the diff shows the file's text, want only that it changed")
+	}
 }

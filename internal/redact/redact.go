@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -102,6 +103,7 @@ type KeySource interface {
 // Scrubber masks secrets. It's safe for concurrent use.
 type Scrubber struct {
 	patterns []Pattern
+	masks    *regexp.Regexp // the masks this scrubber writes, so it never masks one again
 
 	keys    KeySource
 	keyOnce sync.Once
@@ -127,7 +129,7 @@ func New(patterns []Pattern, keys KeySource) (*Scrubber, error) {
 			return nil, fmt.Errorf("pattern %d (%s): no group named %q", i, p.Kind, p.Group)
 		}
 	}
-	return &Scrubber{patterns: patterns, keys: keys}, nil
+	return &Scrubber{patterns: patterns, keys: keys, masks: maskPattern(patterns)}, nil
 }
 
 // KeyErr returns the error from loading the fingerprint key, if any. When
@@ -210,6 +212,7 @@ func (s *Scrubber) Secret(kind, raw string) (Text, Found) {
 // matches finds every span to mask, in pattern order.
 func (s *Scrubber) matches(raw string) []span {
 	var spans []span
+	masks := s.ownMasks(raw)
 	for i, p := range s.patterns {
 		g := p.groupIndex()
 		for _, m := range p.Re.FindAllStringSubmatchIndex(raw, -1) {
@@ -220,10 +223,54 @@ func (s *Scrubber) matches(raw string) []span {
 			if p.Valid != nil && !p.Valid(raw[m[0]:m[1]], raw[start:end]) {
 				continue
 			}
+			if overlaps(masks, start, end) {
+				continue // already masked, like text read back from a snapshot
+			}
 			spans = append(spans, span{start, end, i})
 		}
 	}
 	return spans
+}
+
+// maskPattern matches a mask this scrubber writes: REDACTED, one of its
+// kinds, maybe a fingerprint. Longer kinds go first, so a kind that's the
+// start of another one can't cut a match short.
+func maskPattern(patterns []Pattern) *regexp.Regexp {
+	kinds := []string{fallbackKind}
+	for _, p := range patterns {
+		if !slices.Contains(kinds, p.Kind) {
+			kinds = append(kinds, p.Kind)
+		}
+	}
+	sort.Slice(kinds, func(a, b int) bool { return len(kinds[a]) > len(kinds[b]) })
+	return regexp.MustCompile(`REDACTED:(?:` + strings.Join(kinds, "|") + `)(?::[0-9a-f]{12})?`)
+}
+
+// ownMasks finds the masks already in raw. One counts only when it ends at
+// a word boundary, so text made to look like a mask, like REDACTED:ghp_ with
+// a real token after it, can't hide that token.
+func (s *Scrubber) ownMasks(raw string) [][]int {
+	var out [][]int
+	for _, m := range s.masks.FindAllStringIndex(raw, -1) {
+		if m[1] < len(raw) && isWordByte(raw[m[1]]) {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func isWordByte(b byte) bool {
+	return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+}
+
+func overlaps(spans [][]int, start, end int) bool {
+	for _, m := range spans {
+		if start < m[1] && m[0] < end {
+			return true
+		}
+	}
+	return false
 }
 
 func mask(f Found) string {

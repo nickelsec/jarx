@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/nickelsec/jarx/internal/agent"
 	"github.com/nickelsec/jarx/internal/agent/claude"
@@ -24,6 +25,7 @@ import (
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
+	"github.com/nickelsec/jarx/internal/snapshot"
 )
 
 const scanUsage = `usage: jarx scan [--home <dir>] [path...]
@@ -83,14 +85,40 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	p.Projects(res.Projects)
 	p.Unknown(res.Unknown)
 	p.Instructions(res.Instructions)
-	p.Findings(slices.Concat(
+	findings := slices.Concat(
 		res.Findings,
 		secrets.Analyze(scrub, res.Projects, res.Instructions),
 		poison.Analyze(scrub, res.Projects, res.Instructions),
 		permFindings,
 		unknown.Analyze(scrub, res.Unknown),
-	), rules)
+	)
+	p.Findings(findings, rules)
+	saveSnapshot(p, env, scrub, snapshot.Input{
+		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
+	})
 	return exitOK
+}
+
+// saveSnapshot compares this scan with the last snapshot, prints what
+// changed, and saves this one. A snapshot problem is said in the changes
+// section and never fails the scan.
+func saveSnapshot(p *report.Printer, env platform.Env, scrub *redact.Scrubber, in snapshot.Input) {
+	d, err := jarxdir.Open(env)
+	if err != nil {
+		p.Changes(time.Time{}, "couldn't open jarx's state dir", nil, err)
+		return
+	}
+	defer func() { _ = d.Close() }()
+	prev, note, err := snapshot.Latest(d, scrub)
+	if err != nil {
+		note = "couldn't list earlier snapshots"
+	}
+	cur := snapshot.Build(scrub, time.Now(), in)
+	var changes []snapshot.Change
+	if !prev.Taken.IsZero() {
+		changes = snapshot.Diff(scrub, prev, cur)
+	}
+	p.Changes(prev.Taken, note, changes, snapshot.Save(d, cur))
 }
 
 // emptyHome reports --home given with no value.

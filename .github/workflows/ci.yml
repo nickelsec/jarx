@@ -147,15 +147,26 @@ jobs:
             fi
           done
           # The demo has secrets, so the scan makes its fingerprint key, and
-          # nothing else anywhere in the checkout.
+          # it saves one snapshot. Nothing else, anywhere in the checkout.
           wrote=$(comm -13 <(echo "$before") <(files))
-          if [ "$wrote" != "!! testdata/demo/.jarx-state/fingerprint.key" ]; then
-            echo "the demo scan should write only its fingerprint key, but wrote:"
+          if [ "$(grep -c . <<<"$wrote")" != 2 ] \
+            || ! grep -qx '!! testdata/demo/.jarx-state/fingerprint.key' <<<"$wrote" \
+            || ! grep -qxE '!! testdata/demo/.jarx-state/snapshots/[0-9TZ.]+-[0-9a-f]+[.]json' <<<"$wrote"; then
+            echo "the demo scan should write its fingerprint key and one snapshot, but wrote:"
             echo "$wrote"
             exit 1
           fi
-          # A second scan reuses the key, so the fingerprints don't change.
-          # Only the state dir line may differ: the dir exists now.
+          grep -q '^changes: no earlier snapshot$' <<<"$out"
+          # The snapshot is masked and keeps texts only as hashes.
+          for planted in demo-not-a-real-token your-api-key-here "Deploy with"; do
+            if grep -rqF "$planted" testdata/demo/.jarx-state/snapshots; then
+              echo "the snapshot holds the demo's $planted"
+              exit 1
+            fi
+          done
+          # A second scan reuses the key, so the fingerprints don't change,
+          # and finds nothing changed. Only the state dir line and the
+          # changes line may differ.
           key=$(sha256sum testdata/demo/.jarx-state/fingerprint.key)
           again=$(offline "$RUNNER_TEMP/jarx" scan --home testdata/demo)
           if [ "$key" != "$(sha256sum testdata/demo/.jarx-state/fingerprint.key)" ]; then
@@ -166,7 +177,11 @@ jobs:
             echo "the second scan doesn't show the state dir as existing"
             exit 1
           fi
-          if ! diff <(grep -v '^  state dir ' <<<"$out") <(grep -v '^  state dir ' <<<"$again"); then
+          if ! grep -qE '^changes since [0-9-]+ [0-9:]+ UTC: none$' <<<"$again"; then
+            echo "the second scan should find no changes"
+            exit 1
+          fi
+          if ! diff <(grep -v '^  state dir \|^changes' <<<"$out") <(grep -v '^  state dir \|^changes' <<<"$again"); then
             echo "a second scan printed something different (diff above)"
             exit 1
           fi

@@ -109,3 +109,19 @@ func TestAPatternCanDecideWhatLooksLikeAPlaceholder(t *testing.T) {
 		t.Errorf("found = %+v, want the short real value not flagged and the example flagged", found)
 	}
 }
+
+func TestAMaskIsNeverMaskedAgain(t *testing.T) {
+	// Text read back from a snapshot goes through Scrub again. A pattern
+	// that would match inside an existing mask must leave it alone.
+	s, err := New([]Pattern{{Kind: "kv", Re: regexp.MustCompile(`key=(?P<secret>\S+)`)}}, staticKey("k"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	once, _ := s.Scrub("key=abc123 and key=REDACTED:kv")
+	twice, found := s.Scrub(once.String())
+
+	if twice.String() != once.String() || len(found) != 0 || !strings.Contains(once.String(), "key=REDACTED:kv") {
+		t.Errorf("once %q, twice %q (%d finds); want masks left as they are", once, twice, len(found))
+	}
+}

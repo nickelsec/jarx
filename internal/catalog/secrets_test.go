@@ -236,3 +236,60 @@ func TestALongProviderTokenWithNoRandomnessIsAPlaceholder(t *testing.T) {
 		t.Error("want a varied token treated as real")
 	}
 }
+
+func TestScrubbingTwiceChangesNothing(t *testing.T) {
+	// A snapshot read back from disk goes through the scrubber again, so a
+	// mask must never be masked a second time.
+	ps, err := Secrets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := redact.New(ps, staticKey("k"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{
+		"GITHUB_TOKEN=demo-not-a-real-token",
+		"Authorization: Bearer " + body(32),
+		"curl -H 'x-api-key: " + body(24) + "' https://example.invalid",
+		"https://deploy:" + body(16) + "@example.invalid/x",
+	} {
+		once, _ := s.Scrub(raw)
+		twice, found := s.Scrub(once.String())
+		if twice.String() != once.String() || len(found) != 0 {
+			t.Errorf("%q: once %q, twice %q (%d new finds), want no change", raw, once, twice, len(found))
+		}
+	}
+}
+
+// staticKey is a fingerprint key for tests.
+type staticKey []byte
+
+func (k staticKey) Key() ([]byte, error) { return k, nil }
+
+func TestALookAlikeMaskCantHideASecret(t *testing.T) {
+	// Only a real mask (a kind the scrubber knows, then maybe a 12-hex
+	// fingerprint, then a word boundary) is left alone, so text dressed up
+	// as a mask can't hide the token that follows it.
+	s := scrubber(t)
+	token := "ghp_" + body(36)
+	for _, raw := range []string{
+		"REDACTED:" + token,
+		"REDACTED:github_pat:" + token,
+		"REDACTED:github_pat:" + strings.Repeat("a", 12) + ":" + token,
+	} {
+		if got, _ := s.Scrub(raw); strings.Contains(got.String(), token) {
+			t.Errorf("Scrub(%q) = %q, want the token masked", raw, got)
+		}
+	}
+	// Each guard on its own: a real kind with no boundary after it, and a
+	// boundary after a word that isn't a kind.
+	for raw, secret := range map[string]string{
+		"https://deploy:REDACTED:github_pat" + body(16) + "@example.invalid/x": body(16),
+		"API_KEY=REDACTED:hunter2value":                                        "hunter2value",
+	} {
+		if got, _ := s.Scrub(raw); strings.Contains(got.String(), secret) {
+			t.Errorf("Scrub(%q) = %q, want %q masked", raw, got, secret)
+		}
+	}
+}

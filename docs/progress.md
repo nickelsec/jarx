@@ -152,7 +152,14 @@ stale ones marked.
     reference, lists them), hooks.json and plugin manifests, MCP config keys
     (phase 4), and Claude's deprecated keys beyond `ignorePatterns`, since
     the index still lists the rest (b49a8f4)
-- [ ] `snapshot`: masked snapshots, retention, diff in `scan` output
+- [x] `snapshot`: masked snapshots, retention, diff in `scan` output.
+  Items with an identity and a state, texts kept as hashes, the newest 20
+  kept, a note rather than an error for a broken or newer snapshot, and a
+  `changes` section in `scan`. Also scrubbing made idempotent, with a guard
+  against text dressed up as a mask, and the offline CI job allowing one
+  snapshot
+  - Not covered yet: servers, tools, prompts and resources (phase 4),
+    verdicts (phase 5), the snapshot picker (phase 7), and named baselines
 
 **Run it:** `jarx scan --home testdata/demo` shows instruction files, skills,
 hooks, permissions and the planted findings. Change a demo file and the diff
