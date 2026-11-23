@@ -216,7 +216,25 @@ shows it.
     with Codex plugins), `environment_id` and remote executors,
     `startup_readiness` and `required`, and unknown values for
     `approval_mode` (the open item in the PRD)
-- [ ] `fakemcp`: scripted stdio and HTTP server
+- [x] `fakemcp`: scripted stdio and HTTP server. It speaks both protocol
+  eras (2026-07-28 with `server/discover` and the version in `_meta`, and
+  legacy `initialize`), streamable HTTP with the version header check, and
+  the 2024-11-05 HTTP+SSE transport. Tools, prompts and resources go out
+  byte for byte, and it records every message, so `Forbidden()` proves a
+  client only listed. A script can make it hostile: hang on a method, delay,
+  page forever, write garbage or huge replies, answer with the wrong id
+  first, flood notifications, send the client sampling, roots and
+  elicitation requests, answer lists with an `InputRequiredResult`, print a
+  secret and escapes on stderr, exit early, and over HTTP answer a set
+  status, redirect to the metadata address, or want a bearer token. The doc
+  check for it found 2026-07-28 dropped `initialize`, so design.md and the
+  PRD now say the client sends `server/discover` first and falls back to
+  `initialize` for legacy servers
+  - Not covered yet: the demo's poisoned server (it needs a way to start
+    `fakemcp` under `--home`, which comes with probe), spawning child
+    processes that outlive a kill (that test belongs to `proc`),
+    `subscriptions/listen`, and the `-race` run here (no C compiler on this
+    machine, so CI's linux job covers it)
 - [ ] `proc`: job objects on Windows, process groups on unix, baseline env.
   First check whether Go 1.27 fixed golang/go#79927 (design.md says the fix
   "isn't in Go 1.25"). If it did, use the `SysProcAttr` fix instead of the

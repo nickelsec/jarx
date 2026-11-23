@@ -80,7 +80,8 @@ These go in the README and each one gets tests.
    probe stderr). It shows up only as `REDACTED:<type>` plus a fingerprint,
    and never reaches the terminal, dashboard, snapshots, logs or the LLM.
 5. **Never calls an MCP tool or reads an MCP resource.** It only sends
-   `initialize` and the list methods.
+   `server/discover` (or `initialize`, for a legacy server) and the list
+   methods.
 6. **Never writes agent config.**
 7. **Dashboard binds to 127.0.0.1 only**, with a token, Host check and Origin
    check.
@@ -284,8 +285,9 @@ A server is probed only if the agent would start it:
   `APPDATA` and the like). Nothing else from jarx's own env.
 - Claude expansion rules: `${VAR}` and `${VAR:-default}`; an unset var with no
   default stays as literal text; an empty string counts as set.
-- Send `initialize`, then `tools/list`, `prompts/list`, `resources/list`. Then
-  kill the whole process tree (on Windows, a job object, so `npx` children die
+- Send `server/discover` (or `initialize`, for a server older than the
+  2026-07-28 protocol), then `tools/list`, `prompts/list`, `resources/list`.
+  Then kill the whole process tree (on Windows, a job object, so `npx` children die
   too).
 - 15s timeout per server, at most 4 at a time.
 - A failure shows as **"failed to start"** or **"timed out"** (see
@@ -293,8 +295,8 @@ A server is probed only if the agent would start it:
 
 ### How a remote server is probed
 
-- `https://` servers with no creds get one anonymous `initialize` plus the
-  list calls. A `401` or `403` shows as **"requires auth"**.
+- `https://` servers with no creds get one anonymous `server/discover` (or
+  `initialize`) plus the list calls. A `401` or `403` shows as **"requires auth"**.
 - Servers with static creds configured (a token in `headers`,
   `http_headers`, `env_http_headers` or `bearer_token_env_var`) get them sent
   exactly the way the agent would send them. It's the same no-new-risk logic
@@ -930,7 +932,7 @@ This is the full list. Anything not here is a bug.
 
 | When | What | To where | Turned off by |
 |---|---|---|---|
-| `jarx scan` with probing (default) | MCP `initialize` and list calls to remote servers that would connect anyway, with their configured static creds if any | the server's configured `https://` URL | `--no-probe` |
+| `jarx scan` with probing (default) | MCP `server/discover` or `initialize` and list calls to remote servers that would connect anyway, with their configured static creds if any | the server's configured `https://` URL | `--no-probe` |
 | `jarx scan` with probing (default) | jarx starts stdio servers. **The servers themselves** may use the network (for example `npx` downloading a package), just like when the agent starts them | whatever the server does | `--no-probe` |
 | `jarx scan --llm` or dashboard button | LLM review requests, redacted | the base URL the user set up | don't pass `--llm` |
 | `jarx ui` | listens for the browser | `127.0.0.1` only, inbound | not running `jarx ui` |

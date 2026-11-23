@@ -102,18 +102,38 @@ never runs git at all, so the demo and the tests never start a binary from a
 fake PATH. Tests prove each real defense with throwaway repos whose config
 writes a marker file if it ever runs.
 
-### MCP client covers four protocol revisions
+### MCP client speaks both protocol eras
 
-Revision 2026-07-28 removed protocol sessions and the GET stream from
-Streamable HTTP. The client:
+Revision 2026-07-28 has no handshake at all. There's no `initialize`, no
+session and no GET stream. Every request names its protocol version in
+`_meta` (`io.modelcontextprotocol/protocolVersion`), and on HTTP also in a
+`Mcp-Protocol-Version` header that has to match. The spec calls that
+"modern" and everything up to 2025-11-25 "legacy". The client works with
+both:
 
-- offers every version it knows in `initialize` (2024-11-05 through
-  2026-07-28)
-- falls back to legacy SSE only when a POST gets `400`, `404` or `405`
-  without a modern JSON-RPC error body (that's the spec's own rule)
-- follows `nextCursor` on the list calls, up to 50 pages
+- **stdio:** send `server/discover` first, with 2026-07-28 in `_meta`. A
+  `DiscoverResult` means a modern server. A `-32022`
+  (`UnsupportedProtocolVersionError`) means modern but another version, so
+  the client picks one from its `supported` list. Any other error, or no
+  answer, means legacy, and the client falls back to `initialize`
+  (2025-11-25 down to 2024-11-05).
+- **streamable HTTP:** the same probe as a POST. A `400` without a modern
+  error body means legacy, so `initialize` next. A `400`, `404` or `405`
+  without a JSON-RPC body on that means the old HTTP+SSE transport.
+- **lists:** follows `nextCursor` up to 50 pages. A list call answered with
+  an `InputRequiredResult` (the server asking the client to run sampling or
+  elicitation for it) gives no items, and the client never answers it.
+- The client never answers anything the server sends it. The 2026-07-28
+  stdio binding forbids server requests on stdout, but a hostile server
+  sends them anyway, and `fakemcp` tests that.
 
-Source: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
+`fakemcp` speaks both eras and both HTTP transports, so the client is tested
+against each kind of server.
+
+Sources: https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning,
+https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio,
+https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http,
+https://modelcontextprotocol.io/specification/2024-11-05/basic/transports
 
 ### Claude managed settings and trust
 
@@ -537,7 +557,7 @@ a spot in the code that makes breaking it hard.
 |---|---|
 | Secrets never leak | Model text fields are `redact.Text`. Only the `redact` package can build one (unexported field). `report`, `ui`, `snapshot` and `llm` only take `redact.Text`, so there's no way to put a raw string on screen, on disk or on the wire. Anything that matches a secret pattern is always masked. Entropy only flags a match as a likely placeholder, it never decides whether to mask, because showing a real secret is far worse than hiding a fake one. A reflection test walks every type reachable from `model.Inventory` and fails on a raw string anywhere: fields (exported or not), named string types, pointers, slices, arrays, map keys and values, `[]byte`, `[]rune`, interfaces, funcs, chans, embedded and generic types, and structs from other packages that aren't allowlisted. The test has one fixture per hiding spot, so a gap in the walker fails too. `model.Path` keeps the raw path only for fsys reads, and prints and encodes as the masked path for every fmt verb and in JSON. |
 | Nothing raw reaches the terminal or a log | Only `report` writes output. `forbidigo` bans `fmt.Print*`, `fmt.Fprint*`, `os.Stdout`, `os.Stderr`, `print`, `println`, `log` and `log/slog` everywhere else (`cmd/jarx` may use `os.Stdout` and `os.Stderr` only to hand them to `report`). `report` takes values only as `redact.Text`, and its format string has an unexported type, so a string variable won't compile as the format. `report.Error` scrubs error text, since a parser error can quote the line it failed on. The limit: a package handed an `io.Writer` could still call `Write` on it, but only `cmd/jarx` can reach the real stdout and stderr, so that needs a new parameter that review would catch. |
-| Never calls a tool | The `mcp` package has constants only for `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
+| Never calls a tool | The `mcp` package has constants only for `server/discover`, `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
 | Only the listed network calls | `netguard` is the only package allowed to make a network connection. golangci `forbidigo` bans `http.Get`, `http.Client`, `http.Transport`, `http.DefaultClient`, `net.Dial*`, `net.Dialer`, `tls.Dial*`, `tls.Client`, DNS lookups (`net.Lookup*`, `net.Resolver`), `net/smtp` and `net/rpc` everywhere else. Inside netguard, every connection is checked in the dialer's `Control` hook, after DNS and right before connect, on the exact IP being connected, so DNS rebinding and reconnects can't get past it. A literal IP host is also checked before dialing, because Go rewrites `0.0.0.0`, `::` and an empty host into a dial to the local machine before `Control` sees it. The tests run with a fake DNS server and a test-only rule that refuses any non-loopback connection, so a broken guard fails its tests instead of reaching a real address. |
 | Only discover runs a process | `forbidigo` bans `exec.Command`, `exec.CommandContext`, `exec.LookPath` (it reads the real PATH), `os.StartProcess` and `syscall.Exec`/`ForkExec` outside `discover`, which only runs hardened git. `proc` joins it in phase 4. git is found through `platform.Env`'s PATH, never under `--home`. |
 | Never reads a credential value | `fsys` refuses content reads of any path `credmeta.Location` calls a credential, checked on the path and on where its symlinks lead, so following an `@import` or a symlinked rule can't open one. Stat still works for existence checks. The phase 5 metadata parsers get their input through an explicit `fsys` method, not by opening files themselves. |
@@ -613,8 +633,8 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
    doesn't recognize go to `model.Unknown`.
 3. **probe** asks the model which servers the agent would start. Up to 4 run
    at once. **proc** spawns stdio servers in a job or process group.
-   **netguard** handles remote servers. **mcp** sends `initialize` and the
-   list calls. Results go through redact and land on `model.Server` with a
+   **netguard** handles remote servers. **mcp** sends `server/discover` (or
+   `initialize` to a legacy server) and the list calls. Results go through redact and land on `model.Server` with a
    status.
 4. **history** loads its cursor and reads only new bytes. It records
    permission modes, cwds and secret fingerprints. Codex sqlite is opened
