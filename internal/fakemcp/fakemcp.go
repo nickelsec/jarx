@@ -43,6 +43,7 @@ const (
 	codeMethodNotFound     = -32601
 	codeHeaderMismatch     = -32020
 	codeUnsupportedVersion = -32022
+	codeInvalidParams      = -32602
 
 	defaultLegacyVersion = "2025-11-25"
 	canaryText           = "fakemcp: a client called this, and a list-only client never should"
@@ -52,6 +53,7 @@ const (
 	keyText              = "text"
 	resultComplete       = "complete"
 	samplingTokens       = 100
+	methodInitialize     = "initialize"
 )
 
 // legacyVersions are the handshake revisions it accepts in initialize.
@@ -64,7 +66,7 @@ var legacyVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11
 //
 //nolint:gochecknoglobals // fixed list, read only
 var allowed = []string{
-	"server/discover", "initialize", "notifications/initialized", "notifications/cancelled",
+	"server/discover", methodInitialize, "notifications/initialized", "notifications/cancelled",
 	"tools/list", "prompts/list", "resources/list",
 }
 
@@ -77,6 +79,9 @@ type Script struct {
 	// plant any shape or text.
 	Tools, Prompts, Resources []json.RawMessage
 	PageSize                  int // items per page; 0 sends everything at once
+	// Capabilities is what it says it has, from tools, prompts and
+	// resources. Nil means all three.
+	Capabilities []string
 	// Log gets one line per message received: the method, or
 	// "(response <id>)" for a response.
 	Log io.Writer
@@ -210,15 +215,13 @@ func (s *Server) handle(raw []byte) outcome {
 
 // answer is the result or error for one request, with its HTTP status.
 func (s *Server) answer(method string, p params) (any, *rpcError, int) {
-	version, _ := p.Meta[metaVersion].(string)
-	if version != "" && s.sc.Era != EraLegacy && version != modernVersion {
-		return nil, &rpcError{Code: codeUnsupportedVersion, Message: "Unsupported protocol version",
-			Data: map[string]any{"supported": s.supported(), "requested": version}}, http.StatusBadRequest
+	if rerr := s.versionError(method, p); rerr != nil {
+		return nil, rerr, http.StatusBadRequest
 	}
 	switch method {
 	case "server/discover":
 		return s.discover()
-	case "initialize":
+	case methodInitialize:
 		return s.initialize(p.ProtocolVersion)
 	case "tools/list":
 		return s.list("tools", s.sc.Tools, p.Cursor), nil, http.StatusOK
@@ -240,7 +243,7 @@ func (s *Server) discover() (any, *rpcError, int) {
 		return nil, notFound(), http.StatusNotFound
 	}
 	return s.pad(map[string]any{
-		keyResultType: resultComplete, "supportedVersions": s.supported(), "capabilities": capabilities(),
+		keyResultType: resultComplete, "supportedVersions": s.supported(), "capabilities": s.capabilities(),
 		"serverInfo": map[string]any{"name": s.name(), "version": "0.0.0"}, "instructions": s.sc.Instructions,
 		"ttlMs": 0, "cacheScope": "private",
 	}), nil, http.StatusOK
@@ -256,7 +259,7 @@ func (s *Server) initialize(asked string) (any, *rpcError, int) {
 		v = defaultLegacyVersion
 	}
 	return s.pad(map[string]any{
-		"protocolVersion": v, "capabilities": capabilities(),
+		"protocolVersion": v, "capabilities": s.capabilities(),
 		"serverInfo": map[string]any{"name": s.name(), "version": "0.0.0"}, "instructions": s.sc.Instructions,
 	}), nil, http.StatusOK
 }
@@ -279,8 +282,16 @@ func (s *Server) supported() []string {
 	return append([]string{modernVersion}, legacyVersions...)
 }
 
-func capabilities() map[string]any {
-	return map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}, "resources": map[string]any{}}
+func (s *Server) capabilities() map[string]any {
+	has := s.sc.Capabilities
+	if has == nil {
+		has = []string{"tools", "prompts", "resources"}
+	}
+	out := map[string]any{}
+	for _, c := range has {
+		out[c] = map[string]any{}
+	}
+	return out
 }
 
 // list is one page of items, with the cursor to the next one.
@@ -384,4 +395,18 @@ func (s *Server) wait(ctx context.Context) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+// versionError checks a request's _meta version: a modern version this
+// server doesn't speak, or none at all on a modern-only server.
+func (s *Server) versionError(method string, p params) *rpcError {
+	version, _ := p.Meta[metaVersion].(string)
+	switch {
+	case version != "" && s.sc.Era != EraLegacy && version != modernVersion:
+		return &rpcError{Code: codeUnsupportedVersion, Message: "Unsupported protocol version",
+			Data: map[string]any{"supported": s.supported(), "requested": version}}
+	case version == "" && s.sc.Era == EraModern && method != methodInitialize:
+		return &rpcError{Code: codeInvalidParams, Message: "a modern request names its protocol version in _meta"}
+	}
+	return nil
 }

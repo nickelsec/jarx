@@ -146,10 +146,25 @@ both:
   elicitation for it) gives no items, and the client never answers it.
 - The client never answers anything the server sends it. The 2026-07-28
   stdio binding forbids server requests on stdout, but a hostile server
-  sends them anyway, and `fakemcp` tests that.
+  sends them anyway, and `fakemcp` tests that. Requests, notifications,
+  replies to ids it never sent and lines that aren't JSON are skipped and
+  counted, so probe can say how noisy a server was.
+- **HTTP headers:** modern requests carry `Mcp-Protocol-Version` and the
+  required `Mcp-Method`. A legacy server gets the version header from
+  2025-06-18 on, and its `Mcp-Session-Id` back. The configured headers
+  (like a token) go on every request, the SSE GET included.
+- **The old SSE endpoint** has to be on the same scheme and host as the
+  configured URL. A server that names another origin could otherwise get
+  the configured token sent to it, so the client refuses.
+- **Limits:** one message is at most 10 MiB, and at most 32 MiB of list
+  items is kept per server. Each list checks the server's capabilities
+  first. A list method the server says doesn't exist is a note, not a
+  failure.
 
 `fakemcp` speaks both eras and both HTTP transports, so the client is tested
-against each kind of server.
+against each kind of server. A test also reads the `mcp` package's own
+source and fails on any MCP method string but discovery and the lists, and
+the request builder refuses every other method at run time.
 
 Sources: https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning,
 https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio,

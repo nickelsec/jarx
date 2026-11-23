@@ -506,3 +506,23 @@ func TestStdioStopsWhenTheContextEndsWithTheInputStillOpen(t *testing.T) {
 		t.Fatal("ServeStdio kept running after its context ended")
 	}
 }
+
+func TestAModernOnlyServerWantsTheVersionInMeta(t *testing.T) {
+	ms, _, _ := talk(t, Script{Era: EraModern, Tools: tools(1)}, req(1, "tools/list", "", nil), req(2, "tools/list", modern, nil))
+
+	if c := reply(t, ms, 1).errCode(); c != -32602 {
+		t.Errorf("no _meta version = error %v, want -32602", c)
+	}
+	if _, ok := reply(t, ms, 2).result()["tools"]; !ok {
+		t.Error("with the version it should list")
+	}
+}
+
+func TestCapabilitiesCanBeCutDown(t *testing.T) {
+	ms, _, _ := talk(t, Script{Capabilities: []string{"tools"}}, req(1, "server/discover", modern, nil))
+
+	caps, _ := reply(t, ms, 1).result()["capabilities"].(map[string]any)
+	if _, ok := caps["tools"]; !ok || len(caps) != 1 {
+		t.Errorf("capabilities = %v, want only tools", caps)
+	}
+}

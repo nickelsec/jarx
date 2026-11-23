@@ -251,11 +251,30 @@ shows it.
     on unix (in Limits), the Linux `Pdeathsig` backstop if jarx itself
     dies mid-probe, and the exec-bit and process-group tests, which run
     only on the linux and mac CI jobs since this machine is Windows
-- [ ] `mcp`: list-only client, stdio, streamable HTTP, legacy SSE, paging,
-  `go/ast` method test
+- [x] `mcp`: list-only client, stdio, streamable HTTP, legacy SSE, paging,
+  `go/ast` method test. `server/discover` first and `initialize` when the
+  server is legacy (on stdio also when discover gets no answer), the HTTP
+  fallbacks from modern to legacy streamable HTTP to HTTP+SSE on a 4xx
+  without a JSON-RPC body, and refusals for a server with no version in
+  common and an SSE endpoint on another origin. Paging stops at 50 pages,
+  a repeated cursor or 32 MiB kept, and an `InputRequiredResult` gives no
+  items. Server requests, notifications, wrong ids and garbage are skipped
+  and counted, never answered. The request builder refuses any other
+  method, and a `go/ast` test fails on any other method string in the
+  package. Also `fakemcp` grew a strict modern era (no version in `_meta`
+  is an error) and a `Capabilities` list, so the client's `_meta` and
+  capability checks have something to fail against
+  - Not covered yet: the legacy `Mcp-Session-Id` and the legacy version
+    header aren't checked by `fakemcp`, the 32 MiB cap has no test, and
+    `ttlMs` caching and `subscriptions/listen` aren't used (jarx lists
+    once)
 - [ ] `probe`: which servers, env expansion, concurrency, status,
   `--no-probe`
-- [ ] MCP supply chain and config rules
+- [ ] MCP supply chain and config rules. Includes the rules item 1, 2 and 4
+  set up: a repo server that takes your server's name, one name in two
+  scopes with different endpoints, a repo redefining a Codex server whose
+  lower layer sends a token, and `cmd.exe` metacharacters in the args of a
+  `.bat` or `.cmd` server
 - [ ] `analyze/capability` and `analyze/drift`
 
 **Run it:** `jarx scan --home testdata/demo` probes the fake poisoned server

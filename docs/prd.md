@@ -629,6 +629,12 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
   or local servers, so your permission rules for that name apply to the
   repository's server once it's approved.
 - The same server name in two scopes with different endpoints.
+- A server whose command is a `.bat` or `.cmd` file (or a bare name like
+  `npx` that's one on Windows) with `cmd.exe` metacharacters in its args.
+  `cmd.exe` reads them as syntax when the agent starts the server, so the
+  config can run a command it never names. High when a repository's config
+  does it, medium in your own. This is a finding of its own, apart from the
+  "failed to start" status jarx gives the server.
 
 ### Permissions and auto-approval
 
