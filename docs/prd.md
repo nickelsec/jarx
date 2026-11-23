@@ -394,6 +394,11 @@ whether an ssh key has a passphrase. Where a non-secret file exists, jarx
 reads that one instead (`~/.aws/config` over `credentials`, gh `hosts.yml` for
 host and user only).
 
+Paths come from each CLI's own docs, including the env vars that move them
+(`AWS_SHARED_CREDENTIALS_FILE`, `GH_CONFIG_DIR`, `CLOUDSDK_CONFIG`,
+`KUBECONFIG` and the rest), on Windows, macOS and Linux. design.md has the
+full table and what jarx keeps from each kind.
+
 When jarx has to open a secret-bearing file for metadata, it streams it, keeps
 only the allowed fields (section names, key names, cipher or kdf names) and
 drops everything else right away. A test feeds a fake secret through every
@@ -1147,6 +1152,9 @@ clean fixtures, written by us as the failing test before the rule exists.
 ## Limits
 
 Things jarx can't see, stated plainly in the README and the dashboard:
+
+- **Credentials the docs don't place.** GnuPG's Windows default dir and ssh
+  keys that `~/.ssh/config` points at outside `~/.ssh` aren't found.
 
 - **claude.ai cloud connectors.** They're set up in the claude.ai account,
   not on disk, so jarx can't list them. It notes that they may exist.

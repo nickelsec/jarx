@@ -612,6 +612,61 @@ server can't use it at all.
 So a demo scan probes over stdio pipes only, and the offline CI job keeps
 probing on, which proves the probe makes no network syscall.
 
+### Where credentials live and what jarx reads
+
+Each CLI's own docs give its paths, and most let an env var move them.
+`credmeta.Location`, the read guard and the metadata parsers all use one
+table, so a moved credential is still refused by `fsys` and still found.
+The phase 3 table had two Windows paths wrong (gh and gcloud) and no env
+vars; this replaces it.
+
+| Kind | Where (first match wins unless it says merged) | Source |
+|---|---|---|
+| aws | `AWS_CONFIG_FILE`, else `~/.aws/config`; `AWS_SHARED_CREDENTIALS_FILE`, else `~/.aws/credentials`; `~/.aws/sso/cache` and `~/.aws/cli/cache` | AWS SDKs and tools reference, AWS CLI user guide |
+| gh | `GH_CONFIG_DIR`, else `$XDG_CONFIG_HOME/gh`, else `%AppData%\GitHub CLI` on Windows, else `~/.config/gh`; the file is `hosts.yml` | `gh help environment` |
+| gcloud | `CLOUDSDK_CONFIG`, else `%APPDATA%\gcloud` on Windows, else `~/.config/gcloud` | gcloud "Managing configurations" |
+| azure | `AZURE_CONFIG_DIR`, else `~/.azure` | Azure CLI configuration |
+| docker | `DOCKER_CONFIG`, else `~/.docker`; the file is `config.json` | docker CLI reference |
+| kube | `KUBECONFIG` as a list (`:` on unix, `;` on Windows), merged; else `~/.kube/config` | kubernetes.io kubeconfig |
+| ssh | `~/.ssh` (`%USERPROFILE%\.ssh` on Windows) | OpenSSH, Microsoft's OpenSSH for Windows |
+| git | `~/.git-credentials`, then `$XDG_CONFIG_HOME/git/credentials` (else `~/.config/git/credentials`), both read | git-credential-store |
+| netrc | `NETRC` (curl 8.16 and later), else `~/.netrc`; on Windows `.netrc`, then `_netrc` | curl man page |
+| npm | `NPM_CONFIG_USERCONFIG`, else `~/.npmrc`; a project's own `.npmrc` too | npm config docs |
+| pypi | `~/.pypirc` | PyPA `.pypirc` spec |
+| gnupg | `GNUPGHOME`, else `~/.gnupg` | GnuPG manual |
+| login files | `CLAUDE_CONFIG_DIR` or `~/.claude`, `.credentials.json`; `CODEX_HOME` or `~/.codex`, `auth.json` | agents' docs |
+| env files and keys | `.env`, `.env.*`, private key names and extensions in a project | jarx's own list |
+
+Two things the docs leave out, so jarx leaves them out too: GnuPG's
+Windows default (only forum posts name `%APPDATA%\gnupg`), and ssh keys
+that `~/.ssh/config` points at from other places (a later item, since it
+means reading the ssh config's `IdentityFile` lines).
+
+What jarx keeps from each, and nothing else. A parser streams the file
+through `fsys` (capped like any read), keeps only these fields and drops the
+rest as it goes:
+
+| Kind | Kept |
+|---|---|
+| aws | profile names, and which kind of credential each has from its key names (static keys, sso, `credential_process`, a role) |
+| gh | host names and each host's `user`, and whether a token sits in the file or the keyring |
+| docker | registry hosts in `auths`, whether an entry holds an inline `auth`, and `credsStore` and `credHelpers` helper names |
+| kube | context, cluster and user names, `current-context`, and which kind of credential each user has from its key names (token, client key, exec, auth provider) |
+| ssh | each private key's type and whether it has a passphrase: an OpenSSH key's cipher name from the first bytes of its body (`none` means no passphrase, per `PROTOCOL.key`), a PEM key's `Proc-Type` header, PKCS#8's `ENCRYPTED PRIVATE KEY` label, PuTTY's `Encryption` line |
+| git | scheme and host of each stored URL, never the user or password |
+| netrc | machine names and `default`, never `login`, `password` or `account` |
+| npm | registry hosts that have an auth key, and the key's name (`_authToken`, `_auth`, `_password`) |
+| pypi | index server names and their repository hosts |
+| gcloud | configuration names, the active one, and which credential files exist |
+| azure, gnupg, login files | existence only |
+| env files | key names |
+
+gh's `hosts.yml` and kubeconfig are YAML, and jarx has no YAML parser. A
+small line reader that only knows those two shapes keeps the keys it needs
+and drops every value it doesn't, so a value it misreads is dropped, not
+kept. A test feeds a canary secret through every parser and checks it never
+shows up in what the parser returns, the scan output or the snapshot.
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
