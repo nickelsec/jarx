@@ -2,8 +2,10 @@
 //
 // Project records come from the "projects" map in ~/.claude.json (moved by
 // CLAUDE_CONFIG_DIR, like ~/.claude/). The docs show that map keyed by
-// project path, at code.claude.com/docs/en/claude-directory, but not the
-// fields inside an entry, so only the keys are read here.
+// project path, at code.claude.com/docs/en/claude-directory. The one field
+// read inside an entry is hasTrustDialogAccepted, which
+// code.claude.com/docs/en/permissions#what-runs-before-you-trust-a-folder
+// documents as the folder's trust. Every other value is dropped.
 package claude
 
 import (
@@ -33,6 +35,12 @@ type Adapter struct{}
 // Agent returns claude.
 func (Adapter) Agent() model.Agent { return model.AgentClaude }
 
+// Name is how the scan names the agent.
+func (Adapter) Name() string { return "Claude Code" }
+
+// ConfigDir is ~/.claude, or CLAUDE_CONFIG_DIR.
+func (Adapter) ConfigDir(env platform.Env) string { return claudeDir(env) }
+
 // Projects returns the paths in the projects map of ~/.claude.json.
 func (Adapter) Projects(c agent.Context) ([]model.Project, []finding.Finding) {
 	file := configFile(c.Env)
@@ -56,7 +64,7 @@ func (Adapter) Projects(c agent.Context) ([]model.Project, []finding.Finding) {
 	}
 	defer func() { _ = r.Close() }()
 
-	keys, err := projectKeys(r, maxConfigSize)
+	recs, err := projectRecords(r, maxConfigSize)
 	var perr parseError
 	switch {
 	case errors.Is(err, errTooLarge):
@@ -67,11 +75,12 @@ func (Adapter) Projects(c agent.Context) ([]model.Project, []finding.Finding) {
 		return nil, unreadable("couldn't read the file")
 	}
 
-	out := make([]model.Project, 0, len(keys))
-	for _, k := range keys {
+	out := make([]model.Project, 0, len(recs))
+	for _, rec := range recs {
 		out = append(out, model.Project{
-			Path:    model.NewPath(c.Scrub, c.Env.MapPath(k)),
+			Path:    model.NewPath(c.Scrub, c.Env.MapPath(rec.path)),
 			Origins: []model.Origin{origin},
+			Trust:   []model.Trust{{Level: rec.trust, Origin: origin}},
 		})
 	}
 	return out, nil
@@ -84,36 +93,46 @@ func configFile(env platform.Env) string {
 	return filepath.Join(env.Home, ".claude.json")
 }
 
-// projectKeys streams JSON from r and returns the keys of the top-level
-// "projects" object. Every value is read past and dropped, so nothing else in
-// the file (like an MCP server's env token) is kept. It reads at most limit
-// bytes.
-func projectKeys(r io.Reader, limit int64) ([]string, error) {
+// record is one entry of the projects map: its path and trust.
+type record struct {
+	path  string
+	trust model.TrustLevel
+}
+
+// trustKey is the one field read inside a project entry.
+const trustKey = "hasTrustDialogAccepted"
+
+// projectRecords streams JSON from r and returns the entries of the top-level
+// "projects" object. Inside an entry only hasTrustDialogAccepted is kept, and
+// anything but a bool there is unknown trust. Every other value is read past
+// and dropped, so nothing else in the file (like an MCP server's env token)
+// is kept. It reads at most limit bytes.
+func projectRecords(r io.Reader, limit int64) ([]record, error) {
 	j := jsonReader{dec: json.NewDecoder(&capReader{r: r, left: limit})}
 	if err := j.expect('{', "the file isn't a JSON object"); err != nil {
 		return nil, err
 	}
-	var keys []string
+	var recs []record
 	for j.dec.More() {
 		key, err := j.key()
 		if err != nil {
 			return nil, err
 		}
-		var got []string
+		var got []record
 		if key == "projects" {
-			got, err = j.objectKeys("projects isn't a JSON object")
+			got, err = j.projects()
 		} else {
 			err = j.skip()
 		}
 		if err != nil {
 			return nil, err
 		}
-		keys = append(keys, got...)
+		recs = append(recs, got...)
 	}
 	if err := j.expect('}', "the file isn't closed"); err != nil {
 		return nil, err
 	}
-	return keys, nil
+	return recs, nil
 }
 
 // parseError says where parsing failed, never what was there.
@@ -166,31 +185,95 @@ func (j jsonReader) key() (string, error) {
 	return key, nil
 }
 
-// objectKeys reads an object and returns its keys, dropping every value.
-func (j jsonReader) objectKeys(notObject string) ([]string, error) {
-	if err := j.expect('{', notObject); err != nil {
+// projects reads the projects object.
+func (j jsonReader) projects() ([]record, error) {
+	if err := j.expect('{', "projects isn't a JSON object"); err != nil {
 		return nil, err
 	}
-	var keys []string
+	var recs []record
 	for j.dec.More() {
-		k, err := j.key()
+		path, err := j.key()
 		if err != nil {
 			return nil, err
 		}
-		keys = append(keys, k)
-		if err := j.skip(); err != nil {
+		trust, err := j.entryTrust()
+		if err != nil {
 			return nil, err
 		}
+		recs = append(recs, record{path: path, trust: trust})
 	}
 	if err := j.expect('}', "object isn't closed"); err != nil {
 		return nil, err
 	}
-	return keys, nil
+	return recs, nil
+}
+
+// entryTrust reads one project entry and returns its trust. A value that
+// isn't an object is skipped and its trust is unknown.
+func (j jsonReader) entryTrust() (model.TrustLevel, error) {
+	tok, err := j.dec.Token()
+	if err != nil {
+		return "", j.readErr(err)
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return model.TrustUnknown, j.dropRest(tok)
+	}
+	trust := model.TrustUnknown
+	for j.dec.More() {
+		k, err := j.key()
+		if err != nil {
+			return "", err
+		}
+		if k != trustKey {
+			err = j.skip()
+		} else {
+			trust, err = j.trustValue()
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	if err := j.expect('}', "object isn't closed"); err != nil {
+		return "", err
+	}
+	return trust, nil
+}
+
+// dropRest drops the rest of a value whose first token was tok: the rest of
+// a list, or nothing for a plain value.
+func (j jsonReader) dropRest(tok json.Token) error {
+	if d, ok := tok.(json.Delim); ok && d == '[' {
+		return j.skipRest(1)
+	}
+	return nil
+}
+
+// trustValue reads the hasTrustDialogAccepted value. Only a bool counts;
+// anything else is unknown trust and is skipped.
+func (j jsonReader) trustValue() (model.TrustLevel, error) {
+	tok, err := j.dec.Token()
+	if err != nil {
+		return "", j.readErr(err)
+	}
+	switch v := tok.(type) {
+	case bool:
+		if v {
+			return model.TrustTrusted, nil
+		}
+		return model.TrustUntrusted, nil
+	case json.Delim:
+		return model.TrustUnknown, j.skipRest(1)
+	default:
+		return model.TrustUnknown, nil
+	}
 }
 
 // skip reads one value and drops it.
-func (j jsonReader) skip() error {
-	depth := 0
+func (j jsonReader) skip() error { return j.skipRest(0) }
+
+// skipRest drops tokens until depth open objects and arrays are closed. With
+// depth 0 it drops exactly one value.
+func (j jsonReader) skipRest(depth int) error {
 	for {
 		tok, err := j.dec.Token()
 		if err != nil {

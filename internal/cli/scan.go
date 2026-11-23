@@ -3,20 +3,30 @@ package cli
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"time"
 
 	"github.com/nickelsec/jarx/internal/agent"
 	"github.com/nickelsec/jarx/internal/agent/claude"
 	"github.com/nickelsec/jarx/internal/agent/codex"
+	"github.com/nickelsec/jarx/internal/analyze/perms"
+	"github.com/nickelsec/jarx/internal/analyze/poison"
+	"github.com/nickelsec/jarx/internal/analyze/secrets"
+	"github.com/nickelsec/jarx/internal/analyze/unknown"
+	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/discover"
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/jarxdir"
+	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
+	"github.com/nickelsec/jarx/internal/snapshot"
 )
 
 const scanUsage = `usage: jarx scan [--home <dir>] [path...]
@@ -36,6 +46,7 @@ func scanHelp(s *report.Stream) { s.Printf(scanUsage) }
 func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	fs := newFlagSet("scan")
 	home := fs.String("home", "", "")
+	all := fs.Bool("all", false, "")
 	if code, ok := parse(p, plain, fs, args, scanHelp); !ok {
 		return code
 	}
@@ -54,22 +65,99 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		p.Error(err)
 		return exitError
 	}
-	rules, err := finding.NewRegistry(finding.Rules()...)
+	rules, err := scanRules()
 	if err != nil {
 		p.Error(err)
 		return exitError
 	}
 
-	printEnv(p.Out, scrub, env, files)
+	adapters := []agent.Adapter{claude.Adapter{}, codex.Adapter{}}
 	res := discover.Run(
 		agent.Context{Env: env, Files: files, Scrub: scrub},
-		[]agent.Adapter{claude.Adapter{}, codex.Adapter{}, discover.Saved(configPath(env), cfg.Repos)},
+		append(slices.Clone(adapters), discover.Saved(configPath(env), cfg.Repos)),
 		fs.Args(),
 	)
-	p.Out.Printf("\n")
-	p.Projects(res.Projects)
-	p.Findings(res.Findings, rules)
+	findings, err := analyze(scrub, env, res)
+	if err != nil {
+		p.Error(err)
+		return exitError
+	}
+	if *all {
+		// What platform resolved, in full, and before the scan saves its
+		// snapshot, so the state dir shows as it was.
+		p.Wrapped(model.Path{}, func() { printEnv(p.Out, scrub, env, files) })
+		p.Out.Printf("\n")
+	}
+	view := report.ScanView{
+		Fake: env.Fake(), Home: model.NewPath(scrub, env.Home), GOOS: env.GOOS,
+		Agents:   agentInfo(env, files, scrub, adapters),
+		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown,
+		Findings: findings, Rules: rules, All: *all,
+	}
+	view.Since, view.Note, view.Changes, view.SaveErr = saveSnapshot(env, scrub, snapshot.Input{
+		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
+	})
+	p.Scan(view)
 	return exitOK
+}
+
+// analyze settles what's in effect and runs every analyzer.
+func analyze(scrub *redact.Scrubber, env platform.Env, res discover.Result) ([]finding.Finding, error) {
+	perms.Settle(scrub, res.Projects)
+	permFindings, err := perms.Analyze(scrub, env, res.Projects)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // perms names what failed
+	}
+	return slices.Concat(
+		res.Findings,
+		secrets.Analyze(scrub, res.Projects, res.Instructions),
+		poison.Analyze(scrub, res.Projects, res.Instructions),
+		permFindings,
+		unknown.Analyze(scrub, res.Unknown),
+	), nil
+}
+
+// agentInfo names each agent and whether its config dir is there.
+func agentInfo(env platform.Env, files *fsys.FS, scrub *redact.Scrubber, adapters []agent.Adapter) []report.AgentInfo {
+	var out []report.AgentInfo
+	for _, a := range adapters {
+		d, ok := a.(agent.Describer)
+		if !ok {
+			continue
+		}
+		dir := d.ConfigDir(env)
+		info, err := files.Stat(dir)
+		out = append(out, report.AgentInfo{
+			Agent: a.Agent(), Name: d.Name(), ConfigDir: model.NewPath(scrub, dir), Found: err == nil && info.IsDir(),
+		})
+	}
+	return out
+}
+
+// saveSnapshot compares this scan with the last snapshot and saves this
+// one. It returns when the last one was taken (zero for none), a note when
+// there's nothing to compare against for another reason than a first scan,
+// what changed, and any error saving. A snapshot problem never fails the
+// scan.
+func saveSnapshot(env platform.Env, scrub *redact.Scrubber, in snapshot.Input) (time.Time, string, []snapshot.Change, error) {
+	d, err := jarxdir.Open(env)
+	if err != nil {
+		return time.Time{}, "couldn't open jarx's state dir", nil, fmt.Errorf("state dir: %w", err)
+	}
+	defer func() { _ = d.Close() }()
+	prev, note, err := snapshot.Latest(d, scrub)
+	if err != nil {
+		note = "couldn't list earlier snapshots"
+	}
+	cur := snapshot.Build(scrub, time.Now(), in)
+	var changes []snapshot.Change
+	if !prev.Taken.IsZero() {
+		changes = snapshot.Diff(scrub, prev, cur)
+	}
+	if err := snapshot.Save(d, cur); err != nil {
+		return prev.Taken, note, changes, fmt.Errorf("write: %w", err)
+	}
+	return prev.Taken, note, changes, nil
 }
 
 // emptyHome reports --home given with no value.
@@ -97,7 +185,12 @@ func openEnv(home string) (platform.Env, *fsys.FS, *redact.Scrubber, error) {
 	if err != nil {
 		return platform.Env{}, nil, nil, err //nolint:wrapcheck // fsys errors already say what failed
 	}
-	scrub, err := redact.New(nil, redact.KeyFromState(env))
+	patterns, err := catalog.Secrets()
+	if err != nil {
+		_ = files.Close()
+		return platform.Env{}, nil, nil, err //nolint:wrapcheck // catalog errors already say what failed
+	}
+	scrub, err := redact.New(patterns, redact.KeyFromState(env))
 	if err != nil {
 		_ = files.Close()
 		return platform.Env{}, nil, nil, err //nolint:wrapcheck // redact errors already say what failed
@@ -180,4 +273,15 @@ func plural(n int, one, many string) string {
 		return "1 " + one
 	}
 	return strconv.Itoa(n) + " " + many
+}
+
+// scanRules is every rule a scan can report: finding's own and each
+// adapter's.
+func scanRules() (*finding.Registry, error) {
+	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules())
+	r, err := finding.NewRegistry(all...)
+	if err != nil {
+		return nil, fmt.Errorf("building the rule registry: %w", err)
+	}
+	return r, nil
 }

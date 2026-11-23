@@ -32,6 +32,10 @@ credentials. Single Go binary with a CLI and a local dashboard.
   can't hold its own hash, so the next commit adds it next to the tick.
 - Before starting phase 7 (the dashboard), stop and ask me about the UI. I
   want to give input on how it looks before any `ui` code gets written.
+- All terminal output, in every phase, follows the Terminal output section
+  in docs/design.md and builds on it. New phases add to the same blocks and
+  the same tree format instead of inventing new ones. If something fits no
+  block, ask me first, then add it to that section.
 - Keep the folder layout from the package table in docs/design.md, so things
   are easy to find. Only add a new folder when nothing existing fits. When you
   do, say why in chat and in the PR, and add it to that table.

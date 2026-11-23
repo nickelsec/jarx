@@ -140,22 +140,67 @@ func TestBrokenClaudeJSONIsAFindingWithoutContent(t *testing.T) {
 	}
 }
 
-func TestProjectKeysStopsAtTheCap(t *testing.T) {
+func TestProjectRecordsStopsAtTheCap(t *testing.T) {
 	body := `{"projects": {"/a": {"pad": "` + strings.Repeat("x", 200) + `"}}}`
 
-	_, err := projectKeys(strings.NewReader(body), 100)
+	_, err := projectRecords(strings.NewReader(body), 100)
 
 	if !errors.Is(err, errTooLarge) {
-		t.Errorf("projectKeys() error = %v, want errTooLarge", err)
+		t.Errorf("projectRecords() error = %v, want errTooLarge", err)
 	}
 }
 
-func TestProjectKeysNeverKeepsValues(t *testing.T) {
+func TestProjectRecordsNeverKeepsValues(t *testing.T) {
 	body := `{"projects": {"/a": {"env": {"T": "` + canary + `"}}}, "x": "` + canary + `"}`
 
-	keys, err := projectKeys(strings.NewReader(body), 1<<20)
+	recs, err := projectRecords(strings.NewReader(body), 1<<20)
 
-	if err != nil || !slices.Equal(keys, []string{"/a"}) {
-		t.Errorf("projectKeys() = %q, %v; want just the key", keys, err)
+	if err != nil || !slices.Equal(recs, []record{{path: "/a", trust: model.TrustUnknown}}) {
+		t.Errorf("projectRecords() = %+v, %v; want just the key", recs, err)
+	}
+}
+
+func trustOf(t *testing.T, ps []model.Project, env platform.Env, raw string) model.TrustLevel {
+	t.Helper()
+	for _, p := range ps {
+		if p.Path.Raw() == env.MapPath(raw) {
+			if len(p.Trust) != 1 {
+				t.Fatalf("%s trust = %+v, want exactly one", raw, p.Trust)
+			}
+			return p.Trust[0].Level
+		}
+	}
+	t.Fatalf("project %s not found", raw)
+	return ""
+}
+
+func TestTrustComesFromHasTrustDialogAccepted(t *testing.T) {
+	c := fakeHome(t, map[string]string{
+		".claude.json": `{"projects": {
+			"/yes": {"hasTrustDialogAccepted": true, "env": {"T": "` + canary + `"}},
+			"/no": {"hasTrustDialogAccepted": false},
+			"/missing": {"other": 1},
+			"/odd": {"hasTrustDialogAccepted": "yes"},
+			"/nested": {"x": {"hasTrustDialogAccepted": true}},
+			"/notobj": 7
+		}}`,
+	})
+
+	ps, fs := Adapter{}.Projects(c)
+
+	for raw, want := range map[string]model.TrustLevel{
+		"/yes":     model.TrustTrusted,
+		"/no":      model.TrustUntrusted,
+		"/missing": model.TrustUnknown,
+		"/odd":     model.TrustUnknown,
+		"/nested":  model.TrustUnknown,
+		"/notobj":  model.TrustUnknown,
+	} {
+		if got := trustOf(t, ps, c.Env, raw); got != want {
+			t.Errorf("%s trust = %q, want %q", raw, got, want)
+		}
+	}
+	if len(fs) != 0 {
+		t.Errorf("findings = %+v, want none", fs)
 	}
 }

@@ -10,9 +10,12 @@ package report
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/model"
@@ -32,15 +35,64 @@ type Stream struct {
 func (s *Stream) Printf(f format, args ...redact.Text) {
 	vals := make([]any, len(args))
 	for i, a := range args {
-		vals[i] = a.String()
+		vals[i] = escape(a.String())
 	}
 	_, _ = fmt.Fprintf(s.w, string(f), vals...)
+}
+
+// escape makes control characters in a value visible, so text from a file
+// or a file name can't move the cursor, recolor, fake a new line, or flip
+// how the line reads. C0 and C1 controls and DEL become \xNN or \uNNNN, and
+// so do the Unicode bidi controls. Newlines in the format itself are left
+// alone; only values are escaped.
+func escape(s string) string {
+	if !strings.ContainsFunc(s, unsafeRune) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case !unsafeRune(r):
+			b.WriteRune(r)
+		case r < utf8.RuneSelf:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		default:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		}
+	}
+	return b.String()
+}
+
+// The Unicode bidi controls: marks, embeddings and overrides, isolates.
+const (
+	arabicLetterMark = 0x061c
+	leftToRightMark  = 0x200e
+	rightToLeftMark  = 0x200f
+	firstEmbedding   = 0x202a // LRE, RLE, PDF, LRO, RLO
+	lastEmbedding    = 0x202e
+	firstIsolate     = 0x2066 // LRI, RLI, FSI, PDI
+	lastIsolate      = 0x2069
+)
+
+func unsafeRune(r rune) bool {
+	switch {
+	case unicode.IsControl(r): // C0, DEL and C1
+		return true
+	case r == arabicLetterMark, r == leftToRightMark, r == rightToLeftMark:
+		return true
+	case r >= firstEmbedding && r <= lastEmbedding, r >= firstIsolate && r <= lastIsolate:
+		return true
+	}
+	return false
 }
 
 // Printer writes jarx's output.
 type Printer struct {
 	Out *Stream
 	Err *Stream
+	// Style is how the scan report looks. Its zero value is what piped
+	// output gets.
+	Style Style
 
 	scrub *redact.Scrubber
 }
@@ -71,6 +123,37 @@ func (p *Printer) Projects(ps []model.Project) {
 			detail = "  " + plural(len(proj.Files), "file", "files") + " (" + string(proj.Walk) + ")"
 		}
 		p.Out.Printf("  %s  %s%s\n", proj.Path.Text(), p.text(agents(proj)), p.text(detail))
+		for _, perm := range proj.Permissions {
+			p.permissions(perm)
+		}
+		p.instructions(proj)
+		p.extensions(proj)
+	}
+}
+
+// Instructions lists instruction texts not tied to one project, like auto
+// memory folders.
+func (p *Printer) Instructions(is []model.Instruction) {
+	p.Out.Printf("instructions not tied to a project (%s)\n", p.text(strconv.Itoa(len(is))))
+	for _, in := range is {
+		kind := string(in.Origin.Agent) + " " + string(in.Kind)
+		p.Out.Printf("  %s  %s  %s\n", p.text(kind), in.Path.Text(), p.text(instructionDetail(in, "")))
+	}
+}
+
+// Unknown lists settings keys an adapter didn't recognize, with the file
+// each came from.
+func (p *Printer) Unknown(us []model.Unknown) {
+	p.Out.Printf("unknown settings (%s)\n", p.text(strconv.Itoa(len(us))))
+	for _, u := range us {
+		extra := ""
+		switch {
+		case !u.Near.IsZero():
+			extra = "  did you mean " + u.Near.String() + "?"
+		case !u.Note.IsZero():
+			extra = "  " + u.Note.String()
+		}
+		p.Out.Printf("  %s  %s %s  %s%s\n", u.Key, p.text(string(u.Origin.Agent)), p.text(string(u.Origin.Scope)), u.Origin.File.Text(), p.text(extra))
 	}
 }
 
@@ -122,6 +205,100 @@ func (p *Printer) Findings(fs []finding.Finding, rules *finding.Registry) {
 			}
 		}
 		p.Out.Printf("  %s  %s  %s%s\n", p.text(f.Severity.String()), p.text(f.RuleID), p.text(where), p.text(detail))
+	}
+}
+
+// instructions lists a project's instruction texts per agent, with paths
+// inside the project shown relative to it.
+func (p *Printer) instructions(proj model.Project) {
+	var agentsSeen []model.Agent
+	for _, in := range proj.Instructions {
+		if !slices.Contains(agentsSeen, in.Origin.Agent) {
+			agentsSeen = append(agentsSeen, in.Origin.Agent)
+		}
+	}
+	root := proj.Path.Raw()
+	for _, a := range agentsSeen {
+		p.Out.Printf("    %s instructions\n", p.text(string(a)))
+		for _, in := range proj.Instructions {
+			if in.Origin.Agent != a {
+				continue
+			}
+			p.Out.Printf("      %s  %s  %s\n", p.text(string(in.Kind)), p.shortPath(root, in.Path), p.text(instructionDetail(in, root)))
+		}
+	}
+}
+
+// instructionDetail is the scope, when it loads, who imported it, whether
+// jarx read it, and why it's not in effect.
+func instructionDetail(in model.Instruction, root string) string {
+	parts := []string{string(in.Origin.Scope), string(in.Load)}
+	if !in.ImportedBy.IsZero() {
+		parts = append(parts, "via "+relPath(root, in.ImportedBy))
+	}
+	if in.Read != model.ReadOK {
+		parts = append(parts, string(in.Read))
+	}
+	if in.Limit > 0 {
+		parts = append(parts, "first "+strconv.Itoa(in.Limit)+" bytes")
+	}
+	detail := strings.Join(parts, ", ")
+	if !in.Origin.InEffect {
+		detail += "  not in effect: " + in.Origin.Why.String()
+	}
+	return detail + note(in.Note)
+}
+
+// note renders a note that jarx can't settle, or "".
+func note(n redact.Text) string {
+	if n.IsZero() {
+		return ""
+	}
+	return "  note: " + n.String()
+}
+
+// shortPath shows path relative to root when it's inside it.
+func (p *Printer) shortPath(root string, path model.Path) redact.Text {
+	if rel := relPath(root, path); rel != path.Text().String() {
+		return p.text(rel)
+	}
+	return path.Text()
+}
+
+// relPath is path's masked text, relative to root when it's inside it.
+func relPath(root string, path model.Path) string {
+	if root != "" {
+		if rel, err := filepath.Rel(root, path.Raw()); err == nil && filepath.IsLocal(rel) {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return path.Text().String()
+}
+
+// permissions lists one agent's modes, rules and extra dirs for a project,
+// each with its scope and, when it doesn't apply, why.
+func (p *Printer) permissions(perm model.Permissions) {
+	p.Out.Printf("    %s permissions\n", p.text(string(perm.Agent)))
+	row := func(kind string, value redact.Text, o model.Origin) {
+		why := ""
+		if !o.InEffect {
+			why = "  not in effect: " + o.Why.String()
+		}
+		p.Out.Printf("      %-5s  %s  %s%s\n", p.text(kind), value, p.text(string(o.Scope)), p.text(why))
+	}
+	for _, l := range perm.DefaultMode.Layers {
+		row("mode", l.Value, l.Origin)
+	}
+	for _, o := range perm.Options {
+		for _, l := range o.Setting.Layers {
+			p.Out.Printf("      %s = %s  %s%s\n", o.Key, l.Value, p.text(string(l.Origin.Scope)), p.text(notInEffect(l.Origin)))
+		}
+	}
+	for _, r := range perm.Rules {
+		row(string(r.Action), r.Rule, r.Origin)
+	}
+	for _, d := range perm.AdditionalDirectories {
+		row("dir", d.Value, d.Origin)
 	}
 }
 

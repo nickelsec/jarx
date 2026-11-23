@@ -1,0 +1,114 @@
+# Commands that run more than they look like when an allow rule covers them.
+# Columns: program, subcommand (empty means the program with any args),
+# class (any: runs any code; repo: runs code the repo defines; escape: has a
+# way to run any command), and why, in our own words.
+sh		any	a shell runs whatever command it is given, like sh -c
+bash		any	a shell runs whatever command it is given, like bash -c
+zsh		any	a shell runs whatever command it is given, like zsh -c
+dash		any	a shell runs whatever command it is given, like dash -c
+ksh		any	a shell runs whatever command it is given, like ksh -c
+fish		any	a shell runs whatever command it is given, like fish -c
+csh		any	a shell runs whatever command it is given, like csh -c
+tcsh		any	a shell runs whatever command it is given, like tcsh -c
+pwsh		any	a shell runs whatever command it is given
+powershell		any	a shell runs whatever command it is given
+cmd		any	a shell runs whatever command it is given
+python		any	an interpreter runs any code passed to it, like python -c
+node		any	an interpreter runs any code passed to it, like node -e
+nodejs		any	an interpreter runs any code passed to it, like nodejs -e
+deno		any	an interpreter runs any code passed to it, like deno eval
+ruby		any	an interpreter runs any code passed to it, like ruby -e
+perl		any	an interpreter runs any code passed to it, like perl -e
+php		any	an interpreter runs any code passed to it, like php -r
+lua		any	an interpreter runs any code passed to it, like lua -e
+osascript		any	an interpreter runs any code passed to it, like osascript -e
+awk		any	awk scripts can call system() to run any command
+gawk		any	awk scripts can call system() to run any command
+env		any	env runs the command that follows it
+xargs		any	xargs runs the command that follows it; Claude only strips xargs when it has no flags
+sudo		any	sudo runs the command that follows it, as root
+doas		any	doas runs the command that follows it, as root
+su		any	su -c runs any command as another user
+eval		any	eval runs its arguments as a command
+exec		any	exec runs the command that follows it
+npx		any	npx downloads and runs any package
+pnpx		any	pnpx downloads and runs any package
+bunx		any	bunx downloads and runs any package
+uvx		any	uvx downloads and runs any package
+pipx	run	any	pipx run downloads and runs any package
+npm		any	npm with any args can run any package or script, like npm exec
+npm	run	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+npm	test	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+npm	start	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+npm	install	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+npm	ci	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+npm	i	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+npm	t	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+pnpm		any	pnpm with any args can run any package or script, like pnpm exec
+pnpm	run	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+pnpm	test	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+pnpm	start	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+pnpm	install	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+pnpm	ci	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+pnpm	i	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+pnpm	t	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+yarn		any	yarn with any args can run any package or script, like yarn exec
+yarn	run	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+yarn	test	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+yarn	start	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+yarn	install	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+yarn	i	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+yarn	t	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+bun		any	bun with any args can run any package or script, like bun exec
+bun	run	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+bun	test	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+bun	start	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+bun	install	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+bun	ci	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+bun	i	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+bun	t	repo	runs scripts from the repo's package.json and its dependencies' install scripts
+npm	exec	any	npm exec downloads and runs any package
+pnpm	dlx	any	pnpm dlx downloads and runs any package
+pnpm	exec	any	pnpm exec runs any command
+yarn	dlx	any	yarn dlx downloads and runs any package
+yarn	exec	any	yarn exec runs any command
+bun	x	any	bun x downloads and runs any package
+bun	exec	any	bun exec runs any command
+uv		any	uv with any args can run any command, like uv run
+uv	run	any	uv run runs any command it is given
+pip	install	any	pip install runs the setup code of any package it installs
+pip3	install	any	pip install runs the setup code of any package it installs
+python	-m pip install	any	pip install runs the setup code of any package it installs
+python	-m pytest	repo	pytest runs the repo's conftest.py and test files
+pytest		repo	pytest runs the repo's conftest.py and test files
+go		any	go with any args can run any code, like go run or go generate
+go	run	any	go run builds and runs any package it is given, local or remote
+go	test	repo	go test runs the repo's test code
+go	generate	repo	go generate runs the commands the repo's //go:generate lines name
+cargo		any	cargo with any args can run any code, like cargo run or cargo install
+cargo	build	repo	cargo runs the repo's build.rs and proc macros while it builds
+cargo	test	repo	cargo runs the repo's build.rs and proc macros while it builds
+cargo	run	repo	cargo runs the repo's build.rs and proc macros while it builds
+cargo	check	repo	cargo runs the repo's build.rs and proc macros while it builds
+cargo	clippy	repo	cargo runs the repo's build.rs and proc macros while it builds
+cargo	bench	repo	cargo runs the repo's build.rs and proc macros while it builds
+cargo	install	any	cargo install builds any crate, running its build.rs
+make		repo	make runs the tasks the repo defines
+just		repo	just runs the tasks the repo defines
+task		repo	task runs the tasks the repo defines
+rake		repo	rake runs the tasks the repo defines
+invoke		repo	invoke runs the tasks the repo defines
+tox		repo	tox runs the tasks the repo defines
+nox		repo	nox runs the tasks the repo defines
+mvn		repo	mvn runs the tasks the repo defines
+gradle		repo	gradle runs the tasks the repo defines
+docker		any	docker with any args can run any image or command, like docker run
+docker	run	any	docker run starts any image with any command
+docker	exec	any	docker exec runs any command in a container
+docker	compose	repo	compose runs the services the repo's compose file defines
+podman		any	podman with any args can run any image or command, like podman run
+podman	run	any	podman run starts any image with any command
+podman	exec	any	podman exec runs any command in a container
+podman	compose	repo	compose runs the services the repo's compose file defines
+docker-compose		repo	compose runs the services the repo's compose file defines
+git		escape	git -c and aliases can run any command, like git -c alias.x=!cmd x

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/model"
@@ -43,13 +44,19 @@ func (s Severity) String() string {
 
 func (s Severity) valid() bool { return s >= Info && s <= Critical }
 
-// Rule is one detection rule. ID, Title and Fix are jarx's own constants.
+// Rule is one detection rule. ID, Title, Detail and Fix are jarx's own
+// constants.
 type Rule struct {
 	ID       string // like JARX-MCP-001
 	Severity Severity
-	Title    string // the short reason
+	Title    string // the short reason, at most MaxTitle chars
+	Detail   string // the reason in full, when the title leaves some out
 	Fix      string // the fix hint
 }
+
+// MaxTitle is how long a title can be: the scan prints it on one line with
+// the severity and the rule ID.
+const MaxTitle = 42
 
 // Finding is one thing a rule found.
 type Finding struct {
@@ -85,6 +92,8 @@ func NewRegistry(rules ...Rule) (*Registry, error) {
 			return nil, fmt.Errorf("rule %s: bad severity %d", rule.ID, int(rule.Severity))
 		case rule.Title == "" || rule.Fix == "":
 			return nil, fmt.Errorf("rule %s: needs a title and a fix", rule.ID)
+		case utf8.RuneCountInString(rule.Title) > MaxTitle:
+			return nil, fmt.Errorf("rule %s: title is over %d chars; put the rest in Detail", rule.ID, MaxTitle)
 		}
 		r.byID[rule.ID] = rule
 	}
@@ -137,7 +146,8 @@ func WalkTruncated() Rule {
 	return Rule{
 		ID:       "JARX-SCAN-003",
 		Severity: Info,
-		Title:    "stopped listing files in a very large project",
+		Title:    "stopped listing a very large project",
+		Detail:   "stopped listing files in a very large project",
 		Fix:      "files past the limit weren't checked; scan a subfolder with jarx scan <path>",
 	}
 }

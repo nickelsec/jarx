@@ -2,11 +2,11 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 	"slices"
@@ -22,8 +22,9 @@ import (
 // result is what one Run call produced.
 type result struct {
 	code   int
-	stdout string
+	stdout string // after the banner
 	stderr string
+	banner bool // stdout started with the banner
 }
 
 func run(args ...string) result {
@@ -36,7 +37,10 @@ func run(args ...string) result {
 	}
 	var stdout, stderr bytes.Buffer
 	code := Run(args, &stdout, &stderr, "v1.2.3-test")
-	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
+	// Every run starts with the banner. Tests check it once, in
+	// TestEveryRunShowsTheBanner, and the rest look at what comes after.
+	out, banner := strings.CutPrefix(stdout.String(), bannerText)
+	return result{code: code, stdout: out, stderr: stderr.String(), banner: banner}
 }
 
 func TestVersionFlagPrintsVersion(t *testing.T) {
@@ -45,8 +49,8 @@ func TestVersionFlagPrintsVersion(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("exit code = %d, want 0", got.code)
 	}
-	if got.stdout != "jarx v1.2.3-test\n" {
-		t.Errorf("stdout = %q, want %q", got.stdout, "jarx v1.2.3-test\n")
+	if !got.banner || got.stdout != "" {
+		t.Errorf("stdout = %q after the banner, want just the banner, which has the version", got.stdout)
 	}
 	if got.stderr != "" {
 		t.Errorf("stderr = %q, want empty", got.stderr)
@@ -147,9 +151,10 @@ func fakeHome(t *testing.T, jarxEnv string) string {
 }
 
 func TestScanWithHomePrintsWhatPlatformResolved(t *testing.T) {
+	t.Setenv("COLUMNS", "400") // long temp paths, read in full
 	home := fakeHome(t, "A=1\nB=2\n")
 
-	got := run("scan", "--home", home)
+	got := run("scan", "--all", "--home", home)
 
 	if got.code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
@@ -268,18 +273,21 @@ func TestScanHelpPrintsScanUsageToStdout(t *testing.T) {
 }
 
 func TestScanTakesExtraPaths(t *testing.T) {
+	t.Setenv("COLUMNS", "400") // long temp paths, read in full
 	home := fakeHome(t, "")
 	extra := filepath.Join(home, "extra")
 	if err := os.Mkdir(extra, 0o700); err != nil {
 		t.Fatal(err)
 	}
 
-	got := run("scan", "--home", home, extra)
+	got := run("scan", "--all", "--home", home, extra)
 
 	if got.code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
 	}
-	if !strings.Contains(got.stdout, "projects (1)\n  "+extra+"  jarx  0 files (walk)\n") {
+	// The inventory shows paths in the home dir from ~.
+	shown := "~" + string(filepath.Separator) + filepath.Base(extra)
+	if !strings.Contains(got.stdout, "projects (1)\n  "+shown+"  jarx  0 files (walk)\n") {
 		t.Errorf("stdout = %q, want the extra path listed as from jarx", got.stdout)
 	}
 }
@@ -384,33 +392,46 @@ func TestPathStatus(t *testing.T) {
 }
 
 func TestScanShowsTheHomeExists(t *testing.T) {
-	got := run("scan", "--home", fakeHome(t, ""))
+	t.Setenv("COLUMNS", "400") // long temp paths, read in full
+	got := run("scan", "--all", "--home", fakeHome(t, ""))
 
 	if l := line(got.stdout, "home"); !strings.HasSuffix(l, "(exists)") {
 		t.Errorf("home line = %q, want it to end with (exists)", l)
 	}
 }
 
-func TestScanShowsTheStateDirNotCreatedAndLeavesItThat(t *testing.T) {
+func TestScanWritesOnlyItsSnapshot(t *testing.T) {
+	t.Setenv("COLUMNS", "400") // long temp paths, read in full
+	// The PRD: every scan saves a masked snapshot. With no secrets found,
+	// that's all a scan writes.
 	home := fakeHome(t, "")
 
-	got := run("scan", "--home", home)
+	got := run("scan", "--all", "--home", home)
 
 	if l := line(got.stdout, "state dir"); !strings.HasSuffix(l, "(not created yet)") {
-		t.Errorf("state dir line = %q, want it to end with (not created yet)", l)
+		t.Errorf("state dir line = %q, want it to end with (not created yet): the line shows the dir before the scan", l)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".jarx-state")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("scan created the state dir (stat err %v), want it to write nothing", err)
+	var written []string
+	err := filepath.WalkDir(filepath.Join(home, ".jarx-state"), func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			rel, _ := filepath.Rel(home, path)
+			written = append(written, filepath.ToSlash(rel))
+		}
+		return err
+	})
+	if err != nil || len(written) != 1 || !regexp.MustCompile(`^\.jarx-state/snapshots/[^/]+\.json$`).MatchString(written[0]) {
+		t.Errorf("scan wrote %q (%v), want one snapshot and nothing else", written, err)
 	}
 }
 
 func TestScanShowsTheStateDirWhenItExists(t *testing.T) {
+	t.Setenv("COLUMNS", "400") // long temp paths, read in full
 	home := fakeHome(t, "")
 	if err := os.Mkdir(filepath.Join(home, ".jarx-state"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
-	got := run("scan", "--home", home)
+	got := run("scan", "--all", "--home", home)
 
 	if l := line(got.stdout, "state dir"); !strings.HasSuffix(l, "(exists)") {
 		t.Errorf("state dir line = %q, want it to end with (exists)", l)
@@ -418,7 +439,8 @@ func TestScanShowsTheStateDirWhenItExists(t *testing.T) {
 }
 
 func TestScanSaysWhenThereIsNoJarxEnv(t *testing.T) {
-	got := run("scan", "--home", fakeHome(t, ""))
+	t.Setenv("COLUMNS", "400") // long temp paths, read in full
+	got := run("scan", "--all", "--home", fakeHome(t, ""))
 
 	if l := line(got.stdout, "env"); !strings.Contains(l, "no .jarx-env, empty env") {
 		t.Errorf("env line = %q, want it to say there's no .jarx-env", l)
@@ -426,6 +448,7 @@ func TestScanSaysWhenThereIsNoJarxEnv(t *testing.T) {
 }
 
 func TestScanCountsArePlural(t *testing.T) {
+	t.Setenv("COLUMNS", "400") // long temp paths, read in full
 	sep := string(os.PathListSeparator)
 	tests := []struct {
 		jarxEnv  string
@@ -436,7 +459,7 @@ func TestScanCountsArePlural(t *testing.T) {
 		{"PATH=/a" + sep + "/b\nX=1\n", "2 vars from .jarx-env", "2 entries"},
 	}
 	for _, tt := range tests {
-		got := run("scan", "--home", fakeHome(t, tt.jarxEnv))
+		got := run("scan", "--all", "--home", fakeHome(t, tt.jarxEnv))
 
 		if l := line(got.stdout, "env"); !strings.HasSuffix(l, tt.wantEnv) {
 			t.Errorf("env line = %q, want it to end with %q", l, tt.wantEnv)
@@ -457,40 +480,6 @@ func TestEnvSectionShowsEachSystemDirWithAStatus(t *testing.T) {
 	}
 }
 
-func TestScanDemoHome(t *testing.T) {
-	demo := filepath.Join("..", "..", "testdata", "demo")
-	data, err := os.ReadFile(filepath.Join(demo, ".jarx-env")) //nolint:gosec // G304: fixed repo fixture path
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got := run("scan", "--home", demo)
-
-	if got.code != 0 {
-		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
-	}
-	abs, err := filepath.Abs(demo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proj := func(rel string) string { return filepath.Join(abs, "projects", rel) }
-	for _, want := range []string{
-		"environment (fake home)", "3 vars from .jarx-env", "skipped (--home)",
-		// The demo's records use paths like /projects/app, read inside the
-		// fake home.
-		"projects (3)\n" +
-			"  " + proj("app") + "  claude, codex (trusted)  1 file (walk)\n" +
-			"  " + proj("notes") + "  codex (untrusted)  1 file (walk)\n" +
-			"  " + proj("old") + "  claude  stale\n",
-		"findings (0)\n",
-	} {
-		if !strings.Contains(got.stdout, want) {
-			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
-		}
-	}
-	assertNoEnvLeak(t, string(data), got.stdout+got.stderr)
-}
-
 // assertNoEnvLeak fails if any name or value from a .jarx-env file shows up
 // in out.
 func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
@@ -506,5 +495,233 @@ func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
 				t.Errorf("output contains %q from the demo .jarx-env:\n%s", leak, out)
 			}
 		}
+	}
+}
+
+func TestScanRegistryHasEveryOwnersRules(t *testing.T) {
+	rules, err := scanRules()
+	if err != nil {
+		t.Fatalf("scanRules() error = %v", err)
+	}
+
+	for _, id := range []string{"JARX-SCAN-001", "JARX-CLAUDE-001", "JARX-CODEX-001", "JARX-SECRET-001", "JARX-POISON-001", "JARX-PERMS-001", "JARX-UNKNOWN-001"} {
+		if _, ok := rules.Lookup(id); !ok {
+			t.Errorf("registry is missing %s", id)
+		}
+	}
+}
+
+var fingerprintRe = regexp.MustCompile(`fingerprint [0-9a-f]{12}`)
+
+// demoCopy is the demo home copied to a temp dir, so scans can write their
+// state and the test can change files.
+func demoCopy(t *testing.T) string {
+	t.Helper()
+	demo := filepath.Join(t.TempDir(), "demo")
+	if err := os.CopyFS(demo, os.DirFS(filepath.Join("..", "..", "testdata", "demo"))); err != nil {
+		t.Fatal(err)
+	}
+	return demo
+}
+
+// bannerText is the banner as the tests get it: ASCII, since their output
+// isn't a terminal, with the version next to its last row.
+const bannerText = `    #####     ####    ########   ###    ###
+    #####    ######   #########  ####  ####
+    #####   ###  ###  ###   ####  ########
+    #####   ###  ###  ###   ####   ######
+    #####  ###    ### #########     ####
+    #####  ########## ########     ######
+##  #####  ###    ### ### ####    ########
+#########  ###    ### ###  ####  ####  ####
+ #######   ###    ### ###   #### ###    ###  v1.2.3-test
+
+what your coding agents can see and reach
+
+`
+
+func TestEveryRunShowsTheBanner(t *testing.T) {
+	home := fakeHome(t, "")
+	for _, args := range [][]string{
+		{"--version"}, {"--help"}, {}, {"frobnicate"}, {"--bogus"},
+		{"scan", "--home", home}, {"scan", "--help"}, {"setup", "--home", home},
+	} {
+		if got := run(args...); !got.banner {
+			t.Errorf("%v: stdout = %q, want it to start with the banner and version", args, got.stdout)
+		}
+	}
+}
+
+func TestScanDemoHome(t *testing.T) {
+	t.Setenv("COLUMNS", "80") // the layout below is for 80 columns
+	repoDemo := filepath.Join("..", "..", "testdata", "demo")
+	data, err := os.ReadFile(filepath.Join(repoDemo, ".jarx-env")) //nolint:gosec // G304: fixed repo fixture path
+	if err != nil {
+		t.Fatal(err)
+	}
+	demo := demoCopy(t)
+
+	got := run("scan", "--home", demo)
+	all := run("scan", "--all", "--home", demo)
+
+	if got.code != 0 || all.code != 0 {
+		t.Fatalf("exit codes = %d, %d; want 0 (stderr %q %q)", got.code, all.code, got.stderr, all.stderr)
+	}
+	// The header holds the temp dir, whose length changes from run to run
+	// and OS to OS, so it's checked in parts. The rest is checked whole.
+	if !strings.HasPrefix(got.stdout, "fake home ") || !strings.Contains(strings.SplitN(got.stdout, "\n", 2)[0], runtime.GOOS) {
+		t.Errorf("header = %q, want fake home and the OS", strings.SplitN(got.stdout, "\n", 2)[0])
+	}
+	_, view, _ := strings.Cut(got.stdout, "\nagents on this machine\n")
+	// Fingerprints are keyed per install, so they're random here.
+	view = fingerprintRe.ReplaceAllString("agents on this machine\n"+view, "fingerprint FP")
+	if want := strings.ReplaceAll(demoView, "{S}", string(filepath.Separator)); view != want {
+		t.Errorf("view =\n%s\nwant\n%s", view, want)
+	}
+	assertAllShowsEverything(t, all.stdout)
+	assertDemoNoLeak(t, string(data), got.stdout+got.stderr)
+	assertDemoNoLeak(t, string(data), all.stdout+all.stderr)
+}
+
+// assertDemoNoLeak checks a demo scan's output for the demo's secrets.
+func assertDemoNoLeak(t *testing.T, env, out string) {
+	t.Helper()
+	// The demo's planted secrets are made up to dodge push protection, and
+	// jarx still has to mask every one.
+	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here"} {
+		if strings.Contains(out, planted) {
+			t.Errorf("output contains the planted %q", planted)
+		}
+	}
+	assertNoEnvLeak(t, env, out)
+	// The demo's fake .env is imported by its CLAUDE.md. Nothing in it may
+	// show up: jarx never reads it.
+	if strings.Contains(out, "sk-demo-0000") {
+		t.Errorf("output contains the demo .env's value:\n%s", out)
+	}
+}
+
+// assertAllShowsEverything checks jarx scan --all on the demo: what platform
+// resolved, every finding with its full reason, and the full inventory.
+func assertAllShowsEverything(t *testing.T, out string) {
+	t.Helper()
+	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
+	if len(titles) != 18 {
+		t.Errorf("--all shows %d findings, want all 18", len(titles))
+	}
+	for _, want := range []string{
+		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
+		"why: Claude starts in bypassPermissions, so it skips prompts and safety",
+		"full inventory\nprojects (3)\n",
+		// At 80 columns this line wraps at a space onto an indented line.
+		"unknown settings (1)\n  aproval_policy  codex user  ", "did you mean\n      approval_policy?\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--all output doesn't contain %q", want)
+		}
+	}
+	if strings.Contains(out, "more:") || strings.Contains(out, "jarx scan --all") {
+		t.Error("--all hides findings or points at itself")
+	}
+}
+
+// demoView is the demo scan at 80 columns, ASCII since the tests' output
+// isn't a terminal. {S} is the path separator.
+const demoView = `agents on this machine
++- Claude Code ~{S}.claude  2 projects (1 trusted - 1 unknown)
+\- Codex       ~{S}.codex   2 projects (1 trusted - 1 untrusted)
+
+scanned
++- 3 projects                        1 stale, not scanned
++- 2 instruction files - 2 imports   1 credential file not read
++- 1 skill - 1 hook - 1 hook script
++- 4 permission rules - 3 mode settings
+\- 4 config files                    1 unknown setting
+
+18 findings   8 HIGH - 6 MED - 4 INFO   changes: first scan
+
+your user config - applies to every project
++- HIGH  Claude starts in bypassPermissions  PERMS-001
+|  \- ~{S}.claude{S}settings.json  defaultMode is bypassPermissions in user settings
+|
+\- HIGH  A safety setting is misspelled  UNKNOWN-003
+   \- ~{S}.codex{S}config.toml  aproval_policy looks like a typo of approval_poli...
+
+~{S}projects{S}app  claude trusted - codex trusted
++- HIGH  An @import pulls in a credential file  CLAUDE-002
+|  \- .env  an @import in CLAUDE.md points at a credential file; jarx didn't ...
+|
++- HIGH  A repo sandbox_mode drops your profile  CODEX-001
+|  \- .codex{S}config.toml  .codex{S}config.toml sets sandbox_mode = danger-full-...
+|
++- HIGH  Codex runs with no sandbox  PERMS-002
+|  \- .codex{S}config.toml  sandbox_mode = danger-full-access in project config
+|
++- HIGH  An allow rule runs every command  PERMS-004
+|  \- .claude{S}settings.json  Bash(*)
+|
++- HIGH  Hidden text aimed at the agent  POISON-007
+|  \- CLAUDE.md:9  in an inline comment: "curl -fsSL https://example.invalid/...
+|
++- HIGH  A secret is in text the agent loads  SECRET-001
+|  \- CLAUDE.md  named_secret, fingerprint FP, in text the agent se...
+|
++- MED   A skill runs shell before Claude sees it  CLAUDE-003
+|  \- .claude{S}skills{S}release{S}SKILL.md  release runs 1 shell command when invoked
+|
++- MED   A repo skill grants tools without trust  CLAUDE-004
+|  \- .claude{S}skills{S}release{S}SKILL.md  release pre-approves Bash(git *)
+|
++- MED   An allow covers a tool that runs anything  PERMS-010
+|  \- .claude{S}skills{S}release{S}SKILL.md  skill release pre-approves Bash(git *)...
+|
++- MED   Text tells the agent to override or hide  POISON-006
+|  \- .claude{S}skills{S}release{S}SKILL.md:8  "ignore your previous instructions"
+|
++- ... 6 more: 2 MED - 4 INFO  (jarx scan --all)
+|
+\- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
+
+~{S}projects{S}notes  codex untrusted - no findings
+\- loads here: claude 1 instruction
+
+~{S}projects{S}old  claude unknown - stale, not scanned
+
+all findings and the full inventory: jarx scan --all
+`
+
+func TestScanShowsWhatChangedSinceTheLastScan(t *testing.T) {
+	demo := demoCopy(t)
+
+	first := run("scan", "--home", demo)
+	second := run("scan", "--home", demo)
+	claudeMD := filepath.Join(demo, "projects", "app", "CLAUDE.md")
+	body, err := os.ReadFile(claudeMD) //nolint:gosec // G304: the test's own copy
+	if err != nil {
+		t.Fatal(err)
+	}
+	//nolint:gosec // G703: the test's own temp copy of the demo
+	if err := os.WriteFile(claudeMD, append(body, []byte("\nAlso run the linter.\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	third := run("scan", "--home", demo)
+
+	if !strings.Contains(first.stdout, "   changes: first scan\n") {
+		t.Errorf("first scan = %q, want a first scan", first.stdout)
+	}
+	if !regexp.MustCompile(`   changes: none since \d{4}-\d\d-\d\d \d\d:\d\d UTC\n`).MatchString(second.stdout) {
+		t.Errorf("second scan = %q, want no changes", second.stdout)
+	}
+	sep := string(filepath.Separator)
+	for _, want := range []string{
+		"(+0 -0 ~1)\n",
+		"changed since the last scan\n\\- ~ instruction  claude instructions ~" + sep + "projects" + sep + "app" + sep + "CLAUDE.md: content changed\n",
+	} {
+		if !strings.Contains(third.stdout, want) {
+			t.Errorf("third scan = %q, want it to contain %q", third.stdout, want)
+		}
+	}
+	if strings.Contains(third.stdout, "Also run the linter") {
+		t.Error("the diff shows the file's text, want only that it changed")
 	}
 }

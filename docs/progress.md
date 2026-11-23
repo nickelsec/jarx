@@ -52,18 +52,126 @@ stale ones marked.
 
 ## Phase 3: Instruction files and settings
 
-- [ ] Claude adapter: settings, precedence, trust. Includes the Windows
-  registry and macOS plist reads in `platform` (first use of `golang.org/x/sys`)
-  and checking the managed paths against the official docs
-- [ ] Claude adapter: instruction files, `@` imports, memory, output styles
-- [ ] Claude adapter: skills, commands, subagents, plugins, hooks
-- [ ] Codex adapter: config, profiles, precedence, trust, requirements
-- [ ] Codex adapter: instruction files, skills, hooks
-- [ ] `catalog` secret patterns and `analyze/secrets`
-- [ ] `analyze/poison`: hidden text and poisoned content rules
-- [ ] `analyze/perms`: effective permissions view
-- [ ] `analyze/unknown`: unknown settings report
-- [ ] `snapshot`: masked snapshots, retention, diff in `scan` output
+- [x] Claude adapter: settings, precedence, trust. Includes the Windows
+  registry reads in `platform` (first use of `golang.org/x/sys`), the settings
+  index scope table, and checking the managed paths against the official docs
+  (8257aaa)
+  - Not covered yet: the local settings file at the repo root when Claude
+    starts in a subfolder, local files tracked in git (they wait for trust),
+    "can't be set from this file" for keys outside `permissions`, and the
+    keys Claude reads from every admin source (they come with the items
+    that read those keys)
+- [x] Claude adapter: instruction files, `@` imports, memory, output styles.
+  Also the read guards an `@` import made necessary: `fsys` refuses
+  credential files (even behind a symlink), network paths and non-regular
+  files, `credmeta.Location` starts early for that, and `report` escapes
+  control and bidi characters (1c1c423)
+  - Not covered yet: `claudeMdExcludes`, symlinked rules that point outside
+    the project (Claude treats them like external imports), output styles in
+    `.claude/output-styles/` between the working dir and the repo root,
+    plugin output styles (with plugins), whether external imports were
+    approved (not documented), and how Claude treats an import path that
+    ends in punctuation like `@docs/setup.md.` (not documented; jarx keeps
+    the documented rule, the path runs to the first space)
+- [x] Claude adapter: skills, commands, subagents, plugins, hooks. Also the
+  canary test that proves nothing they declare runs, and two findings:
+  skills that run shell commands before Claude sees them, and repository
+  skills that grant tools or add hooks without the trust check
+  - Not covered yet: frontmatter hooks are kept as raw text (no YAML
+    parser), `@skills-dir`, `@inline` and synced plugins, synced skills,
+    plugin MCP and LSP servers and monitors (MCP comes in phase 4), plugin
+    output styles, `extraKnownMarketplaces`, `allowedHttpHookUrls`,
+    `strictPluginOnlyCustomization`, project subagent hooks waiting for
+    trust, skill `paths` and supporting files, skills in parent dirs up to
+    the repo root, and command subfolders (7e18571)
+- [x] Codex adapter: config, profiles, precedence, trust, requirements. Also
+  the generic `Options` and read and write rules in the model, and five
+  findings for settings that quietly override others: a repository's
+  `sandbox_mode` turning off your permission profile (high), your own
+  `sandbox_mode` doing the same (medium), a repository changing your
+  permission profile (medium), and a legacy `managed_config.toml` and legacy
+  profiles (info)
+  - Not covered yet: Codex unknown keys (no key table yet), the project
+    ignored keys once options need them (phase 5 egress), managed
+    `deny_read` and the `[[remote_sandbox_config]]` host overrides,
+    `managed_config.toml` fields that turn into requirements, granular
+    approval policies beyond their name, `extends` chains, and the
+    `untrusted` approval policy's fallback (ac09450)
+- [x] Codex adapter: instruction files, skills, hooks. Also the
+  `project_doc_max_bytes` handling for its two documented readings, a note
+  and a byte limit on instructions and a note on hooks in the model, Codex
+  hooks in the no-execution canary, and a finding for a repository changing
+  which instructions Codex loads
+  - Not covered yet: Codex plugins and their hooks and skills, Codex
+    memories, skill metadata beyond the name (`agents/openai.yaml`),
+    `[skills.bundled]`, worktrees reading hooks from the main checkout,
+    `--dangerously-bypass-hook-trust`, and `command_windows` in managed hooks
+    (1b700af)
+- [x] `catalog` secret patterns and `analyze/secrets`. About 20 token
+  formats from provider docs and RFCs, a name rule for values with no
+  documented format, placeholders judged by shape for named values, `redact`
+  masking one group of a match, a scrubbed copy of every settings and config
+  file in the model, and three findings: a secret the agent sees (high), a
+  secret in a config file or hook (medium), and a likely placeholder (info)
+  - Not covered yet: the PRD's 30 to 50 formats (npm, OpenAI and Hugging
+    Face don't document a prefix, so only the name rule finds them), MCP
+    configs (phase 4), Codex config files that aren't valid TOML, plugin
+    `installed_plugins.json`, the "sees" state in the credential view
+    (phase 5), and the line a secret is on (f70cc46)
+- [x] `analyze/poison`: hidden text and poisoned content rules. 13 rules
+  over instructions, memory, skills, hook commands and hook scripts: tag
+  characters, bidi controls, zero-width characters, terminal escapes, HTML
+  comments the agent reads (block comments in CLAUDE.md skipped, since
+  Claude strips them), text aimed at the agent, the same found in hidden
+  text, exfil shapes, credential file pointers, and the PRD's four hook
+  rules. Fixtures per rule, the demo's hidden comment, and `-text` for
+  analyzer fixtures in `.gitattributes`
+  - Not covered yet: MCP text (phase 4), lying annotations and tool
+    shadowing (phase 4), Codex memories, look-alike characters, phrases in
+    languages other than English, and comments that only show when the
+    agent opens a CLAUDE.md with its Read tool (dfa8ee5)
+- [x] `analyze/perms`: effective permissions view. Claude's sandbox and
+  `enableAllProjectMcpServers` in the view, allows a deny or ask rule
+  overrides marked not in effect, `PermissionRule.Target`, credmeta's sample
+  credential paths, the embedded command table, and ten findings: bypass
+  mode, no Codex sandbox, never asking, every command, grants that cover
+  credential files, all project MCP servers, a retired approval policy, and
+  allows that run any code, the repo's code, or a tool with an escape
+  - Not covered yet: Codex per-tool `approval_mode` (phase 4), Codex
+    execution-policy rules files, how two different Bash patterns overlap,
+    `blockReadsOutsideWorkingDirectories` and the other `permissions.*`
+    switches, sandbox network settings (phase 5 egress), and programs not in
+    the command table (ef4961a)
+- [x] `analyze/unknown`: unknown settings report. A Codex key table from
+  the config reference (both files, with aliases), Claude's `$schema` and
+  marketplace aliases, "did you mean" for likely typos, and three findings:
+  an unknown key (info), a likely typo (medium), and a likely typo of a
+  safety key (high). Also a finding for a Claude alias ignored next to its
+  canonical key
+  - Not covered yet: keys inside Codex `[hooks]` (the Hooks guide, not the
+    reference, lists them), hooks.json and plugin manifests, MCP config keys
+    (phase 4), and Claude's deprecated keys beyond `ignorePatterns`, since
+    the index still lists the rest (b49a8f4)
+- [x] `snapshot`: masked snapshots, retention, diff in `scan` output.
+  Items with an identity and a state, texts kept as hashes, the newest 20
+  kept, a note rather than an error for a broken or newer snapshot, and a
+  `changes` section in `scan`. Also scrubbing made idempotent, with a guard
+  against text dressed up as a mask, and the offline CI job allowing one
+  snapshot
+  - Not covered yet: servers, tools, prompts and resources (phase 4),
+    verdicts (phase 5), the snapshot picker (phase 7), and named baselines
+    (38873d0)
+- [x] `report`: redesign the terminal output so a scan is easy to read,
+  instead of every section printed in full. A header, the agents, what was
+  scanned, one summary line, then findings grouped by project, worst first,
+  with user-level problems once on their own. Short paths, at most 10
+  findings per project but every high one, `--all` for everything, width
+  and color and charset from `platform.DetectTerm`, and lines cut instead of
+  wrapped. Also rule titles cut to 42 chars with the rest in `Detail`, and
+  the banner with the version on every run
+  - Not covered yet: MCP servers and agent versions in the agents block
+    (phase 4 and the versions work), and the last line pointing to the
+    dashboard instead of `--all` (phase 7) (0bf72ba)
 
 **Run it:** `jarx scan --home testdata/demo` shows instruction files, skills,
 hooks, permissions and the planted findings. Change a demo file and the diff

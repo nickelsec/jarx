@@ -138,3 +138,225 @@ func TestEmptyListings(t *testing.T) {
 		t.Errorf("stdout = %q", out.String())
 	}
 }
+
+func TestProjectsListingShowsPermissions(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	at := func(scope model.Scope) model.Origin {
+		return model.Origin{Agent: model.AgentClaude, Scope: scope, InEffect: true}
+	}
+	held := at(model.ScopeProject)
+	held.InEffect, held.Why = false, text("project allow waits for trust: the folder isn't trusted")
+	ignored := at(model.ScopeProject)
+	ignored.InEffect, ignored.Why = false, text("defaultMode auto is ignored from project files")
+
+	p.Projects([]model.Project{{
+		Path: model.NewPath(s, "/projects/app"), Status: model.ProjectOK,
+		Origins: []model.Origin{{Agent: model.AgentClaude}},
+		Permissions: []model.Permissions{{
+			Agent: model.AgentClaude,
+			DefaultMode: model.Setting[redact.Text]{Layers: []model.Layer[redact.Text]{
+				{Value: text("auto"), Origin: ignored},
+				{Value: text("plan"), Origin: at(model.ScopeUser)},
+			}},
+			Rules: []model.PermissionRule{
+				{Action: model.RuleAllow, Rule: text("Bash(*)"), Origin: held},
+				{Action: model.RuleDeny, Rule: text("Read(" + canary + ")"), Origin: at(model.ScopeUser)},
+			},
+			AdditionalDirectories: []model.Layer[redact.Text]{{Value: text("../shared"), Origin: at(model.ScopeLocal)}},
+		}},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  claude\n" +
+		"    claude permissions\n" +
+		"      mode   auto  project  not in effect: defaultMode auto is ignored from project files\n" +
+		"      mode   plan  user\n" +
+		"      allow  Bash(*)  project  not in effect: project allow waits for trust: the folder isn't trusted\n" +
+		"      deny   Read(REDACTED:test_token)  user\n" +
+		"      dir    ../shared  local\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestUnknownSettingsListing(t *testing.T) {
+	p, s, out, _ := setup(t)
+	key := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	origin := model.Origin{Agent: model.AgentClaude, Scope: model.ScopeProject, File: model.NewPath(s, "/projects/app/.claude/settings.json")}
+
+	p.Unknown([]model.Unknown{
+		{Key: key("notARealSetting"), Origin: origin},
+		{Key: key(canary), Origin: origin},
+	})
+
+	want := "unknown settings (2)\n" +
+		"  notARealSetting  claude project  /projects/app/.claude/settings.json\n" +
+		"  REDACTED:test_token  claude project  /projects/app/.claude/settings.json\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestUnknownSettingsShowTheNearKeyOrNote(t *testing.T) {
+	p, s, out, _ := setup(t)
+	key := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	origin := model.Origin{Agent: model.AgentClaude, Scope: model.ScopeUser, File: model.NewPath(s, "/h/.claude/settings.json")}
+
+	p.Unknown([]model.Unknown{
+		{Key: key("permisions"), Near: key("permissions"), Origin: origin},
+		{Key: key("ignorePatterns"), Note: key("deprecated: replaced by permissions.deny"), Origin: origin},
+	})
+
+	want := "unknown settings (2)\n" +
+		"  permisions  claude user  /h/.claude/settings.json  did you mean permissions?\n" +
+		"  ignorePatterns  claude user  /h/.claude/settings.json  deprecated: replaced by permissions.deny\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestProjectsListingShowsInstructions(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	path := func(raw string) model.Path { return model.NewPath(s, raw) }
+	at := func(scope model.Scope) model.Origin {
+		return model.Origin{Agent: model.AgentClaude, Scope: scope, InEffect: true}
+	}
+	waits := at(model.ScopeProject)
+	waits.InEffect, waits.Why = false, text("external import: needs approval")
+
+	p.Projects([]model.Project{{
+		Path: path("/projects/app"), Status: model.ProjectOK, Origins: []model.Origin{{Agent: model.AgentClaude}},
+		Instructions: []model.Instruction{
+			{Kind: model.InstructionFile, Path: path("/projects/app/CLAUDE.md"), Load: model.LoadLaunch, Read: model.ReadOK, Origin: at(model.ScopeProject)},
+			{Kind: model.InstructionImport, Path: path("/projects/shared.md"), Load: model.LoadLaunch, Read: model.ReadOK,
+				ImportedBy: path("/projects/app/CLAUDE.md"), Depth: 1, Origin: waits},
+			{Kind: model.InstructionImport, Path: path("/projects/app/.env"), Load: model.LoadLaunch, Read: model.ReadCredential,
+				ImportedBy: path("/projects/app/CLAUDE.md"), Depth: 1, Origin: at(model.ScopeProject)},
+		},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  claude\n" +
+		"    claude instructions\n" +
+		"      instructions  CLAUDE.md  project, at launch\n" +
+		"      import  /projects/shared.md  project, at launch, via CLAUDE.md  not in effect: external import: needs approval\n" +
+		"      import  .env  project, at launch, via CLAUDE.md, credential file, not read\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestUnboundInstructionsListing(t *testing.T) {
+	p, s, out, _ := setup(t)
+	origin := model.Origin{Agent: model.AgentClaude, Scope: model.ScopeUser, InEffect: true}
+
+	p.Instructions([]model.Instruction{
+		{Kind: model.InstructionMemory, Path: model.NewPath(s, "/home/.claude/projects/x/memory/MEMORY.md"), Load: model.LoadLaunch, Read: model.ReadOK, Origin: origin},
+	})
+
+	want := "instructions not tied to a project (1)\n" +
+		"  claude memory  /home/.claude/projects/x/memory/MEMORY.md  user, at launch\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestProjectsListingShowsExtensions(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	path := func(raw string) model.Path { return model.NewPath(s, raw) }
+	at := func(scope model.Scope) model.Origin {
+		return model.Origin{Agent: model.AgentClaude, Scope: scope, InEffect: true}
+	}
+	off := at(model.ScopeProject)
+	off.InEffect, off.Why = false, text("disableAllHooks is on in user settings")
+
+	p.Projects([]model.Project{{
+		Path: path("/projects/app"), Status: model.ProjectOK, Origins: []model.Origin{{Agent: model.AgentClaude}},
+		Hooks: []model.Hook{
+			{Event: text("PostToolUse"), Matcher: text("Edit|Write"), Type: text("command"), Run: text("${CLAUDE_PROJECT_DIR}/check.sh"),
+				Script: path("/projects/app/check.sh"), ScriptRead: model.ReadOK, Origin: at(model.ScopeUser)},
+			{Event: text("Stop"), Type: text("http"), Run: text("http://localhost:8080/hook"), Origin: off},
+		},
+		Skills: []model.Skill{
+			{Kind: model.SkillSkill, Name: text("deploy"), Path: path("/projects/app/.claude/skills/deploy/SKILL.md"), Load: model.LoadInvoked,
+				Read: model.ReadOK, Tools: []redact.Text{text("Bash(*)")}, Hooks: text("Stop: []"), ShellCommands: 2, Origin: at(model.ScopeProject)},
+			{Kind: model.SkillSubagent, Name: text("fmt:rev"), Path: path("/home/.claude/plugins/rev.md"), Load: model.LoadInvoked,
+				Read: model.ReadOK, Mode: text("bypassPermissions"), Plugin: text("fmt@m"), Origin: at(model.ScopePlugin)},
+		},
+		Plugins: []model.Plugin{
+			{ID: text("fmt@m"), Version: text("1.0.0"), Path: path("/home/.claude/plugins/cache/fmt"), Origin: at(model.ScopeUser)},
+		},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  claude\n" +
+		"    claude hooks\n" +
+		"      PostToolUse (Edit|Write)  command  ${CLAUDE_PROJECT_DIR}/check.sh  user, script check.sh\n" +
+		"      Stop  http  http://localhost:8080/hook  project  not in effect: disableAllHooks is on in user settings\n" +
+		"    claude skills\n" +
+		"      skill  deploy  .claude/skills/deploy/SKILL.md  project, when invoked, pre-approves Bash(*), declares hooks, runs 2 shell commands\n" +
+		"      subagent  fmt:rev  /home/.claude/plugins/rev.md  plugin, when invoked, from fmt@m, mode bypassPermissions\n" +
+		"    claude plugins\n" +
+		"      fmt@m  user, version 1.0.0, /home/.claude/plugins/cache/fmt\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestPermissionsListingShowsOptions(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	at := func(scope model.Scope) model.Origin {
+		return model.Origin{Agent: model.AgentCodex, Scope: scope, InEffect: true}
+	}
+	off := at(model.ScopeUser)
+	off.InEffect, off.Why = false, text("sandbox_mode is set in .codex/config.toml, so Codex ignores default_permissions")
+
+	p.Projects([]model.Project{{
+		Path: model.NewPath(s, "/projects/app"), Status: model.ProjectOK, Origins: []model.Origin{{Agent: model.AgentCodex}},
+		Permissions: []model.Permissions{{
+			Agent: model.AgentCodex,
+			Options: []model.Option{
+				{Key: text("sandbox_mode"), Setting: model.Setting[redact.Text]{Layers: []model.Layer[redact.Text]{{Value: text("danger-full-access"), Origin: at(model.ScopeProject)}}}},
+				{Key: text("default_permissions"), Setting: model.Setting[redact.Text]{Layers: []model.Layer[redact.Text]{{Value: text("locked"), Origin: off}}}},
+			},
+			Rules: []model.PermissionRule{{Action: model.RuleDeny, Rule: text("locked ~/.ssh"), Origin: off}},
+		}},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  codex\n" +
+		"    codex permissions\n" +
+		"      sandbox_mode = danger-full-access  project\n" +
+		"      default_permissions = locked  user  not in effect: sandbox_mode is set in .codex/config.toml, so Codex ignores default_permissions\n" +
+		"      deny   locked ~/.ssh  user  not in effect: sandbox_mode is set in .codex/config.toml, so Codex ignores default_permissions\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
+func TestListingsShowLimitsAndNotes(t *testing.T) {
+	p, s, out, _ := setup(t)
+	text := func(raw string) redact.Text { v, _ := s.Scrub(raw); return v }
+	at := model.Origin{Agent: model.AgentCodex, Scope: model.ScopeProject, InEffect: true}
+
+	p.Projects([]model.Project{{
+		Path: model.NewPath(s, "/projects/app"), Status: model.ProjectOK, Origins: []model.Origin{{Agent: model.AgentCodex}},
+		Instructions: []model.Instruction{{Kind: model.InstructionFile, Path: model.NewPath(s, "/projects/app/AGENTS.md"),
+			Load: model.LoadLaunch, Read: model.ReadOK, Limit: 100, Note: text("cut under the combined reading"), Origin: at}},
+		Hooks: []model.Hook{{Event: text("Stop"), Type: text("command"), Run: text("notify"), Note: text("waits for review in /hooks"), Origin: at}},
+	}})
+
+	want := "projects (1)\n" +
+		"  /projects/app  codex\n" +
+		"    codex instructions\n" +
+		"      instructions  AGENTS.md  project, at launch, first 100 bytes  note: cut under the combined reading\n" +
+		"    codex hooks\n" +
+		"      Stop  command  notify  project  note: waits for review in /hooks\n"
+	if out.String() != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", out.String(), want)
+	}
+}

@@ -115,6 +115,262 @@ Streamable HTTP. The client:
 
 Source: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
 
+### Claude managed settings and trust
+
+From the settings, settings-reference, managed-settings and permissions
+pages (read 2026-11-22):
+
+- Settings files are strict JSON. A comment or trailing comma is an error,
+  so there's no JSONC parser.
+- Managed sources rank remote > MDM (macOS plist or `HKLM`) > files >
+  `HKCU`. Under the default `managedSourcesBehavior: "first-wins"` only the
+  top source with a policy key counts, apart from a short list of keys read
+  from every admin source. `"merge"` combines them by kind of key. `HKCU`
+  counts only when no admin source is present. jarx records every source it
+  sees and marks the ones that lose as not in effect.
+- The files are `managed-settings.json`, then `managed-settings.d/*.json` in
+  alphabetical order (hidden and non-`.json` files skipped). Windows'
+  legacy `C:\ProgramData\ClaudeCode\` isn't read by Claude, so not by jarx.
+- Registry: the JSON in a `REG_SZ` or `REG_EXPAND_SZ` value named
+  `Settings` under `SOFTWARE\Policies\ClaudeCode`, in `HKLM` and `HKCU`.
+  `platform` reads it with `golang.org/x/sys/windows/registry` in a
+  `_windows.go` file. Other OSes and `--home` get "not available".
+- jarx doesn't read the macOS plist at all. Claude's docs give only the
+  domain, and Apple's docs don't say where managed preferences live on disk,
+  so the PRD lists it under Limits.
+- Which file a key may come from is the Scope column of the settings index
+  (Any file, User or managed, Managed, Global config and so on). That table
+  ships as embedded data with an "as of" date and doubles as the known-keys
+  list for the unknown settings report.
+- Trust is the documented `projects["<path>"].hasTrustDialogAccepted` in
+  `~/.claude.json`, keyed on the git repo root. Parent folder trust doesn't
+  count, and home dir trust is never written. Anything but a bool is
+  "unknown".
+- `settings.local.json` lives at the repo root, except on Windows, outside a
+  repo, or when ownership doesn't match. A file left in the start dir by
+  older versions is read too. If it's tracked in git or `.claude` is a
+  symlink, its allows wait for trust like project ones.
+
+Sources: https://code.claude.com/docs/en/settings,
+https://code.claude.com/docs/en/settings-reference,
+https://code.claude.com/docs/en/managed-settings,
+https://code.claude.com/docs/en/permissions
+
+### What an @import can point at
+
+A CLAUDE.md `@import` is a path someone else wrote, and Claude follows it up
+to four hops, absolute or relative. So jarx treats every import target, and
+every symlink on the way to one, as untrusted. Checks live in `fsys`, so no
+reader can skip them:
+
+- **Credential files.** `fsys` asks `credmeta.Location` about the path and
+  about where its symlinks lead, and refuses content reads of either with
+  `ErrCredential`. Stat still works, for existence checks. An instruction
+  that pulls in a credential is listed as "credential file, not read" and
+  raised as `JARX-CLAUDE-002`, because Claude would load the secret even
+  though jarx won't.
+- **Network paths.** UNC paths (`\\host\share`, `\\?\UNC\...`), the `\\.\`
+  device namespace, and `/net` and `/Network` on unix are refused from the
+  text alone. A symlink is resolved one component at a time and its target
+  is checked as text before anything looks it up, so a link to a share
+  can't make jarx contact it (on Windows, a lookup can send the share your
+  NTLM hash). `\\wsl$` is allowed, as the docs say it isn't a network path.
+- **Things that aren't files.** `ReadFile` and `Open` stat first and refuse
+  anything that isn't a regular file, so a FIFO can't block a scan and a
+  device can't be read forever.
+- **Loops and fan-out.** Imports stop at Claude's four hops, a file is listed
+  once per project however often it's imported, and one file can name at
+  most 500 imports.
+- **Escaping the fake home.** Absolute import paths go through `MapPath`,
+  and `os.Root` keeps every read and link under `--home` inside it.
+- **The terminal.** A file name or file text is printed by `report`, which
+  escapes C0 and C1 controls, DEL and the Unicode bidi controls, so a hostile
+  name can't recolor, move the cursor, fake a new line or flip the text.
+
+Sources: https://code.claude.com/docs/en/memory#import-additional-files,
+https://code.claude.com/docs/en/memory#share-rules-across-projects-with-symlinks
+
+### Nothing a hook, skill or plugin declares runs
+
+Hooks, skills and plugins all carry things Claude runs: hook commands,
+`http` hooks that POST to a URL, `mcp_tool`, `prompt` and `agent` hooks,
+the `` !`cmd` `` and ` ```! ` blocks a skill runs before Claude sees it,
+plugin hook scripts, plugin dependency installs and marketplace fetches.
+jarx reads all of it as text and never runs any of it:
+
+- Process starts are lint-banned outside `discover` (hardened git), and the
+  network is `netguard`'s alone, so the adapter has no way to run a command
+  or send a request.
+- Commands are shown as written. jarx resolves only `${CLAUDE_PROJECT_DIR}`
+  and `${CLAUDE_PLUGIN_ROOT}`, and only to find a hook script so it can read
+  it. Every other variable stays as written, so an env secret can't end up
+  in the output.
+- Hook scripts and plugin files are read through `fsys`, with every guard
+  from "What an @import can point at".
+- A canary test plants each hook type, a hook script, skill injection and a
+  plugin hook, each of which would write a marker file or call a local test
+  server if it ran. It scans and checks that neither happened.
+- `installed_plugins.json` names its fields in the docs but not its shape,
+  so jarx reads it as an observed format and calls a plugin's install state
+  unknown when the file doesn't match.
+
+Sources: https://code.claude.com/docs/en/hooks,
+https://code.claude.com/docs/en/skills,
+https://code.claude.com/docs/en/sub-agents,
+https://code.claude.com/docs/en/plugins/loading,
+https://code.claude.com/docs/en/plugins-reference
+
+### Codex settings that quietly override others
+
+From the Codex config, permissions and managed configuration docs (read
+2026-11-22). jarx keeps every layer with its origin and marks the ones that
+lose, so an override shows up as a "not in effect" row with the reason:
+
+- **`sandbox_mode` wins over `default_permissions`.** If any loaded layer
+  sets `sandbox_mode`, including a trusted project's `.codex/config.toml`,
+  Codex uses the legacy sandbox and every rule in the permission profile
+  stops applying. A managed `allowed_permission_profiles` is the only thing
+  that reverses it. When a project layer does it to a profile set elsewhere,
+  that's `JARX-CODEX-001` (high): a repository quietly turning off your deny
+  rules is the same class of risk as `JARX-CLAUDE-002`. Your own layers
+  doing it is `JARX-CODEX-005` (medium).
+- **Permission profiles merge by name**, path by path, highest layer first,
+  so a trusted project can replace one entry in your profile.
+  `JARX-CODEX-002` flags a project that touches a profile another layer
+  defines.
+- **Legacy `managed_config.toml`** sits above `config.toml` and CLI flags at
+  startup (`/etc/codex/` on Unix, the Codex home on Windows).
+- **Profiles** apply only with `--profile`, which jarx can't see, so profile
+  files are listed as not in effect with that reason.
+- **Requirements** don't win quietly: a disallowed value falls back to an
+  allowed one and Codex tells the user. jarx marks the value not in effect
+  with the allowed list.
+
+Sources: https://developers.openai.com/codex/config-file/config-basic,
+https://developers.openai.com/codex/config-file/config-advanced,
+https://developers.openai.com/codex/permissions,
+https://developers.openai.com/codex/enterprise/managed-configuration
+
+### Codex's instruction cap is described two ways
+
+The AGENTS.md guide says Codex "stops adding files once the combined size
+reaches" `project_doc_max_bytes` (32 KiB by default). The advanced config
+page says it's "how much to read from each `AGENTS.md` file". jarx doesn't
+pick one:
+
+- A file is marked not in effect only when the per-file reading cuts it,
+  since that reading cuts the least. Saying the agent doesn't see something
+  it might see is the worse mistake.
+- The byte limit Codex reads under the per-file reading goes on the
+  instruction, and a note says what the combined reading would cut, counting
+  raw bytes (a masked secret changes the text's length) in chain order:
+  the global file, then the project root down.
+- The rules always get the whole file. Text past the cap isn't in the first
+  prompt, but it's on disk and the agent can read it with a tool.
+- A repository can set the cap and the fallback filenames in its own
+  `.codex/config.toml`, so `JARX-CODEX-006` flags a trusted project that
+  does.
+
+Source: https://developers.openai.com/codex/guides/agents-md,
+https://developers.openai.com/codex/config-file/config-advanced
+
+### Which HTML comments the agent reads
+
+The memory docs say "block-level HTML comments in CLAUDE.md files are
+stripped before the content is injected into Claude's context", that
+"comments inside code blocks are preserved", and that the Read tool still
+shows them. Nothing else is documented.
+
+| Where | Agent reads it | jarx |
+|---|---|---|
+| Block-level comment in a CLAUDE.md file | no, stripped | skipped |
+| Inline comment in a CLAUDE.md file | not documented | flagged |
+| Any comment in rules, imports, `CLAUDE.local.md`, skills, output styles, AGENTS.md | not documented | flagged |
+| Comment in a fenced code block or a code span | yes, but it renders as code | not hidden, skipped |
+
+Where the docs are silent, jarx assumes the agent reads the comment.
+Missing a hidden instruction is the worse mistake. A block-level comment is
+one that starts its line with at most 3 spaces of indent (CommonMark). The
+comment itself is info; what's in it goes through the content rules, and a
+hit there is the high hidden-text rule.
+
+Source: https://code.claude.com/docs/en/memory
+
+### Allows that run more than they look like
+
+An allow rule's command pattern goes through `catalog/commands.tsv`. Each
+row is a program, an optional subcommand, a class (runs any code, runs the
+repo's code, or has an escape) and the why, in our own words.
+
+- Claude splits compound commands and strips wrappers like `timeout` and
+  `nice` before matching, and its prefix rules can't approve `watch` or
+  `find -exec`. So those aren't in the table. `npx`, `docker exec` and
+  `xargs` with flags aren't stripped, so they are.
+- A trailing `:*` reads like ` *`. The program loses its dir, `.exe` and
+  version suffix, so `/usr/bin/python3.12` is `python`. A relative path is a
+  file in the repo.
+- A listed subcommand matches open or exact (`npm run *`, `npm test`). A
+  program's own row matches only with open args right after it, or flags
+  then open args (`python -c *`). Task runners like `make` match however
+  they're called, since every target is the repo's. An interpreter with a
+  script path (`python scripts/build.py *`) runs a repo file.
+- `git` is its own class: `git -c` and aliases can run any command, but it's
+  the most common allow there is, so it's medium, not high.
+
+Claude path rules resolve the way the permissions docs say: `//path` from
+the root, `~/path` from home, `/path` from the settings source (`~/.claude`
+for user settings, the project otherwise), anything else from the working
+dir. A path with no glob covers everything under it. Each grant is tested
+against credmeta's sample credential paths.
+
+### Unknown keys and typos
+
+Each adapter checks the keys it reads against its own table and leaves a
+`model.Unknown` with the key, the file, and, when there is one, the known key
+it's probably a typo of (`Near`) or what the docs say about it (`Note`).
+`analyze/unknown` only reads those, so the agents' tables stay in the
+adapters.
+
+- A typo is checked against keys at the same level: `permissions.defaultMod`
+  against the other `permissions` keys, `[mcp_servers.x].comand` against the
+  other server keys. A tie gives no guess.
+- Codex's walk goes into a table only when the reference lists keys under
+  it. That keeps it out of maps of names you choose, like
+  `mcp_servers.<id>.env`, and out of `[hooks]`.
+- Whether a typo is a safety typo depends on the key it was meant to be.
+
+### Snapshots keep hashes, not text
+
+A snapshot is jarx's own list of items, not a dump of the model. Each item
+has an identity (its project, its kind and a key like `claude allow Bash(*)
+in <file>`) and a state: in effect and why, a value, and a 16-hex SHA-256 of
+its masked text. The diff matches items by identity, so it says "this allow
+went away", not "line 12 changed".
+
+- Snapshots go through `jarxdir` as `snapshots/<UTC time>-<random>.json`,
+  and each save drops all but the newest 20.
+- Reading one back puts every string through the scrubber again. That's
+  safe because scrubbing is idempotent: a match that overlaps a mask the
+  scrubber writes is left alone. A mask only counts when it's one of the
+  scrubber's own kinds, maybe with a fingerprint, ending at a word boundary,
+  so text dressed up as a mask, like `REDACTED:ghp_<token>`, can't hide the
+  token behind it.
+
+### Placeholders are info, not unmasked
+
+A pattern match is always masked. Whether it looks like a placeholder only
+changes the finding: `JARX-SECRET-003` (info) instead of 001 or 002. This
+keeps the noise of example values out of the high findings without ever
+showing a real secret.
+
+- Token formats judge by entropy. Their bodies are long and random, so
+  `ghp_aaaa...` is clearly fake.
+- The name rule judges by shape: words like `example`, `changeme`, `your`
+  or `xxx`, an `<angle bracket>` hole, or one char repeated. Entropy only
+  counts from 16 chars up. Entropy per char can't go past log2 of the
+  length, so under 8 chars every value scores below 3 bits, and a real
+  short password would always look fake.
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
@@ -140,6 +396,7 @@ a spot in the code that makes breaking it hard.
 | Never calls a tool | The `mcp` package has constants only for `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
 | Only the listed network calls | `netguard` is the only package allowed to make a network connection. golangci `forbidigo` bans `http.Get`, `http.Client`, `http.Transport`, `http.DefaultClient`, `net.Dial*`, `net.Dialer`, `tls.Dial*`, `tls.Client`, DNS lookups (`net.Lookup*`, `net.Resolver`), `net/smtp` and `net/rpc` everywhere else. Inside netguard, every connection is checked in the dialer's `Control` hook, after DNS and right before connect, on the exact IP being connected, so DNS rebinding and reconnects can't get past it. A literal IP host is also checked before dialing, because Go rewrites `0.0.0.0`, `::` and an empty host into a dial to the local machine before `Control` sees it. The tests run with a fake DNS server and a test-only rule that refuses any non-loopback connection, so a broken guard fails its tests instead of reaching a real address. |
 | Only discover runs a process | `forbidigo` bans `exec.Command`, `exec.CommandContext`, `exec.LookPath` (it reads the real PATH), `os.StartProcess` and `syscall.Exec`/`ForkExec` outside `discover`, which only runs hardened git. `proc` joins it in phase 4. git is found through `platform.Env`'s PATH, never under `--home`. |
+| Never reads a credential value | `fsys` refuses content reads of any path `credmeta.Location` calls a credential, checked on the path and on where its symlinks lead, so following an `@import` or a symlinked rule can't open one. Stat still works for existence checks. The phase 5 metadata parsers get their input through an explicit `fsys` method, not by opening files themselves. |
 | Never writes agent config | `fsys` has no write methods. The only writer is `jarxdir`, which is rooted at jarx's state dir (`os.UserConfigDir()/jarx`, or `<home>/.jarx-state` with `--home`) with `os.Root`. `forbidigo` bans `os.WriteFile`, `os.Create`, `os.Mkdir*`, `os.Remove*`, `os.Rename` and friends everywhere else (tests may write fixtures). |
 | Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, PATH, state dir, system roots). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`, and bans `os.Open`, `os.ReadFile`, `os.Stat`, `os.OpenRoot`, `filepath.Walk*` and friends outside `fsys`, `jarxdir` and `platform`. Under `--home`, `fsys` confines every read to the fake home with `os.Root`, so a fixture that points at a real path, a `..` trick or a symlink can't reach the real machine. `--home` builds a `platform.Env` with no system roots, registry, plists, real env or real PATH. |
 | Only approved dependencies | golangci `depguard` lists the five approved modules plus stdlib. A new import fails lint until someone approves it. |
@@ -227,25 +484,163 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
    previous one. **drift** sends changed tools back through **poison**.
 8. **report** prints the result. **ui** serves the same snapshot.
 
+## Terminal output
+
+This is jarx's output style. Every command in every phase follows it. New
+output goes into the blocks and the tree format below. It doesn't get a
+new layout of its own. When something really fits no block, ask before
+adding one, and add it here.
+
+### A run, top to bottom
+
+Every run starts with the pixel `JARX` banner, with the version next to
+its last row, then the tagline. Then `jarx scan` shows what it checked,
+then what it found, in this order:
+
+1. a header: fake home or this machine, and the OS
+2. **agents on this machine**: one row per agent, with its config dir and
+   its project counts by trust, or "not found"
+3. **scanned**: counts of what was read, with notes on what wasn't
+4. one summary line: findings by severity, then what changed since the
+   last scan
+5. **changed since the last scan**, only when something did
+6. **your user config**: user-level problems, once, since they apply to
+   every project
+7. one group per project, worst project first: its findings, then what
+   the agents load there
+8. a pointer to `jarx scan --all`
+
+Where later phases go:
+
+- Facts about an agent (MCP servers, the installed version) go on its row
+  in the agents block.
+- New things jarx reads (MCP servers and tools, credential locations,
+  history sessions) become rows of counts in the scanned block, with
+  skips as notes.
+- Findings from new analyzers join the same groups: the project a file is
+  in, or the user config group. They never get a block of their own.
+- Per-project facts that aren't findings (an MCP server's tools, a
+  credential's reach) are a line in the project's group, like "loads
+  here", and in full under `--all`.
+- Full lists and views go in the `--all` inventory, after the findings.
+
+### Blocks
+
+- A block is a bold heading in plain lowercase words, then a tree. Blocks
+  are one blank line apart.
+- There are no other heading styles: no underlines, boxes, rules, caps
+  or emoji.
+- A group heading may add facts after the name, joined by the list
+  separator, like `~/projects/app  claude trusted · codex trusted`.
+
+### Trees
+
+- The glyphs are `├─ │ └─` on a terminal that shows UTF-8, and `+- | \-`
+  otherwise. Nothing else draws structure.
+- An entry is one line, or a title line plus detail lines. The first
+  detail line hangs off the title on its own branch (`└─`), and later ones
+  are indented under it.
+- When the entries in a tree have more than one line, a line with just the
+  tree bar sits between them. Trees of one-line entries stay tight.
+- A long tree stops at a cap and ends in a count of the rest, like
+  `… 6 more: 2 MED · 4 INFO  (jarx scan --all)`. Anything a user has to
+  act on (critical and high findings) is never hidden by a cap.
+
+### Findings
+
+```
+├─ HIGH  An @import pulls in a credential file  CLAUDE-002
+│  └─ .env  an @import in CLAUDE.md points at a credential file; jarx…
+│
+└─ MED   A skill runs shell before Claude sees it  CLAUDE-003
+   └─ .claude/skills/release/SKILL.md  release runs 1 shell command…
+```
+
+- The title line is the severity (`CRIT`, `HIGH`, `MED `, `INFO`, four
+  wide so titles line up), two spaces, the rule's title with a capital
+  first letter, two spaces, then the rule ID without `JARX-`. When the
+  line has no room for the ID, it moves down next to the file.
+- The detail line is the file, with `:line` when known, then the
+  evidence. Under 80 columns the evidence gets its own line.
+- A rule's `Title` is at most 42 chars, so the title line fits 80 columns.
+  `NewRegistry` refuses a longer one. The longer reason goes in `Detail`,
+  which `--all` shows as `why:`, with the rule's `Fix` as `fix:`.
+- Findings are sorted worst first. A group shows at most 10, but every
+  critical and high one always shows.
+
+### Text
+
+- Paths are relative to the project, or start from `~`. Evidence gets the
+  same treatment, so absolute paths don't fill the line.
+- Inline lists are joined with ` · `, or ` - ` in ASCII.
+- Counts read as words with the right plural: `1 project`, `2 projects`.
+- A note next to a count (what was skipped, why it wasn't read) is dim
+  and sits in a column. When one note doesn't fit, every note in that
+  tree moves to its own line, so they stay lined up.
+- Words are plain and lowercase, with no em dashes.
+- Text from a file is always escaped before it's printed, and only jarx
+  picks colors, so a file can't color or move the terminal.
+
+### Width, color and charset
+
+- Lines never wrap. Each one is cut to the terminal's width with an
+  ellipsis. `--all` wraps long evidence and reasons at spaces instead of
+  cutting them.
+- Colors are the basic 16 only, and the words always say the same thing,
+  so nothing depends on color. Headings are bold. Notes, file names and
+  rule IDs are dim. `CRIT` is bright red, `HIGH` red, `MED` yellow and
+  `INFO` cyan. Trust is green for trusted, yellow for untrusted, and dim
+  for unknown.
+- `platform.DetectTerm` decides the rest. Color needs a terminal that
+  takes ANSI escapes (on Windows, jarx turns on virtual terminal
+  processing through `x/sys`), no `NO_COLOR`, and `TERM` other than
+  `dumb`. Box drawing needs a terminal showing UTF-8 (the console's output
+  code page on Windows, the locale elsewhere). Piped output is always
+  ASCII with no color, because Windows PowerShell 5.1 re-encodes what a
+  program prints. The width is the terminal's, then `COLUMNS`, then 80.
+- Output has to look right in PowerShell, Windows PowerShell 5.1, cmd,
+  Windows Terminal, macOS Terminal, iTerm2 and Linux terminals.
+
+### The banner
+
+- The banner is the same on every run, so two scans still diff cleanly.
+- A version too long to sit next to it, like a dev build's, gets its own
+  line instead of being cut.
+
+### `--all`
+
+`--all` is the same report with nothing held back: no caps, the evidence
+wrapped instead of cut, each finding's `why:` and `fix:`, what platform
+resolved about the machine before the report, and the full inventory
+after it.
+
+### Building on it
+
+New output uses `report`'s pieces instead of printing around them:
+`Style`, `line` and `seg` for text and tone, `emit` to cut a line to the
+width, `tree` and `spacedTree` for blocks, and `branch` for title and
+detail lines. Tests pin the layout with an exact expected view of the
+demo scan at 80 columns, so a layout change shows up as a test change.
+
 ## Package layout
 
 | Package | Job | PRD section |
 |---|---|---|
 | `cmd/jarx` | main, wiring only | CLI |
 | `internal/cli` | subcommands with stdlib `flag` | CLI |
-| `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`). Registry and plist reads land here in phase 3. Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
-| `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. | Walking a repo |
+| `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`), and terminal facts for the report (a terminal or not, width, ANSI, UTF-8). Registry reads land here in phase 3 (macOS plists aren't read, see Limits in the PRD). Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
+| `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. Refuses network paths (and symlinks to them), anything that isn't a regular file, and content reads of credential locations (see "What an @import can point at"). | Walking a repo |
 | `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
-| `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. The secret patterns themselves arrive with `catalog` in phase 3. | Promise 4, Secrets |
+| `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. A `Text` keeps the kind and fingerprint of what it masked, never the value. | Promise 4, Secrets |
 | `internal/model` | agent-neutral inventory, `Origin`, `Path`, `Setting[T]` (one layer per scope, highest first, with each layer marked in effect or not and why; adapters decide, the model only holds the result), `Project`, `Unknown`. Grows per phase. | Architecture |
 | `internal/finding` | Finding, severity, rules as plain values with IDs like `JARX-MCP-001`, a `Registry` built by `scan` from every analyzer's rules (no global registry), worst-first sort, and `JARX-SCAN-001` for files fsys skipped as too large | Detection rules |
 | `internal/discover` | merges every adapter's project records with extra paths, sets each project's status (ok, stale, outside fake home, not absolute, can't check), reports fsys skips as findings, and walks each repo with hardened git or the fallback walk | Project discovery |
-| `internal/agent` | the adapter interface (`Agent`, `Projects`) and the shared `Context` (env, fsys, scrubber). Shared parsers (jsonc, frontmatter, `@` imports) land here in phase 3. | Architecture |
+| `internal/agent` | the adapter interface (`Agent`, `Projects`), the optional `SettingsReader`, `InstructionReader` and `ExtensionReader` that discover calls, and the shared `Context` (env, fsys, scrubber). Shared parsers (frontmatter keys and raw blocks, tool lists, `@` imports) land here in phase 3. Claude settings are strict JSON, so there is no jsonc parser. | Architecture |
 | `internal/agent/claude` | Claude paths, precedence, trust, MCP approval, modes | Scope: Claude Code |
 | `internal/agent/codex` | Codex paths, profiles, legacy `sandbox_mode` switch, requirements | Scope: Codex CLI |
-| `internal/catalog` | embedded data: builtin tools, vendors, advisories, secret patterns, each with an "as of" stamp | Built-in tools catalog, Vendor badge, Advisory data |
-| `internal/credmeta` | cred locations and safe metadata parsers (aws config, ssh header, gh hosts, `.env` keys) | Credentials |
-| `internal/analyze/secrets` | prefix and entropy patterns, the sees state | Secrets |
+| `internal/catalog` | embedded data: builtin tools, vendors, advisories, secret patterns, the command table, each with an "as of" stamp | Built-in tools catalog, Vendor badge, Advisory data |
+| `internal/credmeta` | cred locations and safe metadata parsers (aws config, ssh header, gh hosts, `.env` keys). `Location` lands in phase 3 because `fsys` needs it to refuse credential reads; the parsers come in phase 5. It never imports `fsys`. | Credentials |
+| `internal/analyze/secrets` | findings from what the scrubber masked: seen, plain text or placeholder | Secrets |
 | `internal/analyze/poison` | text rules over every text the agent reads | Detection rules |
 | `internal/analyze/perms` | effective permissions with origin and in-effect reason | Effective permissions view |
 | `internal/analyze/reach` | per-channel verdicts, observed modes, credential view | Reachability verdicts, Credential view |
@@ -260,7 +655,7 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
 | `internal/history` | cursor, jsonl, zstd and read-only sqlite readers (observed formats) | Session history |
 | `internal/analyze/versions` | installs, PATH winner, advisory match, catalog age warning | Agent installs and versions |
 | `internal/analyze/unknown` | the unknown settings report | Unknown settings report |
-| `internal/report` | the only output writer: `Out` and `Err` streams that take a literal format and `redact.Text` values, and an `Error` that scrubs error text. Grows into the terminal report in phase 2. | CLI |
+| `internal/report` | the only output writer: `Out` and `Err` streams that take a literal format and `redact.Text` values, and an `Error` that scrubs error text. Also the scan report (see "Terminal output"), laid out for the terminal's width, colors and charset, and the banner. | CLI |
 | `internal/ui` | server, middleware (host, token, CSRF, CSP), templates, embedded static files | Dashboard |
 | `internal/keystore` | go-keyring for jarx's own entry, or an env var name | Optional LLM review |
 | `internal/llm` | OpenAI-compatible client over netguard, preview, schema check and retry, quote check, cache | Optional LLM review |
@@ -290,7 +685,9 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
   for the expected findings, so the demo can't silently stop showing them.
 - **Line endings:** `.gitattributes` sets `* text=auto eol=lf`, and marks
   `*.sqlite`, `*.zst` and images as `binary`, so fixture bytes (and hashes)
-  are identical on Windows and Linux runners.
+  are identical on Windows and Linux runners. Analyzer rule fixtures under
+  `internal/analyze/*/testdata/` are `-text`, since some test exact bytes
+  like CRLF or a BOM.
 
 ## Dependencies
 
@@ -300,7 +697,8 @@ Stdlib plus these, and depguard enforces the list:
 - `github.com/zalando/go-keyring`
 - `github.com/klauspost/compress` (zstd)
 - `modernc.org/sqlite`
-- `golang.org/x/sys` (Windows job objects)
+- `golang.org/x/sys` (Windows job objects, the console mode and terminal
+  size)
 
 `go.mod` targets the latest stable Go (1.27.4 right now). jarx needs at least
 1.25 for `http.CrossOriginProtection` and `os.Root`.
@@ -325,6 +723,8 @@ Jobs:
   v2.15.0. The config (`.golangci.yml`) uses `default: all`, and every
   disabled linter has a written reason. golangci's gosec linter covers gosec,
   so there's no separate job. `forbidigo` and `depguard` hold the choke points.
+  `uniq-by-line` is off, so another linter on the same line can't hide a
+  forbidigo ban message.
 - **vuln:** govulncheck, run with `go run` at a pinned version.
 - **offline:** on ubuntu, `jarx scan --home testdata/demo` runs inside a
   network namespace with no network at all, under `strace -f`. It has to
@@ -413,7 +813,8 @@ The Claude adapter, then the Codex adapter: settings with precedence and
 trust, instruction files (parent folders, subfolders, `@` imports), memory,
 output styles, skills, commands and hooks. Then `catalog` (secret patterns),
 `analyze/secrets`, `analyze/poison`, `analyze/perms`, `analyze/unknown`, and
-`snapshot` with diff.
+`snapshot` with diff. Last, the scan report gets its terminal layout, since
+by then there's enough output to need one.
 
 - Claude goes first because it has the most surface and the most precedence
   rules. Codex right after is what proves the model really is agent-neutral,

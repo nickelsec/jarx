@@ -96,15 +96,27 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
 - **Settings:** managed (`managed-settings.json` and `managed-settings.d/*.json`
   in the managed dir; macOS `/Library/Application Support/ClaudeCode/`,
   Linux/WSL `/etc/claude-code/`, Windows `C:\Program Files\ClaudeCode\`; plus
-  the macOS plist domain and the Windows `HKLM`/`HKCU` policy keys), user
-  `~/.claude/settings.json`, project `.claude/settings.json`, local
-  `.claude/settings.local.json`, and `~/.claude.json`. Honor
-  `CLAUDE_CONFIG_DIR`.
-- **Precedence:** managed > `--settings` > local > project > user. Two quirks
-  that matter: `defaultMode` of `auto` or `bypassPermissions` is ignored from
-  project and local files, and project `allow` rules,
-  `additionalDirectories` and `extraKnownMarketplaces` only count once the
-  folder is trusted. Deny and ask apply right away.
+  the `Settings` value under the Windows `HKLM` and `HKCU`
+  `SOFTWARE\Policies\ClaudeCode` keys), user `~/.claude/settings.json`,
+  project `.claude/settings.json`, local `.claude/settings.local.json`, and
+  `~/.claude.json`. Honor `CLAUDE_CONFIG_DIR`. The macOS managed preferences
+  domain isn't read (see [Limits](#limits)).
+- **Precedence:** managed > `--settings` > local > project > user. Inside
+  managed, sources rank remote > MDM > files > HKCU, and by default the first
+  one with a policy key wins (`managedSourcesBehavior`). Each key's allowed
+  files come from the settings index, so a managed-only key in a project file
+  is listed as not in effect. Two quirks that matter: `defaultMode` of `auto`
+  or `bypassPermissions` is ignored from project and local files, and project
+  `allow` rules, `additionalDirectories`, `extraKnownMarketplaces` and most
+  `env` values only count once the folder is trusted. Deny and ask apply right
+  away. Trust is `projects["<path>"].hasTrustDialogAccepted` in
+  `~/.claude.json`, keyed on the git repo root. A missing or odd value is
+  "unknown".
+- **Mode locks:** `permissions.disableBypassPermissionsMode` and
+  `disableAutoMode` (also accepted as `permissions.disableAutoMode`) work
+  from any file, take `"disable"`, and the strictest value wins. A locked
+  `bypassPermissions` or `auto` default mode isn't in effect. For auto the
+  docs say the session starts in `default`; lower layers don't take over.
 - **MCP:** local and user scope in `~/.claude.json`, project `.mcp.json`,
   plugin `.mcp.json` or `plugin.json`, managed `managed-mcp.json`, and the
   `mcpServers` frontmatter in agent and subagent files (`.claude/agents/`,
@@ -142,8 +154,18 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
   files `$CODEX_HOME/<name>.config.toml`, `/etc/codex/config.toml`, managed
   `requirements.toml` (`/etc/codex/` or `%ProgramData%\OpenAI\Codex\`), legacy
   `managed_config.toml`.
-- **Precedence:** CLI > project > profile > user > cloud-managed > system >
-  defaults. Trust comes from `[projects."<path>"] trust_level`.
+- **Precedence:** legacy `managed_config.toml` (applied at startup, above
+  even CLI flags) > CLI > project > profile > user > cloud-managed > system >
+  defaults. Trust comes from `[projects."<path>"] trust_level`. Project files
+  load from the project root marker (`.git` by default, or
+  `project_root_markers`) down to the working dir, closest first, and only in
+  trusted projects. A profile file applies only with `--profile <name>`, and
+  `[profiles]` tables or a `profile` key in `config.toml` are ignored.
+  `requirements.toml` constrains values instead of setting them.
+- **Silent overrides to watch:** `sandbox_mode` in any loaded layer makes
+  Codex ignore `default_permissions` (unless managed
+  `allowed_permission_profiles` is set), and permission profiles merge by
+  name, so a trusted project can change your profile without restating it.
 - **MCP:** `[mcp_servers.<id>]` with `enabled`, `enabled_tools`,
   `disabled_tools`, stdio and streamable HTTP fields, and the admin allowlist
   in `requirements.toml`.
@@ -152,10 +174,20 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
   `[permissions.<name>]` profiles, per-tool MCP `approval_mode`.
 - **Instruction files:** global and project `AGENTS.override.md`,
   `AGENTS.md`, `project_doc_fallback_filenames`, the `project_doc_max_bytes`
-  cap.
-- **Skills and hooks:** `.agents/skills`, `$HOME/.agents/skills`,
+  cap. One file per dir, the first non-empty one, from the project root
+  down. The docs describe the cap two ways (a combined budget in the
+  AGENTS.md guide, a per-file limit in the advanced config page), so jarx
+  marks a file off only when the per-file reading cuts it and notes what
+  the combined reading would cut. The rules always read the whole file.
+  Project files load only in a trusted project. The AGENTS.md guide doesn't
+  say so, but the Codex 0.150.0 changelog (2026-08-26) does: "Untrusted
+  projects no longer supply project-level `AGENTS.md` instructions." The
+  global file loads either way.
+- **Skills and hooks:** `.agents/skills` from the working dir up to the repo
+  root, `$HOME/.agents/skills` (`HOME`, not `CODEX_HOME`),
   `/etc/codex/skills`, all documented `hooks.json` locations and inline
-  `[hooks]`.
+  `[hooks]`. Codex runs a non-managed hook only after you review and trust
+  it in `/hooks`; jarx notes that it can't see whether you did.
 - **Agent login:** `$CODEX_HOME/auth.json` existence only, plus the
   `cli_auth_credentials_store` setting.
 
@@ -498,11 +530,25 @@ copy other scanners.
 
 ### Hidden or tricky text
 
-- Unicode tag characters, bidi overrides and zero-width characters in
-  instruction files, skills and tool descriptions.
-- HTML comments in instruction files (the agent sees them, the rendered view
-  hides them).
-- ANSI escape tricks.
+- `JARX-POISON-001` (high): Unicode tag characters. They spell out ASCII
+  that renders as nothing, so the finding shows what they spell. Emoji tag
+  sequences, like the England flag, don't count.
+- `JARX-POISON-002` (medium): bidi controls, so the text reads differently
+  than it looks.
+- `JARX-POISON-003` (info): zero-width characters. A BOM at the start of a
+  file doesn't count, and neither do joiners inside emoji or scripts that
+  need them.
+- `JARX-POISON-004` (medium): terminal control sequences, like ANSI escapes
+  or a lone carriage return, that hide or rewrite text when it's printed.
+- `JARX-POISON-005` (info): an HTML comment the agent reads but a rendered
+  view hides. The memory docs say Claude strips block-level comments from
+  CLAUDE.md files, so those are skipped. Everything else counts, since the
+  docs don't say it's stripped: inline comments, and comments in rules,
+  imports, `CLAUDE.local.md`, skills, output styles and AGENTS.md. Comments
+  in code blocks and code spans render as code, so they aren't hidden.
+- `JARX-POISON-007` (high): the content rules below, found inside hidden
+  text: a comment the agent reads, tag characters, or words split by
+  zero-width characters. A hit there is this rule, not the visible one.
 
 ### What the text rules run on
 
@@ -520,18 +566,38 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 
 ### Poisoned content
 
-- Text aimed at the agent ("ignore previous", "don't tell the user", "before
-  using any other tool").
-- Sensitive path references (`~/.ssh`, `.aws`, `.env`).
-- Exfil patterns: URLs plus encode-and-send instructions, `curl | sh`, base64
-  blobs.
+- `JARX-POISON-006` (medium): text aimed at the agent that works against
+  you: overriding its other instructions ("ignore your previous
+  instructions"), keeping things from you ("don't tell the user"), doing
+  things on the quiet, or "before using any other tool". "Don't deploy
+  without telling the user" is the opposite, so a negated sentence doesn't
+  count. English phrases only.
+- `JARX-POISON-008` (medium): exfil shapes: download-then-run (`curl | sh`
+  and the PowerShell forms), a send tool used on a credential file,
+  encode-and-send instructions, and base64 blobs of 200 chars or more.
+- `JARX-POISON-009` (info): pointers to credential and key files (`~/.ssh`,
+  `.aws/credentials`, `.env`, `.netrc` and the like). `.envrc` doesn't count.
 - Annotations that lie, like a delete tool marked `readOnlyHint`.
 - Tool shadowing: two servers exposing the same tool name.
 
 ### Hooks
 
-- Network calls, download-then-execute, writes to shell rc or startup files,
-  running from temp dirs.
+- `JARX-POISON-010` (info): network calls, including every http hook.
+- `JARX-POISON-011` (high): download-then-execute. In a hook it's this rule,
+  not `JARX-POISON-008`.
+- `JARX-POISON-012` (high): writes to shell rc or startup files (`.bashrc`,
+  `$PROFILE`, crontab, launch agents, the Windows Run key and the like).
+  Reading one doesn't count.
+- `JARX-POISON-013` (medium): running a program from a temp dir. A project's
+  own scripts don't count, even when the project is cloned into a temp dir.
+
+### Skills
+
+- A skill or command whose body runs shell commands before the agent sees
+  it (Claude's `` !`cmd` `` and ` ```! ` blocks), unless
+  `disableSkillShellExecution` turns that off.
+- A repository skill that pre-approves tools (`allowed-tools`) or adds
+  hooks. Claude applies both even in a folder you haven't trusted.
 
 ### MCP supply chain and config
 
@@ -555,11 +621,50 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 
 ### Permissions and auto-approval
 
-- `bypassPermissions`, `Bash(*)`, `danger-full-access`,
-  `approval_policy = never`.
-- `enableAllProjectMcpServers`, Codex per-tool `approval_mode = approve`.
-- Allow rules covering credential paths.
-- Codex `sandbox_mode` silently overriding permission profiles.
+- `JARX-PERMS-001` (high): Claude's default mode is `bypassPermissions`.
+- `JARX-PERMS-002` (high): Codex runs with no sandbox, through
+  `sandbox_mode = "danger-full-access"` or
+  `default_permissions = ":danger-full-access"`.
+- `JARX-PERMS-003` (medium): Codex `approval_policy = "never"`.
+- `JARX-PERMS-004` (high): a Claude allow for every command: `Bash`,
+  `Bash(*)` (the docs say they're the same), or the PowerShell forms.
+- `JARX-PERMS-005` (high): a grant that covers a credential file: a Claude
+  `Read` or `Edit` allow, an `additionalDirectories` entry, a sandbox
+  `allowRead` or `allowWrite` path, or a Codex profile `read` or `write`
+  path. The credential paths are credmeta's, the same list the read guard
+  uses.
+- `JARX-PERMS-006` (medium): `enableAllProjectMcpServers` is on. Codex
+  per-tool `approval_mode = approve` comes with phase 4.
+- `JARX-PERMS-007` (info): Codex `approval_policy = "untrusted"` (retired,
+  and the docs say it can stop Codex from starting) or `"on-failure"`
+  (deprecated).
+- `JARX-PERMS-008` (high): an allow that looks narrow but runs any code: an
+  interpreter, shell or wrapper with open args (`Bash(python *)`,
+  `Bash(sh -c *)`, `Bash(env *)`, `Bash(sudo *)`, `Bash(npx *)`), or a package
+  manager open after its name (`Bash(npm *)` covers `npm exec`).
+- `JARX-PERMS-009` (medium): an allow that runs code the repo defines, so
+  whoever can push to the repo decides what runs: `Bash(npm run *)`,
+  `Bash(make *)`, `Bash(pytest *)`, `Bash(cargo test *)`, `Bash(./scripts/*)`.
+- `JARX-PERMS-010` (medium): an allow for a tool with a way to run any
+  command, like `Bash(git *)` (`git -c` and aliases).
+- Skill and command `allowed-tools` count as allows for 004, 005 and 008 to
+  010. Only grants in effect count.
+- Codex `sandbox_mode` silently overriding permission profiles: high when a
+  project file does it (a repository turning off your deny rules), medium
+  when it's your own layers.
+- A trusted project changing a Codex permission profile another layer
+  defines.
+- A `[sandbox_workspace_write]` table Codex ignores because permission
+  profiles are in use: the permissions guide says to use profiles or the
+  older sandbox settings, not both, and only `sandbox_mode` (or managed
+  `allowed_permission_profiles` the other way) decides which. Info
+  (`JARX-CODEX-007`), or medium (`JARX-CODEX-008`) when the table sets
+  `exclude_slash_tmp` or `exclude_tmpdir_env_var`, which would have tightened
+  the sandbox.
+- A legacy Codex `managed_config.toml` overriding your config and CLI flags,
+  and legacy `[profiles]` tables Codex ignores (info).
+- A repository changing which instructions Codex loads, through
+  `project_doc_max_bytes` or `project_doc_fallback_filenames`.
 
 ### Repo-level red flags
 
@@ -570,11 +675,28 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 
 ### Secrets
 
-- Inline secrets found with 30 to 50 provider prefixes plus an entropy check.
-  The patterns ship as an embedded data file.
+- Inline secrets found by token format, from the provider's own docs or an
+  RFC, plus a name rule. The formats ship as an embedded data file with an
+  "as of" date and a source per row. The first cut covers about 20 formats
+  devs most often hold keys for; the PRD's target is 30 to 50.
+- The **name rule** masks a value assigned to a name that says it's a
+  secret (`*_TOKEN=`, `"api_key":`, `password:`), whatever the value looks
+  like. It catches values with no documented format, like npm, OpenAI and
+  Hugging Face keys, and the demo's made-up fakes. References (`$X`,
+  `${X}`), booleans, short numbers and names that describe a secret instead
+  of holding one (`apiKeyHelper`, `token_path`) are left alone. A known
+  format wins over the name rule.
 - It runs on config files and also on instruction, memory, skill and hook
   files. A secret found in an instruction or memory file means the agent
   **sees** it (see [The credential view](#the-credential-view)).
+- Three rules, each reported once per file:
+  - `JARX-SECRET-001` (high): a secret in text the agent loads (instruction
+    files, imports, memory, skill bodies), so it's already in context.
+  - `JARX-SECRET-002` (medium): a secret written in a config file, a hook
+    command or a hook script.
+  - `JARX-SECRET-003` (info): a match that looks like a placeholder, like
+    `your-api-key-here`. It's still masked.
+- Each finding says how many other files hold the same fingerprint.
 - A found secret is replaced with `REDACTED:<type>` (for example
   `REDACTED:github_pat`) everywhere it would appear.
 - Each secret also gets a **fingerprint**: a keyed hash (HMAC with a random
@@ -628,6 +750,12 @@ Per project, jarx shows every permission rule that applies, after merging:
 - whether it's in effect, and if not, why (for example "project allow waits
   for trust", "ignored from project files", "overridden by legacy
   `sandbox_mode`")
+- Claude's sandbox: `sandbox.enabled` and its switches as options, and the
+  `sandbox.filesystem` path lists as rules. They're in effect only while the
+  sandbox runs, which the docs say isn't on native Windows.
+- An allow that a deny or ask rule covers is not in effect, since Claude
+  checks deny, then ask, then allow. jarx counts a rule for the whole tool
+  or the same rule; it doesn't work out how two different patterns overlap.
 
 ## Where your agent talks to
 
@@ -687,6 +815,15 @@ Results are cached by content hash, so an unchanged artifact isn't sent twice.
   projects, servers, tools, prompts, resources, hooks, skills, instruction
   files, permission changes, verdict changes and tool description hash
   changes.
+- A snapshot keeps each thing a scan found with its state: projects,
+  instruction files, skills, hooks, permission rules and settings, config
+  files, findings and unknown keys. Texts are kept only as a hash of their
+  masked form, so jarx never keeps copies of your instruction and memory
+  files, and a changed secret shows as "content changed" without the value.
+- The diff lists what's new, gone, or changed (now in effect or not, content
+  changed, value changed), scan-wide items first, then by project. The first
+  scan says there's no earlier snapshot. A broken snapshot, or one from a
+  newer jarx, means no diff and a note, never a failed scan.
 - To compare against an older snapshot, use the snapshot picker in the
   dashboard.
 - Named baselines are for later.
@@ -697,21 +834,39 @@ The CLI stays small: three commands and a version flag.
 
 | Command | What it does |
 |---|---|
-| `jarx scan [path...]` | full scan, prints a summary grouped by severity plus what changed since the last scan. Extra paths are scanned for this run only. |
+| `jarx scan [path...]` | full scan, prints what it checked, then the findings grouped by project, worst first, plus what changed since the last scan. Extra paths are scanned for this run only. |
 | `jarx ui` | start the dashboard |
 | `jarx setup` | show jarx's own settings: extra repo paths, and whether the LLM is set up |
 | `jarx setup repo add\|rm <path>` | add or remove an extra project path |
 | `jarx setup llm` | set base URL, model, and key or env var name |
-| `jarx --version` | print version and advisory data date |
+| `jarx --version` | print the banner, version and advisory data date |
 
 Flags:
 
 | Flag | On | What it does |
 |---|---|---|
 | `--home <dir>` | `scan`, `ui`, `setup` | treat `<dir>` as the home dir instead of the real one (see [Demo home](#demo-home)) |
+| `--all` | `scan` | show every finding with its full reason and fix, what jarx resolved about the machine, and the full inventory |
 | `--no-probe` | `scan` | skip MCP probing |
 | `--no-history` | `scan` | skip session history |
 | `--llm` | `scan` | run the LLM review after showing the preview |
+
+### Terminal output
+
+A scan should be readable at a glance in any terminal: PowerShell, Windows
+PowerShell 5.1, cmd, Windows Terminal, macOS Terminal, iTerm2 and Linux
+terminals.
+
+- It shows what jarx checked first, then what it found. Findings are grouped
+  by project, worst first, and user-level problems show once on their own.
+- Long lists stop at 10 findings per project, but every high or critical
+  one shows. The rest are counted. `--all` shows everything.
+- Lines fit the terminal's width and never wrap. Paths are short: from `~`
+  or the project.
+- Color is the basic 16 only and never the only way something is said. It
+  turns off when output is piped, with `NO_COLOR`, and with `TERM=dumb`.
+  Piped output is plain ASCII.
+- Every run starts with a banner and the version next to it.
 
 ### Demo home
 
@@ -796,8 +951,7 @@ with `--home`):
 - `config.json` with the extra repo paths from `jarx setup repo add`, and
   later the LLM base URL, model and key env var name (never the key). It has
   a version number; a config from a newer jarx is refused, not guessed at.
-  Reading it never creates the state dir, so a scan that saves nothing writes
-  nothing.
+  Reading it never creates the state dir.
 - `fingerprint.key`, the random per-install key behind secret fingerprints.
   It's made the first time a secret is found, and a damaged one is reported,
   never replaced.
@@ -837,8 +991,31 @@ Adding an agent later means writing an adapter. The analyzers stay the same.
 
 Each adapter knows the keys it understands. Any key it doesn't recognize gets
 listed in an unknown settings report with its file and scope, so a new agent
-release can't silently add a setting jarx ignores. Unknown keys are info
-findings, never errors.
+release can't silently add a setting jarx ignores. Unknown keys are findings,
+never errors.
+
+- Claude's keys are the settings index, plus `$schema` (the settings page
+  shows it as the line that points editors at the schema) and the two
+  documented marketplace aliases. Codex's keys are every row in the config
+  reference's `config.toml` and `requirements.toml` tables, with the aliases
+  the rows name. `[hooks]` isn't checked inside: the reference sends its
+  fields to the Hooks guide.
+- A key one or two edits from a known key at the same level (one for keys
+  under five chars, a swap counts as one, case doesn't count) is a likely
+  typo, and the report says "did you mean".
+- `JARX-UNKNOWN-001` (info): a key the docs don't list. It may be newer than
+  jarx's table, or deprecated, and the report says which when the docs do.
+- `JARX-UNKNOWN-002` (medium): a likely typo, so the setting it was meant to
+  be isn't set by that file.
+- `JARX-UNKNOWN-003` (high): a likely typo of a key that protects you, so
+  someone thinks they're protected when they're not. For Claude that's
+  `permissions.*`, `sandbox.*`, the mode locks and the managed-only switches;
+  for Codex the sandbox, approval, permission profile and shell environment
+  keys, and every `requirements.toml` key. A typo of a key that loosens
+  things, like `enableAllProjectMcpServers`, leaves you safer than you
+  think, so it's 002.
+- `JARX-CLAUDE-005` (info): a key alias in the same file as its canonical
+  key. The settings reference says Claude then ignores the alias.
 
 ### Fixtures per agent version
 
@@ -896,10 +1073,66 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   them.
 - **Other `--settings` / `-c` overrides** passed per run, for the same
   reason.
+- **Secrets without a known format or name.** A value with no documented
+  format, assigned to a name that doesn't say it's secret, isn't found. A
+  Codex config file that isn't valid TOML isn't scanned for secrets.
+- **macOS MDM policy for Claude.** Claude's docs name the
+  `com.anthropic.claudecode` managed preferences domain, but neither they nor
+  Apple's docs say where it sits on disk, so jarx doesn't check it. Managed
+  settings files and the Windows registry are still read.
+- **Server-managed Claude settings and `policyHelper`.** Remote policy lives
+  on Anthropic's servers or a gateway, and a policy helper is a program jarx
+  won't run. When a helper is set, jarx says the effective managed settings
+  are unknown.
+- **WSL inheriting Windows policy.** With `wslInheritsWindowsSettings`,
+  Claude in WSL also reads the Windows registry and managed settings file.
+  jarx treats WSL as plain Linux and doesn't follow that.
 - **What a token is allowed to do** on the server side (layer 2 of the
   capability view), which is usually unknown.
 - **Undocumented formats** can change with any agent release. jarx degrades
   to "unknown" there.
+- **Hooks in skill and subagent frontmatter** are kept as raw text, not split
+  into events and commands, since jarx doesn't parse nested YAML. The rules
+  still read the text.
+- **Plugins and skills that aren't on disk as records.** `--plugin-dir`,
+  `--plugin-url` and SDK plugins (`@inline`), plugins and skills synced from
+  claude.ai, and marketplaces jarx would have to fetch aren't listed.
+- **Codex settings jarx can't see.** Cloud-managed `config.toml` defaults and
+  cloud requirements, macOS managed preferences (`com.openai.codex`), the
+  profile a run selects with `--profile`, and which hooks you've trusted in
+  `/hooks` (Codex keeps that against each hook's hash, somewhere the docs
+  don't name).
+- **Comments the docs don't cover.** The memory docs only say block-level
+  comments in CLAUDE.md files are stripped. jarx assumes every other comment
+  reaches the agent, including in an AGENTS.md that Claude reads. A stripped
+  comment still shows when the agent opens the file with its Read tool;
+  jarx doesn't flag those.
+- **Codex hook fields.** The config reference sends `[hooks]` fields to the
+  Hooks guide, so jarx doesn't check keys inside `[hooks]` for typos.
+- **Key tables lag new releases.** A key newer than jarx's tables shows as
+  unknown until the table is updated. Its finding says so.
+- **Codex's command allowlist.** Codex's execution-policy rules files can
+  pre-approve commands. jarx doesn't read them yet.
+- **Commands beyond the table.** `JARX-PERMS-008` to 010 come from an
+  embedded table of interpreters, runners and tools. A program that isn't
+  in it, or a less common way to run code (like GNU `sed`'s `e` command),
+  isn't flagged.
+- **Claude mode locks the docs leave open.** jarx doesn't count a lock from
+  an untrusted project's files, since the docs don't say whether Claude reads
+  it before trust and counting one it ignores would hide a live bypass. And
+  when bypass is locked, the docs don't say which mode a session starts in,
+  so jarx shows no default mode in effect.
+- **Which Codex version you run.** Codex before 0.150.0 loads a project's
+  AGENTS.md even when the project isn't trusted. jarx follows current
+  Codex until `analyze/versions` can tell which one is installed.
+- **Approval of external imports.** Claude asks before it loads an
+  `@import` from a project file that points outside the project, and the
+  docs don't say where that answer is kept. jarx lists those imports as
+  waiting on approval.
+- **Network paths.** jarx never reads a UNC path (`\\host\share`), a
+  `/net` or `/Network` path, or a symlink that leads to one, since even a
+  lookup can contact the host and, on Windows, send it your NTLM hash.
+  Claude doesn't follow those links either.
 - **Static analysis only.** Verdicts come from settings and docs, not from
   testing the agent.
 
@@ -921,8 +1154,10 @@ Things jarx can't see, stated plainly in the README and the dashboard:
 - The exact meaning of Codex MCP `approval_mode` values (`auto`, `prompt`,
   `writes`, `approve`). Confirm against the config reference before the mode
   rule ships.
-- Whether Codex has an env var channel like Claude's (for example a shell env
-  policy setting). Take it from the docs, or leave it out.
+- Codex's env var channel is `shell_environment_policy`, from the advanced
+  config docs. `ignore_default_excludes` defaults to `true`, so variables
+  named like `KEY`, `SECRET` or `TOKEN` reach spawned commands unless it's
+  set to `false`. jarx records it now; the verdict comes with phase 5.
 - The Codex sessions path and the shapes of the sqlite and zstd files, as
   observed formats.
 
@@ -932,11 +1167,13 @@ Official docs, read 2026-11-21. Codex pages now redirect to
 learn.chatgpt.com.
 
 - Claude Code: https://code.claude.com/docs/en/settings,
-  /managed-settings, /mcp (including `#credential-variables-that-read-as-empty`),
+  /settings-reference (read 2026-11-22), /managed-settings, /mcp (including `#credential-variables-that-read-as-empty`),
   /managed-mcp, /permissions (including `#read-only-commands`),
   /permission-modes, /sandboxing, /hooks, /skills, /sub-agents, /memory,
   /plugins-reference, /claude-directory, /authentication, /sessions,
   /tools-reference, /output-styles
+- Codex changelog: https://learn.chatgpt.com/docs/changelog (CLI 0.150.0,
+  read 2026-11-23)
 - Codex: https://developers.openai.com/codex/config-file/config-basic,
   /config-file/config-advanced, /config-reference, /permissions,
   /concepts/sandboxing, /agent-approvals-security, /mcp, /guides/agents-md,

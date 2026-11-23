@@ -19,5 +19,7 @@ func Real() (Env, error) {
 	if err != nil {
 		return Env{}, fmt.Errorf("finding the user config dir: %w", err)
 	}
-	return newEnv(runtime.GOOS, home, filepath.Join(config, "jarx"), os.Environ(), true, false), nil
+	env := newEnv(runtime.GOOS, home, filepath.Join(config, "jarx"), os.Environ(), true, false)
+	env.registry = realRegistry()
+	return env, nil
 }

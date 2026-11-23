@@ -26,9 +26,11 @@ type Env struct {
 	StateDir string // jarx's own state dir, the only place jarx writes
 	Path     []string
 
-	vars   map[string]string
-	system bool
-	fake   bool
+	vars     map[string]string
+	system   bool
+	fake     bool
+	roots    *Roots   // set by WithSystemRoots, nil means the OS defaults
+	registry Registry // nil when there's none to read
 }
 
 // Roots are the OS-level dirs that managed and system config hangs off. A
@@ -82,6 +84,9 @@ func (e Env) Fake() bool { return e.fake }
 func (e Env) SystemRoots() (Roots, bool) {
 	if !e.system {
 		return Roots{}, false
+	}
+	if e.roots != nil {
+		return *e.roots, true
 	}
 	switch e.GOOS {
 	case goosWindows:

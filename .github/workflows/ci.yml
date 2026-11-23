@@ -129,15 +129,55 @@ jobs:
       - name: jarx scan --home testdata/demo, offline, with no network syscalls
         run: |
           offline() { sudo unshare --net -- sudo -u "$(id -un)" -- "$@"; }
+          files() { git status --porcelain --ignored --untracked-files=all | sort; }
+          before=$(files)
           out=$(offline strace -f -qq -o "$RUNNER_TEMP/jarx.trace" -e trace="$NET_SYSCALLS" \
             "$RUNNER_TEMP/jarx" scan --home testdata/demo)
           echo "$out"
-          grep -q '^projects (3)$' <<<"$out"
+          grep -qF -- '+- 3 projects ' <<<"$out"
+          grep -q ' SECRET-001$' <<<"$out"
           if grep -E "^[0-9]+ +(${NET_SYSCALLS//,/|})\(" "$RUNNER_TEMP/jarx.trace"; then
             echo "jarx made the network syscalls above during an offline scan"
             exit 1
           fi
-          if [ -e testdata/demo/.jarx-state ]; then
-            echo "the demo scan wrote state, but it should write nothing"
+          for planted in demo-not-a-real-token your-api-key-here; do
+            if grep -qF "$planted" <<<"$out"; then
+              echo "the scan printed the demo's planted secret $planted"
+              exit 1
+            fi
+          done
+          # The demo has secrets, so the scan makes its fingerprint key, and
+          # it saves one snapshot. Nothing else, anywhere in the checkout.
+          wrote=$(comm -13 <(echo "$before") <(files))
+          if [ "$(grep -c . <<<"$wrote")" != 2 ] \
+            || ! grep -qx '!! testdata/demo/.jarx-state/fingerprint.key' <<<"$wrote" \
+            || ! grep -qxE '!! testdata/demo/.jarx-state/snapshots/[0-9TZ.]+-[0-9a-f]+[.]json' <<<"$wrote"; then
+            echo "the demo scan should write its fingerprint key and one snapshot, but wrote:"
+            echo "$wrote"
+            exit 1
+          fi
+          grep -q '   changes: first scan$' <<<"$out"
+          # The snapshot is masked and keeps texts only as hashes.
+          for planted in demo-not-a-real-token your-api-key-here "Deploy with"; do
+            if grep -rqF "$planted" testdata/demo/.jarx-state/snapshots; then
+              echo "the snapshot holds the demo's $planted"
+              exit 1
+            fi
+          done
+          # A second scan reuses the key, so the fingerprints don't change,
+          # and finds nothing changed. Only the summary line, which says
+          # what changed, may differ.
+          key=$(sha256sum testdata/demo/.jarx-state/fingerprint.key)
+          again=$(offline "$RUNNER_TEMP/jarx" scan --home testdata/demo)
+          if [ "$key" != "$(sha256sum testdata/demo/.jarx-state/fingerprint.key)" ]; then
+            echo "a second scan changed the fingerprint key"
+            exit 1
+          fi
+          if ! grep -qE '   changes: none since [0-9-]+ [0-9:]+ UTC$' <<<"$again"; then
+            echo "the second scan should find no changes"
+            exit 1
+          fi
+          if ! diff <(grep -v 'changes: ' <<<"$out") <(grep -v 'changes: ' <<<"$again"); then
+            echo "a second scan printed something different (diff above)"
             exit 1
           fi

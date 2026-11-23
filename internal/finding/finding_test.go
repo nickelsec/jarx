@@ -152,3 +152,17 @@ func TestJarxsOwnRulesAreValid(t *testing.T) {
 		t.Errorf("Rules() = %+v, want it to include %s", Rules(), SkippedTooLarge().ID)
 	}
 }
+
+func TestATitleFitsOnOneTerminalLine(t *testing.T) {
+	// The scan prints the title next to the severity and the rule ID, so it
+	// stays short. The full sentence goes in Detail.
+	long := Rule{ID: "JARX-TEST-001", Severity: Info, Title: strings.Repeat("x", MaxTitle+1), Fix: "fix it"}
+	if _, err := NewRegistry(long); err == nil {
+		t.Errorf("NewRegistry() error = nil, want one for a %d-char title", MaxTitle+1)
+	}
+	ok := long
+	ok.Title, ok.Detail = strings.Repeat("x", MaxTitle), strings.Repeat("y", 200)
+	if _, err := NewRegistry(ok); err != nil {
+		t.Errorf("NewRegistry() error = %v, want a long Detail to be fine", err)
+	}
+}

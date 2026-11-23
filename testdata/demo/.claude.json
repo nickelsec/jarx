@@ -1,6 +1,6 @@
 {
   "projects": {
-    "/projects/app": {},
+    "/projects/app": {"hasTrustDialogAccepted": true},
     "/projects/old": {}
   }
 }
