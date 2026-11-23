@@ -171,7 +171,7 @@ stale ones marked.
   the banner with the version on every run
   - Not covered yet: MCP servers and agent versions in the agents block
     (phase 4 and the versions work), and the last line pointing to the
-    dashboard instead of `--all` (phase 7)
+    dashboard instead of `--all` (phase 7) (0bf72ba)
 
 **Run it:** `jarx scan --home testdata/demo` shows instruction files, skills,
 hooks, permissions and the planted findings. Change a demo file and the diff
