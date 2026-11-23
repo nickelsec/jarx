@@ -593,7 +593,7 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 	t.Helper()
 	// The demo's planted secrets are made up to dodge push protection, and
 	// jarx still has to mask every one.
-	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here", "demo-0000-not-a-real-token"} {
+	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here", "demo-0000-not-a-real-token", "demoKey7Qx2Lm9Pz4Rw8Tb1Nc-fake"} {
 		if strings.Contains(out, planted) {
 			t.Errorf("output contains the planted %q", planted)
 		}
@@ -611,8 +611,8 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 19 {
-		t.Errorf("--all shows %d findings, want all 19", len(titles))
+	if len(titles) != 20 {
+		t.Errorf("--all shows %d findings, want all 20", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
@@ -644,14 +644,17 @@ scanned
 +- 4 permission rules - 3 mode settings
 \- 5 config files                    1 unknown setting
 
-19 findings   8 HIGH - 7 MED - 4 INFO   changes: first scan
+20 findings   8 HIGH - 8 MED - 4 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
 |  \- ~{S}.claude{S}settings.json  defaultMode is bypassPermissions in user settings
 |
-\- HIGH  A safety setting is misspelled  UNKNOWN-003
-   \- ~{S}.codex{S}config.toml  aproval_policy looks like a typo of approval_poli...
++- HIGH  A safety setting is misspelled  UNKNOWN-003
+|  \- ~{S}.codex{S}config.toml  aproval_policy looks like a typo of approval_poli...
+|
+\- MED   A secret is in a config file or hook  SECRET-002
+   \- ~{S}.claude.json  named_secret, fingerprint FP, written in the ...
 
 ~{S}projects{S}app  claude trusted - codex trusted
 +- HIGH  An @import pulls in a credential file  CLAUDE-002

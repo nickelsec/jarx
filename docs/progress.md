@@ -190,15 +190,18 @@ shows it.
   start" when the winner won't start, plugin servers matched by endpoint,
   reserved names, servers in snapshots, a row in the scanned block and the
   loads line, the full list in `--all`, the demo's `.mcp.json`, and the demo
-  test's copy starting without the local jarx state
+  test's copy starting without the local jarx state. A follow-up puts every
+  server's command, args, URL, env and header values through the secrets
+  scan, since most real tokens sit in the user and local servers in
+  `~/.claude.json`, and masks an env or header value by its name
+  (`API_TOKEN=...`) even when it has no known format
   - Not covered yet: inline `mcpServers` in subagent frontmatter (no YAML
     parser), servers on the agents row (they come with probe status),
     `${VAR}` expansion when matching list entries (a reference there makes
-    the server "may start"), user and local servers reaching the secrets
-    scan (only `.mcp.json` does), unknown keys inside server entries,
-    claude.ai connectors with `disableClaudeAiConnectors` and
-    `allowAllClaudeAiMcps`, Claude in Chrome next to `managed-mcp.json`, and
-    two plugins defining the same endpoint
+    the server "may start"), unknown keys inside server entries, claude.ai
+    connectors with `disableClaudeAiConnectors` and `allowAllClaudeAiMcps`,
+    Claude in Chrome next to `managed-mcp.json`, and two plugins defining
+    the same endpoint (c3f9aef)
 - [ ] MCP config in the Codex adapter, with the "would it start" logic
 - [ ] `fakemcp`: scripted stdio and HTTP server
 - [ ] `proc`: job objects on Windows, process groups on unix, baseline env.

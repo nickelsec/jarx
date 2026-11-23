@@ -5,6 +5,7 @@ package secrets
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -126,6 +127,26 @@ func projectPlaces(p model.Project) []place {
 		script := h.Origin
 		script.File, script.Line = h.Script, 0
 		out = append(out, place{origin: script, text: h.ScriptText})
+	}
+	for _, s := range p.Servers {
+		out = append(out, serverPlaces(s)...)
+	}
+	return out
+}
+
+// serverPlaces is every text of an MCP server definition. Most real tokens
+// sit in the user and local servers in ~/.claude.json, which isn't kept
+// whole as a config, so the definition is checked field by field.
+func serverPlaces(s model.Server) []place {
+	texts := make([]redact.Text, 0, 3+len(s.Args)+len(s.Env)+len(s.Headers))
+	texts = append(texts, s.Command, s.URL, s.HeadersHelper)
+	texts = append(texts, s.Args...)
+	for _, kv := range append(slices.Clone(s.Env), s.Headers...) {
+		texts = append(texts, kv.Value)
+	}
+	out := make([]place, 0, len(texts))
+	for _, t := range texts {
+		out = append(out, place{origin: s.Origin, text: t})
 	}
 	return out
 }

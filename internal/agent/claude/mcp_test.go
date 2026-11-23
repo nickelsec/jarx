@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/nickelsec/jarx/internal/agent"
+	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/model"
+	"github.com/nickelsec/jarx/internal/redact"
 )
 
 // claudeJSON builds a ~/.claude.json with user servers and local servers for
@@ -472,5 +474,31 @@ func TestBrokenClaudeJSONServersGiveAFinding(t *testing.T) {
 
 	if len(ps[0].Servers) != 0 || len(rulesOf(fs, "JARX-SCAN-002")) != 1 {
 		t.Errorf("servers %v findings %v, want no server and one unreadable finding", serverViews(ps[0].Servers), fs)
+	}
+}
+
+func TestEnvAndHeaderValuesAreMaskedByTheirName(t *testing.T) {
+	const plain = "Xq7Lm2Pz9Rw4Tb8Nc1VdKj5Hs3Fg6Yu" // no known format, caught by its name
+	c := fakeHome(t, map[string]string{
+		".claude.json": claudeJSON(`"a": {"command": "srv", "env": {"API_TOKEN": "`+plain+`", "API_BASE": "https://api.example.com", "KEY_REF": "${API_KEY}"}},
+			"b": {"type": "http", "url": "https://b.example.com", "headers": {"X-Api-Key": "`+plain+`"}}`, "", ""),
+	})
+	ps, err := catalog.Secrets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Scrub, err = redact.New(ps, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	p := serversFor(t, c, model.TrustTrusted)
+
+	a, b := findServer(t, p, model.ScopeUser, "a"), findServer(t, p, model.ScopeUser, "b")
+	got := strings.Join(slices.Concat(texts(a.Env), texts(b.Headers)), " ")
+	if strings.Contains(got, plain) || strings.Count(got, "REDACTED") != 2 {
+		t.Errorf("env and headers = %q, want both secret values masked", got)
+	}
+	if !strings.Contains(got, "API_BASE=https://api.example.com") || !strings.Contains(got, "KEY_REF=${API_KEY}") {
+		t.Errorf("env = %q, want plain values and references kept", got)
 	}
 }

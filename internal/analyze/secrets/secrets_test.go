@@ -196,3 +196,38 @@ func TestRulesAreValid(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSecretsInServerDefinitionsAreFound(t *testing.T) {
+	f := newFixture(t)
+	for name, s := range map[string]model.Server{
+		"env value": {Env: []model.Pair{{Key: f.text("API_TOKEN"), Value: f.secret(fake)}}},
+		"header":    {Headers: []model.Pair{{Key: f.text("Authorization"), Value: f.text("Bearer " + fake)}}},
+		"url":       {URL: f.text("https://x.example.com/mcp?api_token=" + fake)},
+		"arg":       {Args: []redact.Text{f.text("--api-key=" + fake)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s.Name, s.Origin = f.text("srv"), f.origin("/home/dev/.claude.json", model.ScopeUser)
+			p := model.Project{Path: model.NewPath(f.scrub, "/home/dev/app"), Servers: []model.Server{s}}
+
+			got := only(t, Analyze(f.scrub, []model.Project{p}, nil), PlainText().ID)
+
+			if got.Origin.File.Raw() != filepath.FromSlash("/home/dev/.claude.json") {
+				t.Errorf("finding is in %s, want ~/.claude.json", got.Origin.File.Raw())
+			}
+		})
+	}
+}
+
+func TestAUserServerSecretIsReportedOnceAcrossProjects(t *testing.T) {
+	f := newFixture(t)
+	s := model.Server{Name: f.text("srv"), URL: f.text("https://x.example.com/mcp?api_token=" + fake), Origin: f.origin("/home/dev/.claude.json", model.ScopeUser)}
+	ps := []model.Project{{Servers: []model.Server{s}}, {Servers: []model.Server{s}}}
+
+	only(t, Analyze(f.scrub, ps, nil), PlainText().ID)
+}
+
+// secret masks a value the way an adapter does for one it knows is secret.
+func (f fixture) secret(raw string) redact.Text {
+	t, _ := f.scrub.Secret("named_secret", raw)
+	return t
+}

@@ -1,6 +1,10 @@
 {
   "mcpServers": {
-    "search": {"type": "http", "url": "https://search.example.com/mcp"}
+    "search": {
+      "type": "http",
+      "url": "https://search.example.com/mcp",
+      "headers": {"X-Api-Key": "demoKey7Qx2Lm9Pz4Rw8Tb1Nc-fake"}
+    }
   },
   "projects": {
     "/projects/app": {"hasTrustDialogAccepted": true},
