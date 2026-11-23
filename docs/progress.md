@@ -235,10 +235,22 @@ shows it.
     processes that outlive a kill (that test belongs to `proc`),
     `subscriptions/listen`, and the `-race` run here (no C compiler on this
     machine, so CI's linux job covers it)
-- [ ] `proc`: job objects on Windows, process groups on unix, baseline env.
-  First check whether Go 1.27 fixed golang/go#79927 (design.md says the fix
-  "isn't in Go 1.25"). If it did, use the `SysProcAttr` fix instead of the
-  suspended start and update design.md.
+- [x] `proc`: job objects on Windows, process groups on unix, baseline env.
+  golang/go#79927 isn't fixed in Go 1.27.4: the proposal is still open,
+  and the change landed on tip and was reverted on 2026-11-20. So it's the
+  suspended start, with the main thread resumed through a Toolhelp32
+  snapshot and `ResumeThread` (documented calls, unlike `NtResumeProcess`).
+  Also the baseline env plus declared vars (never jarx's own env, and
+  empty stays empty), stderr kept up to 64 KiB, `Find` on the env's PATH
+  through fsys with PATHEXT on Windows and never under `--home`, a refusal
+  to pass `cmd.exe` metacharacters to a `.bat` or `.cmd` file, and `proc`
+  added to the lint rule that lets a package run processes. Tests rerun the
+  test binary as a server that starts a grandchild, and check `Kill` takes
+  both
+  - Not covered yet: a server that leaves its process group with `setsid`
+    on unix (in Limits), the Linux `Pdeathsig` backstop if jarx itself
+    dies mid-probe, and the exec-bit and process-group tests, which run
+    only on the linux and mac CI jobs since this machine is Windows
 - [ ] `mcp`: list-only client, stdio, streamable HTTP, legacy SSE, paging,
   `go/ast` method test
 - [ ] `probe`: which servers, env expansion, concurrency, status,

@@ -1144,6 +1144,14 @@ Things jarx can't see, stated plainly in the README and the dashboard:
   `/net` or `/Network` path, or a symlink that leads to one, since even a
   lookup can contact the host and, on Windows, send it your NTLM hash.
   Claude doesn't follow those links either.
+- **Probed servers that leave their process group.** On macOS and Linux a
+  stdio server runs in its own process group, and a kill goes to the
+  group. A program it starts that calls `setsid` leaves the group and
+  isn't killed. On Windows the job object holds the whole tree.
+- **`.cmd` servers with shell characters in their args.** jarx won't pass
+  an argument with a `cmd.exe` metacharacter (`&`, `|`, `%`, quotes and the
+  like) to a `.bat` or `.cmd` file, since `cmd.exe` could run it as a
+  command. Such a server shows as "failed to start" with that reason.
 - **Static analysis only.** Verdicts come from settings and docs, not from
   testing the agent.
 

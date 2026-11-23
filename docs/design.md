@@ -44,17 +44,38 @@ Source: https://www.agwa.name/blog/post/preventing_server_side_request_forgery_i
 ### Windows process trees: suspended start plus a job object
 
 Calling `AssignProcessToJobObject` after `cmd.Start` is racy. The child can
-spawn grandchildren before it's in the job (golang/go#79927). The fix for
-that in `SysProcAttr` isn't in Go 1.25. jarx does this instead:
+spawn grandchildren before it's in the job (golang/go#79927). That issue
+asks for a job list in `SysProcAttr`. It's still an open proposal: the
+change landed on Go's tip in November 2026 and was reverted on 2026-11-20,
+and Go 1.27.4's `SysProcAttr` has no such field (checked 2026-11-23). jarx
+does this instead:
 
 1. Create a job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. The handle is not
    inheritable.
 2. Start the server with `CREATE_SUSPENDED`.
-3. Assign it to the job.
-4. Resume it with `NtResumeProcess`.
-5. On timeout or when done, close the job, which kills the whole tree.
+3. Assign it to the job. If that fails, kill the still-suspended process,
+   which never ran.
+4. Resume its main thread: a Toolhelp32 thread snapshot finds it (a
+   suspended process can't start more), then `ResumeThread`. Those calls are
+   documented and in `x/sys/windows`, unlike ntdll's `NtResumeProcess`.
+5. On timeout or when done, `TerminateJobObject` and close the job, which
+   kills the whole tree.
 
-On unix, the same thing is `Setpgid` plus `kill(-pgid, SIGKILL)`.
+On unix, the same thing is `Setpgid` plus `kill(-pgid, SIGKILL)`. A child
+that leaves the group on purpose (`setsid`) gets away; that's in Limits.
+
+The server's env is never jarx's own. It's a short baseline (PATH, home, temp
+dirs, and what Windows needs to start a program) plus what the config
+declares, and an empty env is passed as empty, never as nil, since nil would
+hand over everything.
+
+**`.bat` and `.cmd` files.** On Windows `npx` and many launchers are `.cmd`
+files, and a `.cmd` always runs through `cmd.exe`. Go quotes arguments for
+`CreateProcess`, not for `cmd.exe`, so an argument with `&`, `|`, `%` or a
+quote could make `cmd` run something the config never named, which the
+agent's own launcher might quote safely. `proc` refuses to pass an argument
+with a `cmd.exe` metacharacter to a `.bat` or `.cmd` file, and the server
+shows as "failed to start" with that reason.
 
 This makes `golang.org/x/sys/windows` a direct dependency. It was already an
 indirect one through go-keyring and modernc sqlite.

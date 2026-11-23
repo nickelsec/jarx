@@ -82,18 +82,19 @@ linters:
         - pattern: ^(smtp|rpc|jsonrpc)\..*$
           pkg: ^net/(smtp|rpc|rpc/jsonrpc)$
           msg: "network: only internal/netguard may make network calls"
-        # Only internal/discover may run a process (hardened git), plus
-        # internal/proc from phase 4. exec.LookPath reads the real PATH, so it's
-        # banned too; git is found through platform.Env instead.
+        # Only internal/discover (hardened git) and internal/proc (MCP stdio
+        # servers, in a job or process group) may run a process. exec.LookPath
+        # reads the real PATH, so it's banned too; programs are found through
+        # platform.Env instead.
         - pattern: ^exec\.(Command|CommandContext|LookPath)$
           pkg: ^os/exec$
-          msg: "exec: only internal/discover may run commands"
+          msg: "exec: only internal/discover and internal/proc may run commands"
         - pattern: ^os\.StartProcess$
           pkg: ^os$
-          msg: "exec: only internal/discover may run commands"
+          msg: "exec: only internal/discover and internal/proc may run commands"
         - pattern: ^syscall\.(Exec|ForkExec|StartProcess)$
           pkg: ^syscall$
-          msg: "exec: only internal/discover may run commands"
+          msg: "exec: only internal/discover and internal/proc may run commands"
         # Only internal/platform may read the real env and user dirs, so tests
         # and --home never touch the real machine.
         - pattern: ^os\.(Getenv|LookupEnv|Environ|ExpandEnv|UserHomeDir|UserConfigDir|UserCacheDir)$
@@ -166,7 +167,7 @@ linters:
         linters:
           - forbidigo
         text: "output: only cmd/jarx may use os.Stdout"
-      - path: ^internal/discover/
+      - path: ^internal/(discover|proc)/
         linters:
           - forbidigo
         text: "exec:"
