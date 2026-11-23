@@ -722,7 +722,9 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
    validates the JSON (one retry) and checks the quotes. Results are cached by
    hash.
 7. **snapshot** writes the masked JSON, prunes to 20 and diffs against the
-   previous one. **drift** sends changed tools back through **poison**.
+   previous one. **drift**, one of the analyzers in step 5, already read
+   that previous snapshot to flag tools that changed. **poison** runs on
+   every tool's current text, so a changed one is checked again.
 8. **report** prints the result. **ui** serves the same snapshot.
 
 ## Terminal output

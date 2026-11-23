@@ -29,7 +29,7 @@ func enumTypes() []reflect.Type {
 		reflect.TypeFor[ProjectStatus](), reflect.TypeFor[TrustLevel](), reflect.TypeFor[WalkMethod](),
 		reflect.TypeFor[RuleAction](), reflect.TypeFor[InstructionKind](), reflect.TypeFor[LoadWhen](),
 		reflect.TypeFor[ReadStatus](), reflect.TypeFor[SkillKind](),
-		reflect.TypeFor[Transport](), reflect.TypeFor[StartState](), reflect.TypeFor[ServerStatus](), reflect.TypeFor[OfferKind](),
+		reflect.TypeFor[Transport](), reflect.TypeFor[StartState](), reflect.TypeFor[ServerStatus](), reflect.TypeFor[OfferKind](), reflect.TypeFor[ToolAccess](),
 	}
 }
 

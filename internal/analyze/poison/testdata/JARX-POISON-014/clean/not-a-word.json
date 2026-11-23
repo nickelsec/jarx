@@ -1,0 +1,1 @@
+{"name": "undeleted_list", "description": "Lists files that were never deleted.", "inputSchema": {"type": "object"}, "annotations": {"readOnlyHint": true}}

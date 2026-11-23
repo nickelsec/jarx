@@ -197,6 +197,9 @@ func (p *Printer) offers(os []model.Offer) {
 		if len(hints) > 0 {
 			parts = append(parts, strings.Join(hints, " "))
 		}
+		if o.Access != model.AccessUnsettled {
+			parts = append(parts, "agent: "+string(o.Access)+", "+o.AccessWhy.String())
+		}
 		p.Out.Printf("        %s\n", p.text(strings.Join(parts, "  ")))
 	}
 }

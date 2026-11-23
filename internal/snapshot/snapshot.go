@@ -218,13 +218,26 @@ func (b *builder) server(dir redact.Text, s model.Server) {
 	// What a listed server offers, each as its own item with a hash of its
 	// whole masked entry, so a changed description shows up (drift).
 	for _, o := range s.Offers {
-		b.add(Item{
-			Project: dir, Kind: KindOffer,
-			Key:      b.join(string(s.Origin.Agent), s.Name.String(), "in", s.Origin.File.Text().String(), string(o.Kind), o.Name.String()),
-			InEffect: true, Hash: hash(o.Text),
-		})
+		b.add(Item{Project: dir, Kind: KindOffer, Key: OfferKey(b.s, s, o), InEffect: true, Hash: OfferHash(o)})
 	}
 }
+
+// OfferKey is the identity a snapshot gives what a server offers: the
+// server's agent, name and file, and the offer's kind and name. drift uses
+// it to find the same tool in an earlier snapshot.
+func OfferKey(sc *redact.Scrubber, s model.Server, o model.Offer) redact.Text {
+	b := &builder{s: sc}
+	return b.join(string(s.Origin.Agent), s.Name.String(), "in", s.Origin.File.Text().String(), string(o.Kind), o.Name.String())
+}
+
+// ServerKey is the start of OfferKey for every offer of one server.
+func ServerKey(sc *redact.Scrubber, s model.Server) redact.Text {
+	b := &builder{s: sc}
+	return b.join(string(s.Origin.Agent), s.Name.String(), "in", s.Origin.File.Text().String())
+}
+
+// OfferHash is the hash a snapshot keeps of an offer's whole masked entry.
+func OfferHash(o model.Offer) string { return hash(o.Text) }
 
 func texts(ts []redact.Text) string {
 	out := make([]string, 0, len(ts))

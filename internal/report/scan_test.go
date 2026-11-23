@@ -330,3 +330,25 @@ func TestTheAgentRowCountsItsServers(t *testing.T) {
 		t.Errorf("output =\n%s\nwant the server count on the Claude row", out)
 	}
 }
+
+func TestTheInventoryShowsWhetherTheAgentCanCallEachTool(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.All = true
+	srv := f.server("github", model.StartYes)
+	srv.Status = model.StatusListed
+	srv.Offers = []model.Offer{
+		{Kind: model.OfferTool, Name: f.text("delete_repo"), Access: model.AccessNoAsk, AccessWhy: f.text("allowed by mcp__github__* in ~/.claude/settings.json")},
+		{Kind: model.OfferPrompt, Name: f.text("summarize")},
+	}
+	v.Projects[0].Servers = []model.Server{srv}
+
+	out := render(Style{Width: 200}, v)
+
+	if want := "tool  delete_repo  agent: runs without asking, allowed by mcp__github__* in ~/.claude/settings.json"; !strings.Contains(out, want) {
+		t.Errorf("output =\n%s\nwant it to contain %q", out, want)
+	}
+	if strings.Contains(out, "summarize  agent:") {
+		t.Error("a prompt has no tool access to show")
+	}
+}

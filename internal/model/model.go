@@ -277,7 +277,25 @@ type Offer struct {
 	// Text is the whole entry as the server sent it, so the rules and the
 	// drift hash see every field: schemas, param names, enums and defaults.
 	Text redact.Text
+	// Access is whether the agent can call a tool and whether it asks first,
+	// with why, as analyze/capability settles it. What the server's own
+	// credential allows isn't knowable, so it isn't here.
+	Access    ToolAccess
+	AccessWhy redact.Text
 }
+
+// ToolAccess is whether the agent can call a tool and whether you're asked.
+type ToolAccess string
+
+// Tool access.
+const (
+	AccessUnsettled ToolAccess = ""
+	AccessHidden    ToolAccess = "hidden" // the config keeps it from the agent
+	AccessDenied    ToolAccess = "denied" // a rule or mode refuses every call
+	AccessAsks      ToolAccess = "asks"   // you're asked before each call
+	AccessMayNotAsk ToolAccess = "may run without asking"
+	AccessNoAsk     ToolAccess = "runs without asking"
+)
 
 // Config is one settings or config file, scrubbed. Origin says whose and
 // from which scope.

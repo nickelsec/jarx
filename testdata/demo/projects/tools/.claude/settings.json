@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": ["deploy", "tickets", "notes-helper"],
+  "permissions": {
+    "allow": ["mcp__notes-helper__*"]
+  }
+}

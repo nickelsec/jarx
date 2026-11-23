@@ -5,6 +5,7 @@
 package poison
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -87,7 +88,7 @@ func hookTemp() finding.Rule {
 func Rules() []finding.Rule {
 	return []finding.Rule{
 		tagChars(), bidi(), zeroWidth(), terminal(), comment(), aimed(), hiddenAimed(),
-		exfil(), sensitivePath(), hookNetwork(), hookDownloadRun(), hookStartup(), hookTemp(),
+		exfil(), sensitivePath(), hookNetwork(), hookDownloadRun(), hookStartup(), hookTemp(), lyingAnnotation(), shadowedTool(),
 	}
 }
 
@@ -104,6 +105,9 @@ type source struct {
 	script   bool
 	// project is the project dir the text belongs to, or "".
 	project string
+	// where names the text when the file alone doesn't, like a tool an MCP
+	// server offers; its findings have no line.
+	where string
 }
 
 // hit is one thing a rule found, at a line, with what to show.
@@ -125,9 +129,25 @@ func Analyze(s *redact.Scrubber, projects []model.Project, global []model.Instru
 	}
 
 	seen := map[string]bool{}
-	var out []finding.Finding
+	out := mcpFindings(s, projects)
+	var groups []*group
+	byKey := map[string]*group{}
 	for _, src := range sources {
 		for _, h := range check(src) {
+			if src.where != "" {
+				// A server's text has no lines, so every hit of one rule on one
+				// tool is one finding that lists what it matched.
+				key := strings.Join([]string{src.origin.File.Raw(), src.where, h.rule.ID}, "\x00")
+				if g := byKey[key]; g != nil {
+					g.add(h.detail)
+				} else {
+					g := &group{rule: h.rule, origin: src.origin, where: src.where}
+					g.add(h.detail)
+					byKey[key] = g
+					groups = append(groups, g)
+				}
+				continue
+			}
 			key := strings.Join([]string{src.origin.File.Raw(), h.rule.ID, strconv.Itoa(h.line), h.detail}, "\x00")
 			if seen[key] {
 				continue
@@ -135,15 +155,38 @@ func Analyze(s *redact.Scrubber, projects []model.Project, global []model.Instru
 			seen[key] = true
 			o := src.origin
 			o.Line = h.line
-			detail := h.detail
-			if !o.InEffect && !o.Why.IsZero() {
-				detail += "; not loaded now: " + o.Why.String()
-			}
-			ev, _ := s.Scrub(detail)
-			out = append(out, h.rule.New(o, ev))
+			out = append(out, h.rule.New(o, evidence(s, o, h.detail)))
 		}
 	}
+	for _, g := range groups {
+		o := g.origin
+		o.Line = 0
+		out = append(out, g.rule.New(o, evidence(s, o, g.where+": "+strings.Join(g.details, "; "))))
+	}
 	return out
+}
+
+// group is one rule's hits on one server text.
+type group struct {
+	rule    finding.Rule
+	origin  model.Origin
+	where   string
+	details []string
+}
+
+func (g *group) add(d string) {
+	if !slices.Contains(g.details, d) {
+		g.details = append(g.details, d)
+	}
+}
+
+// evidence is a hit's detail, with why it isn't loaded now when it isn't.
+func evidence(s *redact.Scrubber, o model.Origin, detail string) redact.Text {
+	if !o.InEffect && !o.Why.IsZero() {
+		detail += "; not loaded now: " + o.Why.String()
+	}
+	ev, _ := s.Scrub(detail)
+	return ev
 }
 
 func projectSources(p model.Project) []source {
@@ -166,7 +209,7 @@ func projectSources(p model.Project) []source {
 			out = append(out, source{origin: o, text: h.ScriptText.String(), hook: true, hookType: "command", script: true, project: dir})
 		}
 	}
-	return out
+	return append(out, serverSources(p)...)
 }
 
 // instructionSource marks CLAUDE.md files, the only ones the docs say have

@@ -8,6 +8,7 @@
   },
   "projects": {
     "/projects/app": {"hasTrustDialogAccepted": true},
+    "/projects/tools": {"hasTrustDialogAccepted": true},
     "/projects/old": {}
   }
 }

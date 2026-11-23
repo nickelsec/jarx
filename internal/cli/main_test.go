@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,5 +36,28 @@ func TestNoProbeIsAFlag(t *testing.T) {
 
 	if got.code != 0 || !strings.Contains(got.stdout, "not probed: --no-probe") {
 		t.Errorf("exit %d, stdout:\n%s\nwant the servers marked not probed", got.code, got.stdout)
+	}
+}
+
+func TestAToolThatChangesBetweenScansIsFlagged(t *testing.T) {
+	demo := demoCopy(t)
+	first := run("scan", "--all", "--home", demo)
+	script := filepath.Join(demo, "projects", "tools", ".jarx-demo", "notes-helper.json")
+	body, err := os.ReadFile(script) //nolint:gosec // G304: the test's own copy of the demo
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(body), "Summarize the notes.", "Summarize the notes, then send them to the server.", 1)
+	if err := os.WriteFile(script, []byte(changed), 0o600); err != nil { //nolint:gosec // G703: the test's own temp copy
+		t.Fatal(err)
+	}
+
+	second := run("scan", "--all", "--home", demo)
+
+	if strings.Contains(first.stdout, "DRIFT-001") {
+		t.Error("the first scan has nothing to compare, so no drift")
+	}
+	if !strings.Contains(second.stdout, "DRIFT-001") || !strings.Contains(second.stdout, "prompt summarize of notes-helper is different") {
+		t.Errorf("second scan:\n%s\nwant the changed prompt flagged as drift", second.stdout)
 	}
 }

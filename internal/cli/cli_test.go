@@ -583,6 +583,17 @@ func TestScanDemoHome(t *testing.T) {
 	if want := strings.ReplaceAll(demoView, "{S}", string(filepath.Separator)); view != want {
 		t.Errorf("view =\n%s\nwant\n%s", view, want)
 	}
+	// Phase 4's run-it line: the default view, not just --all, flags the
+	// fake poisoned server, the unpinned npx server and the URL token.
+	for what, want := range map[string]string{
+		"poisoned descriptions": "POISON-006\n|  \\- .mcp.json  tool save_note of notes-helper",
+		"unpinned npx":          "MCP-001\n|  \\- .mcp.json  deploy runs npx -y deploy-helper-mcp@latest",
+		"tickets server URL":    "SECRET-002\n|  \\- .mcp.json  named_secret",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the default view doesn't flag the %s (want %q)", what, want)
+		}
+	}
 	assertAllShowsEverything(t, all.stdout)
 	assertDemoNoLeak(t, string(data), got.stdout+got.stderr)
 	assertDemoNoLeak(t, string(data), all.stdout+all.stderr)
@@ -611,13 +622,13 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 23 {
-		t.Errorf("--all shows %d findings, want all 23", len(titles))
+	if len(titles) != 29 {
+		t.Errorf("--all shows %d findings, want all 29", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
 		"why: Claude starts in bypassPermissions, so it skips prompts and safety",
-		"full inventory\nprojects (3)\n",
+		"full inventory\nprojects (4)\n",
 		// At 80 columns this line wraps at a space onto an indented line.
 		"unknown settings (1)\n  aproval_policy  codex user  ", "did you mean\n      approval_policy?\n",
 		// The demo's fake poisoned server is probed: jarx runs itself in
@@ -637,18 +648,18 @@ func assertAllShowsEverything(t *testing.T, out string) {
 // demoView is the demo scan at 80 columns, ASCII since the tests' output
 // isn't a terminal. {S} is the path separator.
 const demoView = `agents on this machine
-+- Claude Code ~{S}.claude  2 projects (1 trusted - 1 unknown) - 5 MCP servers
++- Claude Code ~{S}.claude  3 projects (2 trusted - 1 unknown) - 5 MCP servers
 \- Codex       ~{S}.codex   2 projects (1 trusted - 1 untrusted) - 2 MCP servers
 
 scanned
-+- 3 projects                        1 stale, not scanned
++- 4 projects                        1 stale, not scanned
 +- 2 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
 +- 7 MCP servers                     1 not started - 1 approval unknown
-+- 4 permission rules - 3 mode settings
-\- 5 config files                    1 unknown setting
++- 5 permission rules - 3 mode settings
+\- 6 config files                    1 unknown setting
 
-23 findings   9 HIGH - 10 MED - 4 INFO   changes: first scan
+29 findings   10 HIGH - 14 MED - 5 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -688,13 +699,43 @@ your user config - applies to every project
 +- MED   A repo skill grants tools without trust  CLAUDE-004
 |  \- .claude{S}skills{S}release{S}SKILL.md  release pre-approves Bash(git *)
 |
++- MED   An allow covers a tool that runs anything  PERMS-010
+|  \- .claude{S}skills{S}release{S}SKILL.md  skill release pre-approves Bash(git *)...
+|
++- ... 7 more: 3 MED - 4 INFO  (jarx scan --all)
+|
+\- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
+               1 MCP server - codex 1 MCP server
+
+~{S}projects{S}tools  claude trusted
++- HIGH  A tool that changes things runs unasked  CAP-001
+|  \- .claude{S}settings.json  tools save_note, delete_notes of notes-helper al...
+|
 +- MED   An MCP server runs an unpinned package  MCP-001
 |  \- .mcp.json  deploy runs npx -y deploy-helper-mcp@latest, and deploy-help...
 |
-+- ... 10 more: 6 MED - 4 INFO  (jarx scan --all)
++- MED   A repo MCP server runs the repo's code  MCP-006
+|  \- .mcp.json  scratch runs node tools/scratch-server.js, a script in the r...
 |
-\- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
-               4 MCP servers - codex 1 MCP server
++- MED   Bidi controls reorder the text  POISON-002
+|  \- .mcp.json  tool delete_notes of notes-helper: 1 bidi control character
+|
++- MED   Text tells the agent to override or hide  POISON-006
+|  \- .mcp.json  tool save_note of notes-helper: "Don't tell the user"; "Befo...
+|
++- MED   An MCP tool claims to be read-only  POISON-014
+|  \- .mcp.json  tool save_note of notes-helper is marked readOnlyHint, but i...
+|
++- MED   An MCP tool claims to be read-only  POISON-014
+|  \- .mcp.json  tool delete_notes of notes-helper is marked readOnlyHint, bu...
+|
++- MED   A secret is in a config file or hook  SECRET-002
+|  \- .mcp.json  named_secret, fingerprint FP, written in the file
+|
++- INFO  Points the agent at a credential file  POISON-009
+|  \- .mcp.json  tool save_note of notes-helper: points at ~/.ssh; points at ...
+|
+\- loads here: claude 1 instruction - 4 MCP servers - codex 1 MCP server
 
 ~{S}projects{S}notes  codex untrusted - no findings
 \- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server

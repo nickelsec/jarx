@@ -354,8 +354,28 @@ For each tool, jarx shows three layers side by side:
    rules (`mcp__server__tool` allow/ask/deny), Codex `enabled_tools`,
    `disabled_tools` and per-tool `approval_mode`, plus the observed modes.
 
+Layer 3 is one of: hidden (Codex `enabled_tools` or `disabled_tools`),
+denied, asks, may run without asking, or runs without asking, with the rule
+or mode that decided it. For Claude, deny beats ask beats allow, and with no
+rule the default mode decides (`bypassPermissions` runs it, `dontAsk` denies
+it, `auto` leaves it to a classifier, the rest ask). A server name with `__`
+in it or ending in `_` is only allowed by the wildcard form. For Codex, the
+tool's `approval_mode` or the server's default decides first (`prompt`
+asks, `writes` asks unless the tool is marked read-only). With no mode, a
+tool marked destructive asks unless it's also marked read-only, and the rest
+follow `approval_policy`.
+
 The point is to make "the agent can call a delete tool without asking" easy to
-spot.
+spot:
+
+- `JARX-CAP-001` (high): a tool that changes things (marked destructive and
+  not read-only, or named for a change) that an allow rule or Codex approval
+  mode lets run without asking. One finding per rule or mode, naming the
+  tools it lets through, since that's one fix. A mode alone, like
+  `bypassPermissions`, has its own rule (`JARX-PERMS-001`).
+- `JARX-CAP-002` (medium): a Codex `approval_mode` or
+  `default_tools_approval_mode` of `auto` or `approve`. The docs don't say
+  what these do, so jarx says the tool may run without asking.
 
 ## Credentials
 
@@ -584,8 +604,16 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
   encode-and-send instructions, and base64 blobs of 200 chars or more.
 - `JARX-POISON-009` (info): pointers to credential and key files (`~/.ssh`,
   `.aws/credentials`, `.env`, `.netrc` and the like). `.envrc` doesn't count.
-- Annotations that lie, like a delete tool marked `readOnlyHint`.
-- Tool shadowing: two servers exposing the same tool name.
+- `JARX-POISON-014` (medium): annotations that lie. A tool marked
+  `readOnlyHint` that's also marked `destructiveHint`, or whose name has a
+  word that says it changes things (`delete_notes`, `pushFiles`). Codex
+  doesn't ask before a tool marked read-only, even one also marked
+  destructive.
+- `JARX-POISON-015` (medium): tool shadowing, two servers the same agent
+  loads in a project offering the same tool name.
+
+On MCP text, the hits of one rule on one tool are one finding that lists
+what matched, since a tool's text has no lines to tell them apart.
 
 ### Hooks
 
@@ -750,7 +778,14 @@ Rules that depend on an agent's precedence live in its adapter:
 
 - A credential readable silently on any channel (from the verdicts).
 - **Drift:** when a tool description's hash changes, that tool goes through
-  the poison rules again. It isn't just flagged as "changed".
+  the poison rules again. It isn't just flagged as "changed". The poison
+  rules run on every tool's current text each scan, so the changed one is
+  checked again too.
+  - `JARX-DRIFT-001` (medium): a tool, prompt or resource whose definition
+    changed since the last scan.
+  - `JARX-DRIFT-002` (info): a server listed in the last scan offering
+    something new. A server seen for the first time isn't drift; the
+    snapshot diff shows it as new.
 - **Vulnerable agent version:** an install whose package name and version fall
   in an advisory's affected range.
 
