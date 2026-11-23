@@ -106,10 +106,11 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		Fake: env.Fake(), Home: model.NewPath(scrub, env.Home), GOOS: env.GOOS,
 		Agents:   agentInfo(env, files, scrub, adapters),
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown,
-		Findings: findings, Rules: rules, All: *all,
+		Findings: findings, Rules: rules, All: *all, Credentials: res.Credentials,
 	}
 	view.Since, view.Note, view.Changes, view.SaveErr = saveSnapshot(env, scrub, snapshot.Input{
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
+		Credentials: res.Credentials,
 	})
 	p.Scan(view)
 	return exitOK

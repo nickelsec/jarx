@@ -71,6 +71,12 @@ linters:
         - pattern: ^model\.Launch\.Spec$
           pkg: ^github\.com/nickelsec/jarx/internal/model$
           msg: "launch: only internal/probe may read a raw launch spec"
+        # Only internal/discover may read credential metadata. CredentialFacts
+        # is the one way past fsys's credential guard; it hands the file to
+        # credmeta's parsers and returns their facts, never the bytes.
+        - pattern: ^fsys\.FS\.CredentialFacts$
+          pkg: ^github\.com/nickelsec/jarx/internal/fsys$
+          msg: "credential: only internal/discover may read credential metadata"
         # Only internal/netguard may build HTTP clients, transports or dialers.
         - pattern: ^http\.(Get|Post|Head|PostForm|DefaultClient|DefaultTransport|Client|Transport)$
           pkg: ^net/http$
@@ -181,11 +187,15 @@ linters:
         linters:
           - forbidigo
         text: "launch:"
+      - path: ^internal/discover/
+        linters:
+          - forbidigo
+        text: "credential:"
       # Tests build fixtures in t.TempDir() and check what got written.
       - path: _test\.go$
         linters:
           - forbidigo
-        text: "(read|write|exec|launch):"
+        text: "(read|write|exec|launch|credential):"
 
 # Show every issue on a line. By default golangci-lint keeps one per line,
 # so another linter on the same line (gosec, unused) can hide a forbidigo

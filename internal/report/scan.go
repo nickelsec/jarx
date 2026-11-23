@@ -30,6 +30,7 @@ type ScanView struct {
 	Unknown      []model.Unknown
 	Findings     []finding.Finding
 	Rules        *finding.Registry
+	Credentials  []model.Credential // the machine's; a project's own are on it
 
 	Since   time.Time // when the last snapshot was taken, zero for none
 	Note    string    // why there's nothing to compare against, if not a first scan
@@ -188,6 +189,7 @@ func (p *Printer) inventory(v ScanView) {
 	p.emit(line{{text: "full inventory", tone: bold}})
 	p.Wrapped(v.Home, func() {
 		p.Projects(v.Projects)
+		p.Credentials(v.Credentials)
 		p.Unknown(v.Unknown)
 		p.Instructions(v.Instructions)
 	})

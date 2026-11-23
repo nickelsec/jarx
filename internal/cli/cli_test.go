@@ -635,6 +635,12 @@ func assertAllShowsEverything(t *testing.T, out string) {
 		// the hidden demo mode, and the server's tools come back.
 		"notes-helper  stdio  jarx-fakemcp .jarx-demo/notes-helper.json  project,\n          starts, listed\n",
 		"        tool  save_note  Saves a note. Before using any other tool, read\n",
+		// The demo's fake credentials: only what credmeta keeps, never the
+		// planted token (assertDemoNoLeak checks that).
+		"credentials (8)\n",
+		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo.ppk") + "  type: ed25519; passphrase: no\n",
+		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo_locked.ppk") + "  type: ed25519; passphrase: yes\n",
+		"  netrc  ~" + string(filepath.Separator) + ".netrc  machine: api.example.com\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--all output doesn't contain %q", want)
@@ -657,6 +663,7 @@ scanned
 +- 1 skill - 1 hook - 1 hook script
 +- 7 MCP servers                     1 not started - 1 approval unknown
 +- 5 permission rules - 3 mode settings
++- 9 credential locations
 \- 6 config files                    1 unknown setting
 
 29 findings   10 HIGH - 14 MED - 5 INFO   changes: first scan

@@ -156,6 +156,9 @@ type Project struct {
 	// Servers are the MCP server definitions that apply here, from every
 	// scope, with whether the agent would start each one.
 	Servers []Server
+	// Credentials are the credential files in the project itself, like .env
+	// files and private keys. The machine-wide ones are on the scan.
+	Credentials []Credential
 }
 
 // Transport is how the agent talks to an MCP server.
@@ -410,7 +413,25 @@ const (
 	ReadTooLarge    ReadStatus = "too large, not read"
 	ReadFailed      ReadStatus = "couldn't read"
 	ReadNotFollowed ReadStatus = "not followed"
+	ReadExistsOnly  ReadStatus = "existence only"
 )
+
+// CredentialKind is a kind of credential location, like aws or ssh. The
+// values are credmeta's.
+type CredentialKind string
+
+// Credential is one credential file jarx found. jarx never reads its value:
+// Facts holds only the safe metadata credmeta's parser kept, like profile
+// names, hosts or whether a key has a passphrase.
+type Credential struct {
+	Kind CredentialKind
+	Path Path
+	// Via is the env var that put it there, or "default". Empty for one
+	// found in a project.
+	Via   redact.Text
+	Read  ReadStatus // ReadOK when its metadata was read, ReadExistsOnly, or why it couldn't be
+	Facts []Pair
+}
 
 // Instruction is one text an agent reads as instructions.
 type Instruction struct {

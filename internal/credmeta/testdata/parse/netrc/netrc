@@ -1,0 +1,10 @@
+machine api.example.com login me password JARX-CANARY-NETRC1
+machine "git.example.com" login x password "a machine JARX-CANARY-NETRC2"
+default login anon password JARX-CANARY-NETRC3
+macdef init
+machine JARX-CANARY-NETRC4
+
+machine ftp.example.com
+  login me
+  password JARX-CANARY-NETRC5
+machine odd.example.com login me password machine JARX-CANARY-NETRC6

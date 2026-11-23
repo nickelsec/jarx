@@ -128,6 +128,12 @@ func (p *Printer) Projects(ps []model.Project) {
 		}
 		p.instructions(proj)
 		p.extensions(proj)
+		if len(proj.Credentials) > 0 {
+			p.Out.Printf("    credentials\n")
+			for _, cr := range proj.Credentials {
+				p.credential("      ", cr)
+			}
+		}
 	}
 }
 

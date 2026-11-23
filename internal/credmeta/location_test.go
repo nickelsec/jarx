@@ -26,6 +26,7 @@ func TestCredentialLocations(t *testing.T) {
 	for path, want := range map[string]string{
 		h("proj/.env"):                   "env_file",
 		h("proj/.env.local"):             "env_file",
+		h("proj/.npmrc"):                 "npmrc",
 		h("proj/config/.env.production"): "env_file",
 		h(".ssh/id_ed25519"):             "ssh",
 		h(".ssh/config"):                 "ssh",
@@ -86,5 +87,29 @@ func TestAgentLoginFilesFollowTheirConfigDirs(t *testing.T) {
 		if got, ok := Location(env, path); !ok || got != want {
 			t.Errorf("Location(%s) = %q, %v; want %q", path, got, ok, want)
 		}
+	}
+}
+
+func TestLocateGivesThePathInsideThePlace(t *testing.T) {
+	env := fakeEnv(t, "AWS_SHARED_CREDENTIALS_FILE=/a/creds\n")
+	h := func(rel string) string { return filepath.Join(env.Home, filepath.FromSlash(rel)) }
+	for path, want := range map[string]Located{
+		h(".config/gcloud/application_default_credentials.json"): {KindGcloud, "application_default_credentials.json", false},
+		h(".aws/sso/cache/abc.json"):                             {KindAWS, "abc.json", false},
+		h(".aws/cli/cache/abc.json"):                             {KindAWS, "abc.json", false},
+		h(".aws/config"):                                         {KindAWS, "config", true},
+		h(".aws/credentials"):                                    {KindAWS, "credentials", true},
+		env.MapPath("/a/creds"):                                  {KindAWS, "creds", true},
+		h(".ssh/id_ed25519"):                                     {KindSSH, "id_ed25519", true},
+		h("proj/.env.local"):                                     {KindEnvFile, ".env.local", true},
+		h("proj/certs/server.pem"):                               {KindPrivateKey, "server.pem", false},
+		h(".azure/msal_token_cache.json"):                        {KindAzure, "msal_token_cache.json", false},
+	} {
+		if got, ok := Locate(env, path); !ok || got != want {
+			t.Errorf("Locate(%s) = %+v, %v; want %+v", path, got, ok, want)
+		}
+	}
+	if _, ok := Locate(env, h("proj/README.md")); ok {
+		t.Error("Locate(README.md) found a credential")
 	}
 }

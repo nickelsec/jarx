@@ -337,7 +337,30 @@ and flags it.
 
 ## Phase 5: Credentials and reach
 
-- [ ] `credmeta`: cred locations and safe metadata parsers
+- [x] `credmeta`: cred locations and safe metadata parsers. One table of
+  places from each CLI's docs on Windows, macOS and Linux, with the env vars
+  that move them (`AWS_SHARED_CREDENTIALS_FILE`, `GH_CONFIG_DIR`,
+  `CLOUDSDK_CONFIG`, `GOOGLE_APPLICATION_CREDENTIALS`, `KUBECONFIG`,
+  `NETRC` and the rest). The phase 3 table had gh and gcloud wrong on
+  Windows and knew no env vars, so a moved credential got past the read
+  guard; the guard now checks every place and still the old defaults.
+  Parsers keep only the allowed fields for aws, gh, docker, kube, ssh (OpenSSH,
+  PEM, PKCS#8 and PuTTY keys), git, netrc, npm, pypi and `.env`, with line
+  readers for the two YAML shapes and no new dependency. gcloud, azure,
+  gnupg, aws's token caches and the agents' login files are existence only,
+  and a dir like gcloud's is one entry with its file count.
+  `fsys.CredentialFacts` is the one way past the guard, returns facts and
+  never bytes, and only `discover` may call it (lint). Also
+  `model.Credential` on the scan and on each project (`.env`, keys, a
+  project `.npmrc`), credentials in snapshots as hashes, a row in the
+  scanned block and the full list under `--all`, canaries in every secret
+  slot of the fixtures, ssh test keys built in code so nothing in the repo
+  reads as a private key, and fake credentials in the demo home
+  - Not covered yet: ssh keys `~/.ssh/config` points at elsewhere,
+    GnuPG's Windows default dir (both in Limits), the files inside gcloud's
+    config dir (not documented), `--kubeconfig` and other per-run flags,
+    aws `credential_process` and kube `exec` commands (named, never run),
+    and the per-project reach line (item 5)
 - [ ] built-in tools catalog
 - [ ] `analyze/reach`: Claude channels and verdicts
 - [ ] `analyze/reach`: Codex channels and the legacy `sandbox_mode` switch

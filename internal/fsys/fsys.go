@@ -200,6 +200,12 @@ func (f *FS) openFile(path string) (*os.File, error) {
 	if err := f.guard(path); err != nil {
 		return nil, err
 	}
+	return f.openPlain(path)
+}
+
+// openPlain is openFile without the credential guard. Only CredentialFacts
+// uses it, and it hands the file to credmeta's parsers, never to a caller.
+func (f *FS) openPlain(path string) (*os.File, error) {
 	info, err := f.Stat(path)
 	if err != nil {
 		return nil, err
