@@ -371,6 +371,105 @@ showing a real secret.
   length, so under 8 chars every value scores below 3 bits, and a real
   short password would always look fake.
 
+### Claude MCP config and which servers start
+
+From the mcp, managed-mcp, settings-reference and sub-agents pages (read
+2026-11-23).
+
+Where servers come from:
+
+- **User scope:** top-level `mcpServers` in `~/.claude.json`.
+- **Local scope:** `projects["<path>"].mcpServers` in `~/.claude.json`. The
+  same entry holds `disabledMcpServers` and `enabledMcpServers`, the
+  per-project `/mcp` toggles. `disabledMcpServers` turns off user, plugin and
+  managed servers. `enabledMcpServers` only turns on built-in servers that
+  default to off, so jarx ignores it for configured servers, like Claude
+  does.
+- **Project scope:** `.mcp.json` at the project root.
+- **Plugins:** `.mcp.json` at the plugin root, or `mcpServers` in
+  `plugin.json`, started when the plugin is enabled.
+- **Managed:** `managed-mcp.json` in the managed dir (same format as
+  `.mcp.json`), and `managedMcpServers` in managed settings (remote servers
+  only: `https://`, no `command`, no `headersHelper`, no `${VAR}`). Claude
+  never reads `managedMcpServers` from HKCU or from user, project or local
+  files.
+- **Subagents:** `mcpServers` in agent frontmatter. A string is a reference
+  to a configured server. An inline definition in a project
+  `.claude/agents/` file loads only once the folder is trusted. One in
+  `~/.claude/agents/` or a managed agent doesn't wait. Plugin agents ignore
+  the field.
+
+How `.mcp.json` servers get approved is documented, so it's not an observed
+format. `enableAllProjectMcpServers` and `enabledMcpjsonServers`
+count from user, managed and `--settings` files right away, from the project
+file only once the folder is trusted, and from `settings.local.json` under
+the same trust rule as local allows. The approval dialog writes to
+`settings.local.json`. `disabledMcpjsonServers` in any file rejects the
+server. A project server with no approval is "approval unknown, not probed",
+since jarx can't tell whether a `-p` or SDK run would load it without
+asking.
+
+Managed policy, in the documented order:
+
+1. A `managed-mcp.json` takes full control: only its servers and
+   `managedMcpServers` load. User, project, local and plugin servers are
+   not in effect, with that reason. A `strictPluginOnlyCustomization` that
+   locks `mcp` stops `~/.claude.json` and `.mcp.json` servers but keeps
+   plugin ones.
+2. `deniedMcpServers` from every scope merges, and a match by name, command
+   or URL blocks the server. Nothing overrides a deny.
+3. `allowedMcpServers` merges from every scope, or only from managed when
+   `allowManagedMcpServersOnly` is on. Unset allows everything, `[]` allows
+   nothing. A remote server needs a `serverUrl` match (a `serverName` match
+   only counts when there's no `serverUrl` entry), and stdio works the same
+   with `serverCommand`. `managedMcpServers` and `managed-mcp.json` servers
+   with no `${VAR}` outside `env` skip this check.
+
+`serverCommand` matches the exact command and args. `serverUrl` takes `*`
+wildcards, a case-insensitive host, and the default port unless the host has
+a `*` or a port is given. Both sides expand `${VAR}` before matching. jarx
+expands the server's side from the injected env and the policy side from the
+startup env plus managed `env`, which under `--home` is just `.jarx-env`.
+
+#### The same server name in more than one scope
+
+The docs say Claude connects to one definition, the whole entry from the
+highest source, with no merging of fields:
+
+1. a `managed-mcp.json` entry, then `managedMcpServers` (by name)
+2. local, then project, then user (by name)
+3. plugin servers, then claude.ai connectors, matched to the servers above
+   by endpoint, not by name. Two URLs are the same endpoint when they differ
+   only in scheme or host case, the default port or a trailing slash. A
+   `managedMcpServers` entry also wins over a plugin with the same URL.
+
+jarx keeps every definition, each with its own origin, and marks the ones
+that lose as not in effect: "overridden by the local server with the same
+name". Two choices on top of that:
+
+- **When the winner itself won't start.** The docs don't say whether a
+  definition that's denied, rejected or waiting on approval still hides a
+  lower one with the same name. jarx doesn't guess either way: the lower
+  definition is "may start" with a note saying why, and probe treats it as
+  one that starts, since it would start on its own if the higher one
+  weren't there. Saying a server can't load when it might is the worse
+  mistake.
+- **Names carry rules.** Permission rules (`mcp__github__*`), `serverName`
+  entries and hook matchers are keyed by name. So a repository's `.mcp.json`
+  that reuses the name of one of your user servers, once approved, replaces
+  it, and your allows for that name now apply to the repository's server.
+  The MCP config rules item flags that, and also two scopes defining one
+  name with different endpoints, which Claude only warns about.
+
+A name Claude reserves for its built-in servers (`workspace`,
+`claude-in-chrome`, `computer-use`, `Claude Preview`, `Claude Browser`) is
+skipped at load, so jarx marks it not in effect.
+
+Sources: https://code.claude.com/docs/en/mcp,
+https://code.claude.com/docs/en/managed-mcp,
+https://code.claude.com/docs/en/settings-reference,
+https://code.claude.com/docs/en/sub-agents
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request

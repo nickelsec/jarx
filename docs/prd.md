@@ -249,12 +249,18 @@ A server is probed only if the agent would start it:
 
 - **Claude, project `.mcp.json`:** enabled through `enableAllProjectMcpServers`
   or `enabledMcpjsonServers` in a file that's honored for that key (user,
-  managed, `--settings`, or a trusted local file), or approved in the observed
-  state in `~/.claude.json`. It must also not be in `disabledMcpjsonServers`
-  anywhere.
-- **Claude, all scopes:** respect `enabledMcpServers`/`disabledMcpServers`,
-  managed `allowedMcpServers`/`deniedMcpServers`, `allowManagedMcpServersOnly`
-  and `managed-mcp.json` exclusive control.
+  managed, `--settings`, or a trusted project or local file). The approval
+  dialog writes `enabledMcpjsonServers` to `settings.local.json`. It must
+  also not be in `disabledMcpjsonServers` anywhere.
+- **Claude, all scopes:** respect the per-project `disabledMcpServers` in
+  `~/.claude.json`, `allowedMcpServers`/`deniedMcpServers` merged across
+  scopes, `allowManagedMcpServersOnly`, `managedMcpServers`,
+  `strictPluginOnlyCustomization` and `managed-mcp.json` exclusive control.
+- **Claude, the same name in more than one scope:** only the highest
+  definition loads (local, then project, then user, with managed above
+  them and plugins matched by endpoint). The others are listed as not in
+  effect. When the docs don't say which one loads, every candidate counts
+  as one that may start.
 - **Codex:** project servers only in trusted projects. Skip `enabled = false`.
   Respect `enabled_tools`/`disabled_tools` when showing tools. Respect the
   `requirements.toml` allowlist.
@@ -504,7 +510,6 @@ The docs don't cover most of this:
 - the Codex `sessions/` folder and its `.zst` rollouts
 - the Codex `*.sqlite` files
 - per-session approval and sandbox values in Codex
-- where Claude stores interactive project MCP approvals
 
 jarx supports these as **observed formats**. The parsers are built from fake
 fixtures shaped like real files, tolerate version changes, are labeled
@@ -618,6 +623,10 @@ The hidden-text and poisoned-content rules (the "poison engine") run on
 - Forwarding the whole env.
 - `headersHelper` / `http_headers_helper` (runs a command at connect).
 - Broad filesystem args (a server given `/` or `~`).
+- A repository's `.mcp.json` server that takes the name of one of your user
+  or local servers, so your permission rules for that name apply to the
+  repository's server once it's approved.
+- The same server name in two scopes with different endpoints.
 
 ### Permissions and auto-approval
 
