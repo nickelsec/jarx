@@ -59,15 +59,28 @@ func (p *Printer) agents(v ScanView) {
 	for _, a := range v.Agents {
 		nodes = append(nodes, p.agentRow(v, a, cols))
 	}
-	p.tree(p.alignAgents(nodes, cols))
+	nodes = p.alignAgents(nodes, cols)
+	// An agent's installs get a line of their own under its row, lined up
+	// with the project counts, so they're never cut off.
+	for i, a := range v.Agents {
+		if parts := installParts(a); len(parts) > 0 && a.Found {
+			pad := seg{text: strings.Repeat(" ", cols.name+1)}
+			nodes[i] = append(nodes[i], line{pad, {text: own(strings.Join(parts, p.sep()))}})
+		}
+	}
+	p.tree(nodes)
 }
 
 // agentRow is one agent: its name, its config dir and the projects it
 // knows, with their trust.
 func (p *Printer) agentRow(v ScanView, a AgentInfo, cols agentColumns) node {
 	name := seg{text: own(a.Name + strings.Repeat(" ", cols.name-cells(a.Name)+1))}
+	installs := installParts(a)
 	if !a.Found {
-		return node{line{name, {text: "not found", tone: dim}}}
+		if len(installs) == 0 {
+			return node{line{name, {text: "not found", tone: dim}}}
+		}
+		return node{line{name, {text: own("no config dir" + p.sep() + strings.Join(installs, p.sep())), tone: dim}}}
 	}
 	counts := map[string]int{}
 	n := 0

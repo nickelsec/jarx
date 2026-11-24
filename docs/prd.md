@@ -196,11 +196,49 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
 
 - Find every install of each agent (npm global, native installer, others in
   documented locations). Mark the one that wins on PATH.
-- Read the version from disk first (package.json, version dirs, config
-  fields). Only run `--version` on a binary that resolves to a known install
-  location. Otherwise report "version unknown".
+- Read the version from disk (package.json, version dirs, config fields).
+  jarx never runs an agent to ask its version: every install it knows gives
+  its version on disk, so `--version` would add a process and tell it
+  nothing new. Where the disk doesn't say, it reports "version unknown".
 - Check each install against an embedded advisory list (see
   [Advisory data](#advisory-data)).
+
+Where jarx looks, from the docs:
+
+- **Claude Code** (code.claude.com/docs/en/setup): the native installer's
+  launcher at `~/.local/bin/claude` (`claude.exe` on Windows) and its
+  versions in `~/.local/share/claude/versions`. On macOS and Linux the
+  launcher is a symlink to one of those, so the link names the version. If
+  it isn't a link and there's one version, that's the version. Otherwise
+  it's unknown. The npm package `@anthropic-ai/claude-code` installs the
+  same binary.
+- **Codex** (the openai/codex README): the npm package `@openai/codex`. The
+  standalone installers, Homebrew and release binaries are supported too,
+  but no doc says where they put Codex.
+- **npm** (docs.npmjs.com, "folders"): the global prefix is
+  `npm_config_prefix` when set, else `%AppData%\npm` on Windows and
+  `/usr/local` elsewhere. Packages are in `{prefix}/lib/node_modules` (Unix)
+  or `{prefix}/node_modules` (Windows). A prefix set in `.npmrc` isn't seen,
+  because that file can hold auth tokens and jarx never reads it.
+- **PATH:** the first dir with the agent's command wins, trying `PATHEXT`
+  in order on Windows. On Unix the file needs an exec bit. Nothing is run.
+  An install at a place the docs don't name (Homebrew, WinGet, apt, the
+  Codex installers) only shows up this way, as "unknown".
+
+Findings, in the user config group:
+
+- `JARX-VERSION-001` (high), `002` (medium), `003` (info): an install whose
+  version is in an advisory's affected range, by the worst advisory. A
+  critical counts as high and a low as info. The evidence names the worst
+  few and the version that fixes all of them.
+- `JARX-VERSION-004` (medium): an older install wins on PATH over a newer
+  one, so an update may not have taken.
+- `JARX-VERSION-005` (info): the command on PATH is at no install location
+  the docs name, so jarx can't tell its version.
+
+Each agent's row in the agents block gets a line with the install that
+runs, how many more there are, and "newer than jarx's tool list" when the
+version is past the built-in tools catalog. `--all` lists every install.
 
 ## Project discovery
 
@@ -897,7 +935,7 @@ Rules that depend on an agent's precedence live in its adapter:
     something new. A server seen for the first time isn't drift; the
     snapshot diff shows it as new.
 - **Vulnerable agent version:** an install whose package name and version fall
-  in an advisory's affected range.
+  in an advisory's affected range (`JARX-VERSION-001` to `003`).
 
 ### Vendor badge
 

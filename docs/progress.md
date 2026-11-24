@@ -460,8 +460,27 @@ and flags it.
     Vertex regions and auth (named only when set as env vars), Codex
     provider `http_headers` and `query_params`, Codex's managed
     `experimental_network` requirements, and TLS for Codex (its docs don't
-    give a CA setting outside OpenTelemetry)
-- [ ] `analyze/versions`: installs, PATH winner, advisories
+    give a CA setting outside OpenTelemetry) (b0e31f2)
+- [x] `analyze/versions`: installs, PATH winner, advisories. Each adapter
+  finds its installs at the places its docs name: Claude's native launcher
+  and versions dir (the launcher's symlink names the version) and both
+  agents' npm packages, with the npm prefix from npm's folders doc.
+  Discover marks the install that wins on PATH, using `PATHEXT` on Windows
+  and the exec bit on Unix, and a command on PATH at no known place is an
+  "unknown" install. No agent is ever run. `catalog/advisories.tsv` holds
+  the 33 published CLI advisories (32 Claude Code, 1 Codex), as of
+  2026-11-24, which `jarx --version` prints. Five rules, `JARX-VERSION-001`
+  to `005`. The agents block gets a line per agent with the install that
+  runs and the "newer than jarx's tool list" note, and `--all` lists every
+  install. fsys gained `Lstat` and `Readlink`, and a fake home's
+  `.jarx-env` may start values and PATH entries with `~`, with `;` between
+  PATH entries on every OS, so the demo works wherever it's copied. The
+  demo has a native Claude 2.1.120 and an npm Codex 0.38.0, both in
+  advisories
+  - Not covered yet: Homebrew, WinGet, apt, dnf and apk installs and the
+    Codex standalone installer, whose docs don't give a location (they show
+    up as "unknown" on PATH), a prefix set in `.npmrc`, Claude Desktop and
+    IDE extension advisories, and installs in the snapshot diff
 
 **Run it:** `jarx scan --home testdata/demo` shows credential states,
 per-channel verdicts and the egress panel.

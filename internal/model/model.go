@@ -631,3 +631,29 @@ type Inventory struct {
 	// like auto memory folders whose project naming isn't documented.
 	Instructions []Instruction
 }
+
+// InstallMethod is how an agent was installed.
+type InstallMethod string
+
+// Install methods.
+const (
+	InstallNative InstallMethod = "native"
+	InstallNPM    InstallMethod = "npm"
+	// InstallUnknown is a command on PATH that's at no install location
+	// the docs name, so jarx can't tell its version.
+	InstallUnknown InstallMethod = "unknown"
+)
+
+// Install is one install of an agent, found on disk. jarx never runs it.
+type Install struct {
+	Agent  Agent
+	Method InstallMethod
+	Path   Path // the launcher, the package dir, or the command on PATH
+	BinDir Path // the dir its command is in, which PATH is matched against
+	// Version is empty when jarx couldn't tell. VersionFrom says how it
+	// knows: "launcher link", "only installed version" or "package.json",
+	// or why it doesn't.
+	Version     redact.Text
+	VersionFrom redact.Text
+	OnPath      bool // its command is the first one on PATH
+}

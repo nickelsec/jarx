@@ -50,8 +50,10 @@ func TestVersionFlagPrintsVersion(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("exit code = %d, want 0", got.code)
 	}
-	if !got.banner || got.stdout != "" {
-		t.Errorf("stdout = %q after the banner, want just the banner, which has the version", got.stdout)
+	// The banner has the version; the PRD's command table adds the date the
+	// advisory data is as of, since it's only as new as the build.
+	if want := "advisory data as of " + catalog.AdvisoriesStamp() + "\n"; !got.banner || got.stdout != want {
+		t.Errorf("stdout = %q after the banner, want %q", got.stdout, want)
 	}
 	if got.stderr != "" {
 		t.Errorf("stderr = %q, want empty", got.stderr)
@@ -493,6 +495,12 @@ func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
 			continue
 		}
 		name, value, _ := strings.Cut(l, "=")
+		if name == "PATH" || name == "NPM_CONFIG_PREFIX" {
+			// Where the demo's agents are installed, which jarx shows on
+			// purpose (on PATH, and the install paths under the prefix).
+			// Neither is a secret.
+			continue
+		}
 		leaks := []string{value}
 		if !catalog.SecretName(name) {
 			leaks = append(leaks, name)
@@ -629,13 +637,13 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 37 {
-		t.Errorf("--all shows %d findings, want all 37", len(titles))
+	if len(titles) != 39 {
+		t.Errorf("--all shows %d findings, want all 39", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
 		"why: Claude starts in bypassPermissions, so it skips prompts and safety",
-		"full inventory\nprojects (4)\n",
+		"full inventory\ninstalls (2)\n", "\nprojects (4)\n",
 		// At 80 columns this line wraps at a space onto an indented line.
 		"unknown settings (1)\n  aproval_policy  codex user  ", "did you mean\n      approval_policy?\n",
 		// The demo's fake poisoned server is probed: jarx runs itself in
@@ -647,13 +655,16 @@ func assertAllShowsEverything(t *testing.T, out string) {
 		"credentials (10)\n",
 		// Both agents' verdicts, each under its own heading.
 		"    claude reach\n", "    codex reach\n",
-		// The credential view: the secret the demo planted in CLAUDE.md is
-		// seen, and the user's search server holds an inline key.
 		// Where the agents talk to: the app's settings point Claude at a
 		// gateway, and Codex ignores the same attempt in project config.
 		"    claude talks to\n      model endpoint  ANTHROPIC_BASE_URL  https://llm-gateway.example.invalid\n",
 		"    codex talks to\n      model endpoint  default  OpenAI's API\n",
 		"A repo tries to set Codex's endpoint  EGRESS-003\n",
+		// Every install, found on disk without running either agent: an
+		// npm Codex in an advisory's range, the PATH winner.
+		"  codex  npm  0.38.0  ",
+		// The credential view: the secret the demo planted in CLAUDE.md is
+		// seen, and the user's search server holds an inline key.
 		"    claude credential view\n", "  sees: named_secret, fingerprint\n",
 		"      inline_secret  MCP server search in ~" + string(filepath.Separator) + ".claude.json  can use:\n",
 		"  env_var  GITHUB_TOKEN  via environment  existence only\n",
@@ -674,7 +685,9 @@ func assertAllShowsEverything(t *testing.T, out string) {
 // isn't a terminal. {S} is the path separator.
 const demoView = `agents on this machine
 +- Claude Code ~{S}.claude  3 projects (2 trusted - 1 unknown) - 5 MCP servers
+|              2.1.120 native, on PATH
 \- Codex       ~{S}.codex   2 projects (1 trusted - 1 untrusted) - 2 MCP servers
+               0.38.0 npm, on PATH
 
 scanned
 +- 4 projects                        1 stale, not scanned
@@ -685,7 +698,7 @@ scanned
 +- 11 credential locations
 \- 6 config files                    1 unknown setting
 
-37 findings   13 HIGH - 18 MED - 6 INFO   changes: first scan
+39 findings   15 HIGH - 18 MED - 6 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -693,6 +706,12 @@ your user config - applies to every project
 |
 +- HIGH  A safety setting is misspelled  UNKNOWN-003
 |  \- ~{S}.codex{S}config.toml  aproval_policy looks like a typo of approval_poli...
+|
++- HIGH  Agent version has a high advisory  VERSION-001
+|  \- ~{S}.local{S}bin{S}claude.exe  native 2.1.120 is in 7 advisories: GHSA-5xjx-9...
+|
++- HIGH  Agent version has a high advisory  VERSION-001
+|  \- ~{S}npm{S}node_modules{S}@openai{S}codex  npm 0.38.0 is in 1 advisory: GHSA-w5f...
 |
 \- MED   A secret is in a config file or hook  SECRET-002
    \- ~{S}.claude.json  named_secret, fingerprint FP, written in the ...

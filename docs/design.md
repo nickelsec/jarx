@@ -817,7 +817,8 @@ then what it found, in this order:
 Where later phases go:
 
 - Facts about an agent (MCP servers, the installed version) go on its row
-  in the agents block.
+  in the agents block. Its installs get a second line under the row, lined
+  up with the project counts, so they're never cut off.
 - New things jarx reads (MCP servers and tools, credential locations,
   history sessions) become rows of counts in the scanned block, with
   skips as notes.

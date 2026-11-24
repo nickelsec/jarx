@@ -1,0 +1,40 @@
+# Security advisories for the Claude Code and Codex CLIs, from the GitHub
+# security advisories of anthropics/claude-code and openai/codex, checked on
+# the date in advisories.go. Only the npm CLI packages: the native installs
+# are the same binary and version numbers. Desktop and IDE apps are left out,
+# since jarx doesn't scan them. Ranges are space-separated constraints, all
+# of which must hold. GHSA low shows as info, since jarx has no low.
+# agent	id	package	affected	fixed	severity	published	summary
+claude	GHSA-9f65-56v6-gxw7	@anthropic-ai/claude-code	>0.2.116 <1.0.24	1.0.24	high	2025-06-23	Claude Code IDE extensions allow websocket connections from arbitrary origins
+claude	GHSA-pmw4-pwvc-3hx2	@anthropic-ai/claude-code	<0.2.111	0.2.111	high	2025-08-01	Path Restriction Bypass in Claude Code Research Preview could allow unauthorized file access when path prefixes collide
+claude	GHSA-x56v-x2h6-7j34	@anthropic-ai/claude-code	<1.0.20	1.0.20	high	2025-08-01	Command Injection in Claude Code echo command allowed bypass of user approval prompt for command execution
+claude	GHSA-x5gv-jw7f-j6xj	@anthropic-ai/claude-code	<1.0.4	1.0.4	high	2025-08-15	Permissive Default Allowlist Enables Unauthorized File Read and Network Exfiltration in Claude Code
+claude	GHSA-ph6w-f82w-28w6	@anthropic-ai/claude-code	<1.0.87	1.0.87	high	2025-09-02	Claude Code Vulnerable to Arbitrary Code Execution Due to Insufficient Startup Warning
+claude	GHSA-j4h9-wv2m-wrf7	@anthropic-ai/claude-code	<1.0.105	1.0.105	high	2025-09-09	Claude Code vulnerable to arbitrary code execution caused by maliciously configured git email
+claude	GHSA-qxfv-fcpc-w36x	@anthropic-ai/claude-code	<1.0.105	1.0.105	high	2025-09-09	Command Injection in Claude Code rg command allowed bypass of user approval prompt for command execution
+claude	GHSA-2jjv-qf24-vfm4	@anthropic-ai/claude-code	<1.0.39	1.0.39	high	2025-09-24	Claude Code Vulnerable to Arbitrary Code Execution via Plugin Autoloading with Specific Yarn Versions
+claude	GHSA-4fgq-fpq9-mr3g	@anthropic-ai/claude-code	<1.0.111	1.0.111	high	2025-10-03	Command execution prior to Claude Code startup trust dialog
+claude	GHSA-66m2-gx93-v996	@anthropic-ai/claude-code	<1.0.120	1.0.120	low	2025-10-03	Permission deny bypass through symlink
+claude	GHSA-5hhx-v7f6-x7gv	@anthropic-ai/claude-code	<1.0.39	1.0.39	high	2025-11-19	Command execution prior to Claude Code startup trust dialog
+claude	GHSA-7mv8-j34q-vp7q	@anthropic-ai/claude-code	<2.0.31	2.0.31	high	2025-11-20	Sed Command Validation Bypass Allows Arbitrary File Writes
+claude	GHSA-xq4m-mc3c-vvg3	@anthropic-ai/claude-code	<1.0.93	1.0.93	high	2025-12-03	Command Validation Bypass Allows Arbitrary Code Execution
+claude	GHSA-jh7p-qr78-84p7	@anthropic-ai/claude-code	<2.0.65	2.0.65	medium	2026-01-20	Malicious repo configuration can trigger data leakage via environment configuration used before trust confirmation
+claude	GHSA-q728-gf8j-w49r	@anthropic-ai/claude-code	<2.0.74	2.0.74	high	2026-02-03	Path Restriction Bypass via ZSH Clobber Allows Arbitrary File Writes
+claude	GHSA-qgqw-h4xq-7w8w	@anthropic-ai/claude-code	<2.0.72	2.0.72	high	2026-02-03	Command Injection in find Command Bypasses User Approval Prompt
+claude	GHSA-vhw5-3g5m-8ggf	@anthropic-ai/claude-code	<1.0.111	1.0.111	high	2026-02-03	Domain Validation Bypass Allows Automatic Requests to Attacker-Controlled Domains
+claude	GHSA-4q92-rfm6-2cqx	@anthropic-ai/claude-code	<2.1.7	2.1.7	low	2026-02-06	Permission Deny Bypass Through Symbolic Links
+claude	GHSA-66q4-vfjg-2qhh	@anthropic-ai/claude-code	<2.0.57	2.0.57	high	2026-02-06	Command Injection via Directory Change Bypasses Write Protection
+claude	GHSA-ff64-7w26-62rf	@anthropic-ai/claude-code	<2.1.2	2.1.2	high	2026-02-06	Sandbox Escape via Persistent Configuration Injection in settings.json
+claude	GHSA-mhg7-666j-cqg4	@anthropic-ai/claude-code	<2.0.55	2.0.55	high	2026-02-06	Command Injection via Piped sed Command Bypasses File Write Restrictions
+claude	GHSA-mmgp-wc2j-qcv7	@anthropic-ai/claude-code	<2.1.53	2.1.53	high	2026-03-18	Workspace Trust Dialog Bypass via Repo-Controlled Settings File
+claude	GHSA-5cwg-9f6j-9jvx	@anthropic-ai/claude-code	<2.1.75	2.1.75	medium	2026-04-17	Insecure System-Wide Configuration Loading Enables Local Privilege Escalation on Windows
+claude	GHSA-vp62-r36r-9xqp	@anthropic-ai/claude-code	<2.1.64	2.1.64	high	2026-04-20	Sandbox Escape via Symlink Following Allows Arbitrary File Write Outside Workspace
+claude	GHSA-q5hj-mxqh-vv77	@anthropic-ai/claude-code	>=2.1.63 <2.1.84	2.1.84	high	2026-04-24	Trust Dialog Bypass via Git Worktree Spoofing Allows Arbitrary Code Execution
+claude	GHSA-fg94-h982-f3mm	@anthropic-ai/claude-code	>=0.2.54 <2.1.163	2.1.163	medium	2026-06-13	Out-of-Band Data Exfiltration via Pre-Approved HuggingFace Domain in WebFetch
+claude	GHSA-4vp2-6q8c-pvq2	@anthropic-ai/claude-code	>=2.1.59 <2.1.128	2.1.128	medium	2026-06-25	Insecure Temporary File in /copy Command Enables Response Disclosure and Symlink-Based File Write
+claude	GHSA-7835-87q9-rgvv	@anthropic-ai/claude-code	>=2.1.38 <2.1.163	2.1.163	high	2026-06-25	Sandbox Escape via Git Worktree Path Confusion Allows Unsandboxed Code Execution
+claude	GHSA-gfvf-j8jh-jxxw	@anthropic-ai/claude-code	>=2.0.68 <2.1.260	2.1.260	low	2026-09-29	Managed Settings Not Applied When a Stored API Key Was Preferred Over Enterprise Sign-In
+claude	GHSA-5j29-h97v-84ch	@anthropic-ai/claude-code	<2.1.129	2.1.129	high	2026-10-05	Arbitrary File Write via Write-Time Symlink Following (TOCTOU) in Claude Code
+claude	GHSA-pq7j-f95f-qfcv	@anthropic-ai/claude-code	<2.1.179	2.1.179	high	2026-10-09	Plugin Commit SHA Pin Bypass Allows Installation of Attacker-Controlled Code
+claude	GHSA-5xjx-9qx6-jcrv	@anthropic-ai/claude-code	<2.1.251	2.1.251	high	2026-10-26	TOCTOU Race in Edit Tool Allows File Writes Outside the Workspace
+codex	GHSA-w5fx-fh39-j5rw	@openai/codex	>=0.2.0 <=0.38.0	0.39.0	high	2025-09-19	Sandbox bypass due to bug in path configuration logic
