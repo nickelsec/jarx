@@ -81,7 +81,9 @@ func projectOf(projects []model.Project, file string) int {
 	best, bestLen := -1, 0
 	for i, proj := range projects {
 		dir := proj.Path.Raw()
-		if _, ok := cutPathPrefix(file, dir); ok && len(dir) > bestLen {
+		_, inside := cutPathPrefix(file, dir)
+		// A finding about the project as a whole names its dir.
+		if (inside || strings.EqualFold(file, dir)) && len(dir) > bestLen {
 			best, bestLen = i, len(dir)
 		}
 	}
@@ -134,8 +136,11 @@ func (p *Printer) projectGroup(v ScanView, g group) {
 	}
 	p.emit(head)
 	nodes := p.findingNodes(v, g.findings, proj.Path)
-	if loads := p.loads(proj); loads != nil {
-		nodes = append(nodes, loads)
+	// The project's facts that aren't findings, each a line of its own.
+	for _, fact := range []func(model.Project) node{p.loads, p.credentialLine, p.talksTo} {
+		if n := fact(proj); n != nil {
+			nodes = append(nodes, n)
+		}
 	}
 	p.spacedTree(nodes)
 }

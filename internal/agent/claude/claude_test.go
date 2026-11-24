@@ -38,6 +38,12 @@ func fakeHome(t *testing.T, files map[string]string) agent.Context {
 			t.Fatal(err)
 		}
 	}
+	return contextFor(t, home)
+}
+
+// contextFor is a Context for a fake home that's already written.
+func contextFor(t *testing.T, home string) agent.Context {
+	t.Helper()
 	env, err := platform.FromHome(home)
 	if err != nil {
 		t.Fatal(err)

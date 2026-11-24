@@ -1,0 +1,7 @@
+registry=https://registry.npmjs.org/
+//registry.npmjs.org/:_authToken=JARX-CANARY-NPM1
+//npm.example.com/repo/:_auth=JARX-CANARY-NPM2
+//npm.example.com/repo/:always-auth=true
+_authToken=JARX-CANARY-NPM3
+email=me@example.com
+; //commented.example.com/:_authToken=JARX-CANARY-NPM4

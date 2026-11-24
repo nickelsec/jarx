@@ -35,6 +35,7 @@ const (
 	KindConfig      Kind = "config file"
 	KindServer      Kind = "mcp server"
 	KindOffer       Kind = "mcp offer"
+	KindCredential  Kind = "credential"
 )
 
 // Item is one thing a scan found. Project, Kind and Key say which thing it
@@ -61,6 +62,7 @@ type Input struct {
 	Instructions []model.Instruction // not tied to a project
 	Unknown      []model.Unknown
 	Findings     []finding.Finding
+	Credentials  []model.Credential // the machine's; a project's own are on it
 }
 
 // hashLen is how many hex chars of the SHA-256 a snapshot keeps: plenty to
@@ -103,10 +105,27 @@ func Build(s *redact.Scrubber, taken time.Time, in Input) Snapshot {
 	for _, in := range in.Instructions {
 		b.instruction(redact.Text{}, in)
 	}
+	for _, cr := range in.Credentials {
+		b.credential(redact.Text{}, cr)
+	}
 	for _, p := range in.Projects {
 		b.project(p)
 	}
 	return Snapshot{Taken: taken, Items: b.items}
+}
+
+// credential keeps a credential file by its kind and path, with how it was
+// read as the value and its facts as a hash, so a new profile or a key that
+// lost its passphrase shows as "content changed".
+func (b *builder) credential(dir redact.Text, cr model.Credential) {
+	facts := make([]string, 0, len(cr.Facts))
+	for _, f := range cr.Facts {
+		facts = append(facts, f.Key.String()+"="+f.Value.String())
+	}
+	b.add(Item{
+		Project: dir, Kind: KindCredential, Key: b.join(string(cr.Kind), cr.Path.Text().String(), cr.Name.String()),
+		InEffect: true, Value: b.join(string(cr.Read), cr.Via.String()), Hash: hash(b.join(strings.Join(facts, "\x00"))),
+	})
 }
 
 func (b *builder) project(p model.Project) {
@@ -118,6 +137,9 @@ func (b *builder) project(p model.Project) {
 	b.add(Item{Project: dir, Kind: KindProject, Key: dir, Value: b.join(string(p.Status), strings.Join(agents, ", "))})
 	for _, in := range p.Instructions {
 		b.instruction(dir, in)
+	}
+	for _, cr := range p.Credentials {
+		b.credential(dir, cr)
 	}
 	for _, sk := range p.Skills {
 		tools := make([]string, 0, len(sk.Tools))

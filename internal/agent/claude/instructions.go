@@ -211,7 +211,7 @@ func unloadable(s model.ReadStatus) string {
 		return "it isn't a plain file"
 	case model.ReadTooLarge:
 		return "Claude skips instruction files over 4 MiB"
-	case model.ReadOK, model.ReadCredential, model.ReadOutsideHome, model.ReadFailed, model.ReadNotFollowed:
+	case model.ReadOK, model.ReadCredential, model.ReadOutsideHome, model.ReadFailed, model.ReadNotFollowed, model.ReadExistsOnly:
 		return ""
 	default:
 		return ""

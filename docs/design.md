@@ -612,6 +612,67 @@ server can't use it at all.
 So a demo scan probes over stdio pipes only, and the offline CI job keeps
 probing on, which proves the probe makes no network syscall.
 
+### Where credentials live and what jarx reads
+
+Each CLI's own docs give its paths, and most let an env var move them.
+`credmeta.Location`, the read guard and the metadata parsers all use one
+table, so a moved credential is still refused by `fsys` and still found.
+The phase 3 table had two Windows paths wrong (gh and gcloud) and no env
+vars; this replaces it.
+
+| Kind | Where (first match wins unless it says merged) | Source |
+|---|---|---|
+| aws | `AWS_SHARED_CREDENTIALS_FILE`, else `~/.aws/credentials` (its keys win over the config file's); `AWS_CONFIG_FILE`, else `~/.aws/config`; `~/.aws/sso/cache` and `~/.aws/cli/cache` | AWS SDKs and tools reference, AWS CLI user guide |
+| gh | `GH_CONFIG_DIR`, else `$XDG_CONFIG_HOME/gh`, else `%AppData%\GitHub CLI` on Windows, else `~/.config/gh`; the file is `hosts.yml` | `gh help environment` |
+| gcloud | `CLOUDSDK_CONFIG`, else `%APPDATA%\gcloud` on Windows, else `~/.config/gcloud`; `GOOGLE_APPLICATION_CREDENTIALS`, and `application_default_credentials.json` in the config dir | gcloud "Managing configurations", "How Application Default Credentials works" |
+| azure | `AZURE_CONFIG_DIR`, else `~/.azure` | Azure CLI configuration |
+| docker | `DOCKER_CONFIG`, else `~/.docker`; the file is `config.json` | docker CLI reference |
+| kube | `KUBECONFIG` as a list (`:` on unix, `;` on Windows), merged; else `~/.kube/config` | kubernetes.io kubeconfig |
+| ssh | `~/.ssh` (`%USERPROFILE%\.ssh` on Windows) | OpenSSH, Microsoft's OpenSSH for Windows |
+| git | `~/.git-credentials`, then `$XDG_CONFIG_HOME/git/credentials` (else `~/.config/git/credentials`), both read | git-credential-store |
+| netrc | `NETRC` (curl 8.16 and later), else `~/.netrc`; on Windows `.netrc`, then `_netrc` | curl man page |
+| npm | `NPM_CONFIG_USERCONFIG`, else `~/.npmrc`; a project's own `.npmrc` too | npm config docs |
+| pypi | `~/.pypirc` | PyPA `.pypirc` spec |
+| gnupg | `GNUPGHOME`, else `~/.gnupg` | GnuPG manual |
+| login files | `CLAUDE_CONFIG_DIR` or `~/.claude`, `.credentials.json`; `CODEX_HOME` or `~/.codex`, `auth.json` | agents' docs |
+| env files and keys | `.env`, `.env.*`, private key names and extensions in a project | jarx's own list |
+
+Two things the docs leave out, so jarx leaves them out too: GnuPG's
+Windows default (only forum posts name `%APPDATA%\gnupg`), and ssh keys
+that `~/.ssh/config` points at from other places (a later item, since it
+means reading the ssh config's `IdentityFile` lines).
+
+What jarx keeps from each, and nothing else. A parser streams the file
+through `fsys` (capped like any read), keeps only these fields and drops the
+rest as it goes:
+
+| Kind | Kept |
+|---|---|
+| aws | profile names, and which kind of credential each has from its key names (static keys, sso, `credential_process`, a role) |
+| gh | host names and each host's `user`, and whether a token sits in the file (gh keeps it in the OS keyring when it can) |
+| docker | registry hosts in `auths`, whether an entry holds an inline `auth`, and `credsStore` and `credHelpers` helper names |
+| kube | context, cluster and user names, `current-context`, and which kind of credential each user has from its key names (token, client key, exec, auth provider, password) |
+| ssh | each private key's type and whether it has a passphrase: an OpenSSH key's cipher name from the first bytes of its body (`none` means no passphrase, per `PROTOCOL.key`), a PEM key's `Proc-Type` header, PKCS#8's `ENCRYPTED PRIVATE KEY` label, PuTTY's `Encryption` line |
+| git | scheme and host of each stored URL, never the user or password |
+| netrc | machine names and `default`, never `login`, `password` or `account` |
+| npm | registry hosts that have an auth key, and the key's name (`_authToken`, `_auth`, `_password`) |
+| pypi | index server names and their repository hosts |
+| gcloud, azure, gnupg, aws's token caches, login files | existence only. The docs don't describe the files inside gcloud's config dir, so jarx doesn't read them |
+| env files | key names |
+
+A credential dir jarx doesn't read (gcloud's, azure's, gnupg's, aws's
+token caches) is one entry with its file count. `~/.ssh` is one entry per
+private key, skipping the files OpenSSH documents as something else
+(`config`, `known_hosts`, `authorized_keys`, `*.pub`). A file that won't
+parse says "couldn't read" and nothing more, since a parser's error can
+quote the file.
+
+gh's `hosts.yml` and kubeconfig are YAML, and jarx has no YAML parser. A
+small line reader that only knows those two shapes keeps the keys it needs
+and drops every value it doesn't, so a value it misreads is dropped, not
+kept. A test feeds a canary secret through every parser and checks it never
+shows up in what the parser returns, the scan output or the snapshot.
+
 ### Dashboard token goes into a cookie
 
 `jarx ui` prints `http://127.0.0.1:<port>/?t=<token>`. The first request
@@ -637,7 +698,7 @@ a spot in the code that makes breaking it hard.
 | Never calls a tool | The `mcp` package has constants only for `server/discover`, `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
 | Only the listed network calls | `netguard` is the only package allowed to make a network connection. golangci `forbidigo` bans `http.Get`, `http.Client`, `http.Transport`, `http.DefaultClient`, `net.Dial*`, `net.Dialer`, `tls.Dial*`, `tls.Client`, DNS lookups (`net.Lookup*`, `net.Resolver`), `net/smtp` and `net/rpc` everywhere else. Inside netguard, every connection is checked in the dialer's `Control` hook, after DNS and right before connect, on the exact IP being connected, so DNS rebinding and reconnects can't get past it. A literal IP host is also checked before dialing, because Go rewrites `0.0.0.0`, `::` and an empty host into a dial to the local machine before `Control` sees it. The tests run with a fake DNS server and a test-only rule that refuses any non-loopback connection, so a broken guard fails its tests instead of reaching a real address. |
 | Only discover runs a process | `forbidigo` bans `exec.Command`, `exec.CommandContext`, `exec.LookPath` (it reads the real PATH), `os.StartProcess` and `syscall.Exec`/`ForkExec` outside `discover`, which only runs hardened git. `proc` joins it in phase 4. git is found through `platform.Env`'s PATH, never under `--home`. |
-| Never reads a credential value | `fsys` refuses content reads of any path `credmeta.Location` calls a credential, checked on the path and on where its symlinks lead, so following an `@import` or a symlinked rule can't open one. Stat still works for existence checks. The phase 5 metadata parsers get their input through an explicit `fsys` method, not by opening files themselves. |
+| Never reads a credential value | `fsys` refuses content reads of any path `credmeta.Location` calls a credential, checked on the path and on where its symlinks lead, so following an `@import` or a symlinked rule can't open one. Stat still works for existence checks. The one way past the guard is `fsys.FS.CredentialFacts`: it hands the file to credmeta's parser for its kind and returns only the kept facts, so no caller ever gets a credential's bytes. A `forbidigo` rule lets only `discover` call it. |
 | Never writes agent config | `fsys` has no write methods. The only writer is `jarxdir`, which is rooted at jarx's state dir (`os.UserConfigDir()/jarx`, or `<home>/.jarx-state` with `--home`) with `os.Root`. `forbidigo` bans `os.WriteFile`, `os.Create`, `os.Mkdir*`, `os.Remove*`, `os.Rename` and friends everywhere else (tests may write fixtures). |
 | Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, PATH, state dir, system roots). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`, and bans `os.Open`, `os.ReadFile`, `os.Stat`, `os.OpenRoot`, `filepath.Walk*` and friends outside `fsys`, `jarxdir` and `platform`. Under `--home`, `fsys` confines every read to the fake home with `os.Root`, so a fixture that points at a real path, a `..` trick or a symlink can't reach the real machine. `--home` builds a `platform.Env` with no system roots, registry, plists, real env or real PATH. |
 | Only approved dependencies | golangci `depguard` lists the five approved modules plus stdlib. A new import fails lint until someone approves it. |
@@ -756,7 +817,8 @@ then what it found, in this order:
 Where later phases go:
 
 - Facts about an agent (MCP servers, the installed version) go on its row
-  in the agents block.
+  in the agents block. Its installs get a second line under the row, lined
+  up with the project counts, so they're never cut off.
 - New things jarx reads (MCP servers and tools, credential locations,
   history sessions) become rows of counts in the scanned block, with
   skips as notes.

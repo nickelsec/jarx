@@ -16,6 +16,7 @@ type AgentInfo struct {
 	Name      string
 	ConfigDir model.Path
 	Found     bool
+	Installs  []model.Install // where it's installed, found on disk
 }
 
 // ScanView is everything the scan report shows.
@@ -30,6 +31,7 @@ type ScanView struct {
 	Unknown      []model.Unknown
 	Findings     []finding.Finding
 	Rules        *finding.Registry
+	Credentials  []model.Credential // the machine's; a project's own are on it
 
 	Since   time.Time // when the last snapshot was taken, zero for none
 	Note    string    // why there's nothing to compare against, if not a first scan
@@ -187,7 +189,9 @@ func (p *Printer) changes(v ScanView) {
 func (p *Printer) inventory(v ScanView) {
 	p.emit(line{{text: "full inventory", tone: bold}})
 	p.Wrapped(v.Home, func() {
+		p.Installs(v.Agents)
 		p.Projects(v.Projects)
+		p.Credentials(v.Credentials)
 		p.Unknown(v.Unknown)
 		p.Instructions(v.Instructions)
 	})

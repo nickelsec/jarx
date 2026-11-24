@@ -1,0 +1,11 @@
+{
+  "auths": {
+    "https://index.docker.io/v1/": {"auth": "JARX-CANARY-DOCKER1"},
+    "ghcr.io": {},
+    "registry.example.com": {"identitytoken": "JARX-CANARY-DOCKER2", "auth": "JARX-CANARY-DOCKER3"}
+  },
+  "credsStore": "desktop",
+  "credHelpers": {"gcr.io": "gcloud"},
+  "HttpHeaders": {"X-Meta-Token": "JARX-CANARY-DOCKER4"},
+  "proxies": {"default": {"httpProxy": "http://u:JARX-CANARY-DOCKER5@proxy:3128"}}
+}

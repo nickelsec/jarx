@@ -9,6 +9,7 @@ import (
 	"io"
 	"runtime/debug"
 
+	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
@@ -60,6 +61,7 @@ func Run(args []string, stdout, stderr io.Writer, ldflagsVersion string) int {
 		return code
 	}
 	if *showVersion {
+		p.Out.Printf("advisory data as of %s\n", scrubbed(plain, catalog.AdvisoriesStamp()))
 		return exitOK
 	}
 

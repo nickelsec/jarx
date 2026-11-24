@@ -331,3 +331,59 @@ func TestAChangedToolShowsInTheDiff(t *testing.T) {
 		t.Errorf("Diff() = %+v, want the tool's content changed", changes)
 	}
 }
+
+func (f fixture) cred(path string, read model.ReadStatus, facts ...string) model.Credential {
+	cr := model.Credential{Kind: "aws", Path: model.NewPath(f.s, filepath.Join(f.env.Home, path)), Via: f.text("default"), Read: read}
+	for _, fa := range facts {
+		k, v, _ := strings.Cut(fa, "=")
+		cr.Facts = append(cr.Facts, model.Pair{Key: f.text(k), Value: f.text(v)})
+	}
+	return cr
+}
+
+func TestCredentialsAreItemsAndTheirFactsAHash(t *testing.T) {
+	f := newFixture(t)
+	in := f.input(instructionBody)
+	in.Credentials = []model.Credential{f.cred(".aws/credentials", model.ReadOK, "profile dev=static keys")}
+	in.Projects[0].Credentials = []model.Credential{f.cred("app/.env", model.ReadOK, "key=API_KEY")}
+	prev := Build(f.s, time.Unix(100, 0), in)
+
+	in.Credentials = []model.Credential{f.cred(".aws/credentials", model.ReadOK, "profile dev=static keys", "profile prod=static keys")}
+	in.Projects[0].Credentials = nil
+	changes := Diff(f.s, prev, Build(f.s, time.Unix(200, 0), in))
+
+	var got []string
+	for _, c := range changes {
+		if c.Item.Kind == KindCredential {
+			got = append(got, string(c.Change)+" "+c.Item.Key.String()+" "+c.What.String())
+		}
+	}
+	joined := strings.Join(got, "\n")
+	if len(got) != 2 || !strings.Contains(joined, "content changed") || !strings.Contains(joined, "removed ") || !strings.Contains(joined, ".env") {
+		t.Errorf("credential changes = %q, want the aws file changed and the .env gone", got)
+	}
+	for _, it := range prev.Items {
+		if it.Kind == KindCredential && strings.Contains(it.Value.String()+it.Key.String(), "API_KEY") {
+			t.Errorf("item %+v holds a fact as text, want only its hash", it)
+		}
+	}
+}
+
+func TestEnvVarCredentialsAreKeptByName(t *testing.T) {
+	f := newFixture(t)
+	in := f.input(instructionBody)
+	in.Credentials = []model.Credential{
+		{Kind: "env_var", Name: f.text("GITHUB_TOKEN"), Read: model.ReadExistsOnly},
+		{Kind: "env_var", Name: f.text("NPM_TOKEN"), Read: model.ReadExistsOnly},
+	}
+
+	n := 0
+	for _, it := range Build(f.s, time.Unix(100, 0), in).Items {
+		if it.Kind == KindCredential {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("credential items = %d, want one per env var", n)
+	}
+}

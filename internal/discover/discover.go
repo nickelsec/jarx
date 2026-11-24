@@ -27,6 +27,12 @@ type Result struct {
 	Unknown      []model.Unknown
 	Instructions []model.Instruction // not tied to one project
 	Findings     []finding.Finding
+	// Credentials are the machine's credential files, at the places
+	// credmeta knows. A project's own ones are on the project.
+	Credentials []model.Credential
+	// Installs are where each agent is installed, with the PATH winner
+	// marked. Versions come from disk; no agent is ever run.
+	Installs []model.Install
 }
 
 // Run asks every adapter for its projects, adds the extra paths, merges
@@ -57,6 +63,7 @@ func Run(c agent.Context, adapters []agent.Adapter, extra []string) Result {
 		p.Status = status(c.Files, p.Path.Raw())
 		if p.Status == model.ProjectOK {
 			findings = append(findings, walkProject(c, p, maxFiles)...)
+			p.Credentials = projectCredentials(c, *p)
 		}
 	}
 	var unknown []model.Unknown
@@ -76,8 +83,10 @@ func Run(c agent.Context, adapters []agent.Adapter, extra []string) Result {
 			findings = append(findings, er.Extensions(c, projects)...)
 		}
 	}
+	ins := installs(c, adapters)
 	findings = append(findings, finding.FromSkips(c.Scrub, c.Files.Skips())...)
-	return Result{Projects: projects, Unknown: unknown, Instructions: global, Findings: findings}
+	return Result{Projects: projects, Unknown: unknown, Instructions: global, Findings: findings, Credentials: credentials(c),
+		Installs: ins}
 }
 
 // walkProject lists p's files. A walk cut off at limit is a finding, so it's

@@ -20,6 +20,7 @@ type counts struct {
 	rules, modes, configs         int
 	unknowns                      int
 	servers, serversOff, approval int
+	creds, credsFailed            int
 	tooLarge, unreadable, partial int
 }
 
@@ -46,13 +47,27 @@ func countAll(v ScanView) counts {
 	for _, in := range v.Instructions {
 		k.instruction(in)
 	}
+	k.creds(v.Credentials)
 	k.c.unknowns = len(v.Unknown)
 	k.findings(v.Findings)
 	return k.c
 }
 
+// creds counts credential locations, once per path.
+func (k *counter) creds(cs []model.Credential) {
+	for _, cr := range cs {
+		if k.once("credential", string(cr.Kind), cr.Path.Raw(), cr.Name.String()) {
+			k.c.creds++
+			if cr.Read == model.ReadFailed {
+				k.c.credsFailed++
+			}
+		}
+	}
+}
+
 func (k *counter) project(proj model.Project) {
 	k.c.projects++
+	k.creds(proj.Credentials)
 	if proj.Status != model.ProjectOK {
 		k.c.notScanned++
 		k.c.notScannedWhy[string(proj.Status)]++
@@ -164,6 +179,8 @@ func (c counts) rows(sep string) []scanRow {
 			ifPos(c.approval, plural(c.approval, "approval unknown", "approval unknown")),
 		)},
 		{[]string{plural(c.rules, "permission rule", "permission rules"), plural(c.modes, "mode setting", "mode settings")}, nil},
+		{[]string{plural(c.creds, "credential location", "credential locations")},
+			nonEmpty(ifPos(c.credsFailed, strconv.Itoa(c.credsFailed)+" couldn't read"))},
 		{[]string{plural(c.configs, "config file", "config files")},
 			nonEmpty(ifPos(c.unknowns, plural(c.unknowns, "unknown setting", "unknown settings")))},
 	}

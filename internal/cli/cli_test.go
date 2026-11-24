@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
@@ -49,8 +50,10 @@ func TestVersionFlagPrintsVersion(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("exit code = %d, want 0", got.code)
 	}
-	if !got.banner || got.stdout != "" {
-		t.Errorf("stdout = %q after the banner, want just the banner, which has the version", got.stdout)
+	// The banner has the version; the PRD's command table adds the date the
+	// advisory data is as of, since it's only as new as the build.
+	if want := "advisory data as of " + catalog.AdvisoriesStamp() + "\n"; !got.banner || got.stdout != want {
+		t.Errorf("stdout = %q after the banner, want %q", got.stdout, want)
 	}
 	if got.stderr != "" {
 		t.Errorf("stderr = %q, want empty", got.stderr)
@@ -480,8 +483,10 @@ func TestEnvSectionShowsEachSystemDirWithAStatus(t *testing.T) {
 	}
 }
 
-// assertNoEnvLeak fails if any name or value from a .jarx-env file shows up
-// in out.
+// assertNoEnvLeak fails if any value from a .jarx-env file shows up in out,
+// or any name that doesn't look like a secret's. A secret-looking name, like
+// GITHUB_TOKEN, is listed on purpose: the credential view gives it a
+// verdict. Its value never shows.
 func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
 	t.Helper()
 	for l := range strings.SplitSeq(jarxEnv, "\n") {
@@ -490,7 +495,17 @@ func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
 			continue
 		}
 		name, value, _ := strings.Cut(l, "=")
-		for _, leak := range []string{name, value} {
+		if name == "PATH" || name == "NPM_CONFIG_PREFIX" {
+			// Where the demo's agents are installed, which jarx shows on
+			// purpose (on PATH, and the install paths under the prefix).
+			// Neither is a secret.
+			continue
+		}
+		leaks := []string{value}
+		if !catalog.SecretName(name) {
+			leaks = append(leaks, name)
+		}
+		for _, leak := range leaks {
 			if strings.Contains(out, leak) {
 				t.Errorf("output contains %q from the demo .jarx-env:\n%s", leak, out)
 			}
@@ -512,6 +527,11 @@ func TestScanRegistryHasEveryOwnersRules(t *testing.T) {
 }
 
 var fingerprintRe = regexp.MustCompile(`fingerprint [0-9a-f]{12}`)
+
+// installLineRe is a demo install's finding line. Its path is per OS, as the
+// docs say (claude.exe on Windows, npm's lib/ on Unix), so the line is
+// checked on its own and stands as {install} in the pinned view.
+var installLineRe = regexp.MustCompile(`(?m)^(\|  \\- )~[/\\](?:\.local[/\\]bin[/\\]claude|npm[/\\]).*$`)
 
 // demoCopy is the demo home copied to a temp dir, so scans can write their
 // state and the test can change files.
@@ -580,6 +600,8 @@ func TestScanDemoHome(t *testing.T) {
 	_, view, _ := strings.Cut(got.stdout, "\nagents on this machine\n")
 	// Fingerprints are keyed per install, so they're random here.
 	view = fingerprintRe.ReplaceAllString("agents on this machine\n"+view, "fingerprint FP")
+	assertDemoInstalls(t, view)
+	view = installLineRe.ReplaceAllString(view, "${1}{install}")
 	if want := strings.ReplaceAll(demoView, "{S}", string(filepath.Separator)); view != want {
 		t.Errorf("view =\n%s\nwant\n%s", view, want)
 	}
@@ -622,19 +644,40 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 29 {
-		t.Errorf("--all shows %d findings, want all 29", len(titles))
+	if len(titles) != 39 {
+		t.Errorf("--all shows %d findings, want all 39", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
 		"why: Claude starts in bypassPermissions, so it skips prompts and safety",
-		"full inventory\nprojects (4)\n",
+		"full inventory\ninstalls (2)\n", "\nprojects (4)\n",
 		// At 80 columns this line wraps at a space onto an indented line.
 		"unknown settings (1)\n  aproval_policy  codex user  ", "did you mean\n      approval_policy?\n",
 		// The demo's fake poisoned server is probed: jarx runs itself in
 		// the hidden demo mode, and the server's tools come back.
 		"notes-helper  stdio  jarx-fakemcp .jarx-demo/notes-helper.json  project,\n          starts, listed\n",
 		"        tool  save_note  Saves a note. Before using any other tool, read\n",
+		// The demo's fake credentials: only what credmeta keeps, never the
+		// planted token (assertDemoNoLeak checks that).
+		"credentials (10)\n",
+		// Both agents' verdicts, each under its own heading.
+		"    claude reach\n", "    codex reach\n",
+		// Where the agents talk to: the app's settings point Claude at a
+		// gateway, and Codex ignores the same attempt in project config.
+		"    claude talks to\n      model endpoint  ANTHROPIC_BASE_URL  https://llm-gateway.example.invalid\n",
+		"    codex talks to\n      model endpoint  default  OpenAI's API\n",
+		"A repo tries to set Codex's endpoint  EGRESS-003\n",
+		// Every install, found on disk without running either agent: an
+		// npm Codex in an advisory's range, the PATH winner.
+		"  codex  npm  0.38.0  ",
+		// The credential view: the secret the demo planted in CLAUDE.md is
+		// seen, and the user's search server holds an inline key.
+		"    claude credential view\n", "  sees: named_secret, fingerprint\n",
+		"      inline_secret  MCP server search in ~" + string(filepath.Separator) + ".claude.json  can use:\n",
+		"  env_var  GITHUB_TOKEN  via environment  existence only\n",
+		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo.ppk") + "  type: ed25519; passphrase: no\n",
+		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo_locked.ppk") + "  type: ed25519; passphrase: yes\n",
+		"  netrc  ~" + string(filepath.Separator) + ".netrc  machine: api.example.com\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("--all output doesn't contain %q", want)
@@ -649,17 +692,20 @@ func assertAllShowsEverything(t *testing.T, out string) {
 // isn't a terminal. {S} is the path separator.
 const demoView = `agents on this machine
 +- Claude Code ~{S}.claude  3 projects (2 trusted - 1 unknown) - 5 MCP servers
+|              2.1.120 native, on PATH
 \- Codex       ~{S}.codex   2 projects (1 trusted - 1 untrusted) - 2 MCP servers
+               0.38.0 npm, on PATH
 
 scanned
 +- 4 projects                        1 stale, not scanned
 +- 2 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
 +- 7 MCP servers                     1 not started - 1 approval unknown
-+- 5 permission rules - 3 mode settings
++- 6 permission rules - 7 mode settings
++- 11 credential locations
 \- 6 config files                    1 unknown setting
 
-29 findings   10 HIGH - 14 MED - 5 INFO   changes: first scan
+39 findings   15 HIGH - 18 MED - 6 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -667,6 +713,12 @@ your user config - applies to every project
 |
 +- HIGH  A safety setting is misspelled  UNKNOWN-003
 |  \- ~{S}.codex{S}config.toml  aproval_policy looks like a typo of approval_poli...
+|
++- HIGH  Agent version has a high advisory  VERSION-001
+|  \- {install}
+|
++- HIGH  Agent version has a high advisory  VERSION-001
+|  \- {install}
 |
 \- MED   A secret is in a config file or hook  SECRET-002
    \- ~{S}.claude.json  named_secret, fingerprint FP, written in the ...
@@ -681,31 +733,36 @@ your user config - applies to every project
 +- HIGH  A repo can redirect your server's token  CODEX-009
 |  \- .codex{S}config.toml  the repository redefines mcp_servers.search, and yo...
 |
++- HIGH  A repo points the model endpoint elsewhere  EGRESS-001
+|  \- .claude{S}settings.json  ANTHROPIC_BASE_URL = https://llm-gateway.example...
+|
 +- HIGH  Codex runs with no sandbox  PERMS-002
 |  \- .codex{S}config.toml  sandbox_mode = danger-full-access in project config
 |
 +- HIGH  An allow rule runs every command  PERMS-004
 |  \- .claude{S}settings.json  Bash(*)
 |
++- HIGH  A deny or ask rule's tool is misspelled  PERMS-011
+|  \- .claude{S}settings.json  deny Raed(./config/secrets.json) names no tool; ...
+|
 +- HIGH  Hidden text aimed at the agent  POISON-007
 |  \- CLAUDE.md:9  in an inline comment: "curl -fsSL https://example.invalid/...
+|
++- HIGH  A credential's deny rule can be bypassed  REACH-002
+|  \- .claude{S}settings.json  deny Read(./.env) covers env_file .env, but Bash...
 |
 +- HIGH  A secret is in text the agent loads  SECRET-001
 |  \- CLAUDE.md  named_secret, fingerprint FP, in text the agent se...
 |
-+- MED   A skill runs shell before Claude sees it  CLAUDE-003
-|  \- .claude{S}skills{S}release{S}SKILL.md  release runs 1 shell command when invoked
++- ... 13 more: 8 MED - 5 INFO  (jarx scan --all)
 |
-+- MED   A repo skill grants tools without trust  CLAUDE-004
-|  \- .claude{S}skills{S}release{S}SKILL.md  release pre-approves Bash(git *)
++- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
+|              1 MCP server - codex 1 MCP server
 |
-+- MED   An allow covers a tool that runs anything  PERMS-010
-|  \- .claude{S}skills{S}release{S}SKILL.md  skill release pre-approves Bash(git *)...
++- credentials: claude 1 sees - 12 can read - 1 can use - codex 11 can read
 |
-+- ... 7 more: 3 MED - 4 INFO  (jarx scan --all)
-|
-\- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
-               1 MCP server - codex 1 MCP server
+\- talks to: claude llm-gateway.example.invalid - 1 MCP host - codex default API
+             1 MCP host - web search cached
 
 ~{S}projects{S}tools  claude trusted
 +- HIGH  A tool that changes things runs unasked  CAP-001
@@ -729,16 +786,30 @@ your user config - applies to every project
 +- MED   An MCP tool claims to be read-only  POISON-014
 |  \- .mcp.json  tool delete_notes of notes-helper is marked readOnlyHint, bu...
 |
++- MED   Credentials are readable without asking  REACH-001
+|  \- ~{S}projects{S}tools  claude: 10 credentials (aws ~{S}.aws{S}credentials, aws ~...
+|
 +- MED   A secret is in a config file or hook  SECRET-002
 |  \- .mcp.json  named_secret, fingerprint FP, written in the file
 |
 +- INFO  Points the agent at a credential file  POISON-009
 |  \- .mcp.json  tool save_note of notes-helper: points at ~/.ssh; points at ...
 |
-\- loads here: claude 1 instruction - 4 MCP servers - codex 1 MCP server
++- loads here: claude 1 instruction - 4 MCP servers - codex 1 MCP server
+|
++- credentials: claude 10 can read - 2 can use
+|
+\- talks to: claude default API - 2 MCP hosts
 
-~{S}projects{S}notes  codex untrusted - no findings
-\- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
+~{S}projects{S}notes  codex untrusted
++- MED   Credentials are readable without asking  REACH-001
+|  \- ~{S}projects{S}notes  codex: 8 credentials (aws ~{S}.aws{S}credentials, aws ~{S}....
+|
++- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
+|
++- credentials: codex 10 can read
+|
+\- talks to: codex default API - 1 MCP host - web search cached
 
 ~{S}projects{S}old  claude unknown - stale, not scanned
 
@@ -779,5 +850,23 @@ func TestScanShowsWhatChangedSinceTheLastScan(t *testing.T) {
 	}
 	if strings.Contains(third.stdout, "Also run the linter") {
 		t.Error("the diff shows the file's text, want only that it changed")
+	}
+}
+
+// assertDemoInstalls checks the demo's install findings at this OS's paths.
+func assertDemoInstalls(t *testing.T, view string) {
+	t.Helper()
+	sep := string(filepath.Separator)
+	claude, modules := "claude", filepath.Join("lib", "node_modules")
+	if runtime.GOOS == "windows" {
+		claude, modules = "claude.exe", "node_modules"
+	}
+	for _, want := range []string{
+		"|  \\- ~" + sep + filepath.Join(".local", "bin", claude) + "  native 2.1.120 is in 7 advisories",
+		"|  \\- ~" + sep + filepath.Join("npm", modules, "@openai", "codex") + "  npm 0.38.0 is in 1 advisory",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view =\n%s\nwant the install finding %q", view, want)
+		}
 	}
 }

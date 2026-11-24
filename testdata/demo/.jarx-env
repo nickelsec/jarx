@@ -3,3 +3,8 @@
 ANTHROPIC_API_KEY=sk-ant-demo-0000-not-a-real-key
 GITHUB_TOKEN=demo-not-a-real-token
 EDITOR=vim
+
+# Where the demo's agents are installed: the native Claude launcher, then
+# the npm prefix's commands (bin on Unix, the prefix itself on Windows).
+PATH=~/.local/bin;~/npm/bin;~/npm
+NPM_CONFIG_PREFIX=~/npm

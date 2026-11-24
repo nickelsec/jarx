@@ -293,3 +293,14 @@ func TestALookAlikeMaskCantHideASecret(t *testing.T) {
 		}
 	}
 }
+
+func TestSecretNameUsesTheNameRule(t *testing.T) {
+	for name, want := range map[string]bool{
+		"GITHUB_TOKEN": true, "AWS_SECRET_ACCESS_KEY": true, "OPENAI_API_KEY": true, "DB_PASSWORD": true, "npm_token": true,
+		"PATH": false, "EDITOR": false, "PWD": false, "OLDPWD": false, "apiKeyHelper": false, "TOKEN_PATH": false, "HOME": false,
+	} {
+		if got := SecretName(name); got != want {
+			t.Errorf("SecretName(%s) = %v, want %v", name, got, want)
+		}
+	}
+}

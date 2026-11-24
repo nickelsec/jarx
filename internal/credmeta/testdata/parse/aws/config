@@ -1,0 +1,22 @@
+[default]
+region = us-east-1
+
+[profile dev]
+sso_session = my-sso
+sso_account_id = 111122223333
+sso_role_name = Admin
+
+[profile ci]
+role_arn = arn:aws:iam::111122223333:role/ci
+source_profile = default
+
+[profile proc]
+credential_process = /usr/local/bin/fetch-creds --token JARX-CANARY-PROC
+
+[profile both]
+aws_access_key_id = JARX-CANARY-AWS6
+aws_secret_access_key = JARX-CANARY-AWS7
+role_arn = arn:aws:iam::111122223333:role/x
+
+[sso-session my-sso]
+sso_start_url = https://demo.awsapps.com/start

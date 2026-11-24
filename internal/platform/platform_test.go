@@ -308,3 +308,76 @@ func TestMapPathLeavesRealPathsAlone(t *testing.T) {
 		t.Errorf("MapPath(%q) = %q, want it unchanged", abs, got)
 	}
 }
+
+func TestNamesListsEnvVarNamesSorted(t *testing.T) {
+	env := newEnv("linux", "/home/dev", "/home/dev/.jarx-state", []string{"ZED=1", "API_TOKEN=secret-value", "EDITOR=vim", "EMPTY="}, false, true)
+
+	if got := env.Names(); !slices.Equal(got, []string{"API_TOKEN", "EDITOR", "EMPTY", "ZED"}) {
+		t.Errorf("Names() = %q, want the names sorted", got)
+	}
+}
+
+func TestAFakeHomesPathCanStartFromTheHome(t *testing.T) {
+	home := t.TempDir()
+	pathList := strings.Join([]string{"~/.local/bin", "/fake/bin", "~"}, string(os.PathListSeparator))
+	writeFile(t, filepath.Join(home, ".jarx-env"), "PATH="+pathList+"\n")
+
+	env, err := FromHome(home)
+	if err != nil {
+		t.Fatalf("FromHome() error = %v", err)
+	}
+
+	want := []string{filepath.Join(env.Home, ".local", "bin"), "/fake/bin", env.Home}
+	if !slices.Equal(env.Path, want) {
+		t.Errorf("Path = %q, want %q: a demo copied anywhere still finds its own bins", env.Path, want)
+	}
+}
+
+func TestAFakeHomesValuesCanStartFromTheHome(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".jarx-env"), "NPM_CONFIG_PREFIX=~/npm\nTILDE_INSIDE=a~/b\nJUST=~\n")
+
+	env, err := FromHome(home)
+	if err != nil {
+		t.Fatalf("FromHome() error = %v", err)
+	}
+
+	if got, _ := env.Lookup("NPM_CONFIG_PREFIX"); got != filepath.Join(env.Home, "npm") {
+		t.Errorf("NPM_CONFIG_PREFIX = %q, want it under the fake home, like a shell assignment", got)
+	}
+	if got, _ := env.Lookup("JUST"); got != env.Home {
+		t.Errorf("JUST = %q, want the home", got)
+	}
+	if got, _ := env.Lookup("TILDE_INSIDE"); got != "a~/b" {
+		t.Errorf("TILDE_INSIDE = %q, want it as written: only a leading ~ expands", got)
+	}
+}
+
+func TestAFakeHomesPathSplitsOnSemicolonsOnEveryOS(t *testing.T) {
+	// One demo .jarx-env serves every OS, and ; can't be part of a Windows
+	// path, so it separates entries everywhere.
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".jarx-env"), "PATH=~/a;~/b\n")
+
+	env, err := FromHome(home)
+	if err != nil {
+		t.Fatalf("FromHome() error = %v", err)
+	}
+
+	if want := []string{filepath.Join(env.Home, "a"), filepath.Join(env.Home, "b")}; !slices.Equal(env.Path, want) {
+		t.Errorf("Path = %q, want %q", env.Path, want)
+	}
+}
+
+func TestFakePathSplitsTheSameForEveryGOOS(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	for _, goos := range []string{"linux", "darwin", "windows"} {
+		got := fakePath(goos, home, "~/a;~/b")
+		if want := []string{filepath.Join(home, "a"), filepath.Join(home, "b")}; !slices.Equal(got, want) {
+			t.Errorf("%s: fakePath = %q, want %q", goos, got, want)
+		}
+	}
+	if got := fakePath("linux", home, "/x:/y"); !slices.Equal(got, []string{"/x", "/y"}) {
+		t.Errorf("linux: fakePath(/x:/y) = %q, want : to still split on Unix", got)
+	}
+}

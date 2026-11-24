@@ -17,11 +17,14 @@ import (
 	"github.com/nickelsec/jarx/internal/agent/codex"
 	"github.com/nickelsec/jarx/internal/analyze/capability"
 	"github.com/nickelsec/jarx/internal/analyze/drift"
+	"github.com/nickelsec/jarx/internal/analyze/egress"
 	"github.com/nickelsec/jarx/internal/analyze/mcpconfig"
 	"github.com/nickelsec/jarx/internal/analyze/perms"
 	"github.com/nickelsec/jarx/internal/analyze/poison"
+	"github.com/nickelsec/jarx/internal/analyze/reach"
 	"github.com/nickelsec/jarx/internal/analyze/secrets"
 	"github.com/nickelsec/jarx/internal/analyze/unknown"
+	"github.com/nickelsec/jarx/internal/analyze/versions"
 	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/discover"
 	"github.com/nickelsec/jarx/internal/finding"
@@ -104,12 +107,13 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	}
 	view := report.ScanView{
 		Fake: env.Fake(), Home: model.NewPath(scrub, env.Home), GOOS: env.GOOS,
-		Agents:   agentInfo(env, files, scrub, adapters),
+		Agents:   agentInfo(env, files, scrub, adapters, res.Installs),
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown,
-		Findings: findings, Rules: rules, All: *all,
+		Findings: findings, Rules: rules, All: *all, Credentials: res.Credentials,
 	}
 	view.Since, view.Note, view.Changes, view.SaveErr = saveSnapshot(env, scrub, snapshot.Input{
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
+		Credentials: res.Credentials,
 	})
 	p.Scan(view)
 	return exitOK
@@ -119,6 +123,8 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 func analyze(scrub *redact.Scrubber, env platform.Env, res discover.Result, prev snapshot.Snapshot) ([]finding.Finding, error) {
 	perms.Settle(scrub, res.Projects)
 	capability.Settle(scrub, res.Projects) // reads the settled permissions
+	reach.Settle(scrub, env, res.Projects, res.Credentials)
+	egress.Settle(scrub, env, res.Projects, res.Credentials)
 	permFindings, err := perms.Analyze(scrub, env, res.Projects)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // perms names what failed
@@ -130,13 +136,16 @@ func analyze(scrub *redact.Scrubber, env platform.Env, res discover.Result, prev
 		mcpconfig.Analyze(scrub, env, res.Projects),
 		capability.Analyze(scrub, res.Projects),
 		drift.Analyze(scrub, prev, res.Projects),
+		reach.Analyze(scrub, env, res.Projects),
+		egress.Analyze(scrub, res.Projects),
+		versions.Analyze(scrub, res.Installs),
 		permFindings,
 		unknown.Analyze(scrub, res.Unknown),
 	), nil
 }
 
 // agentInfo names each agent and whether its config dir is there.
-func agentInfo(env platform.Env, files *fsys.FS, scrub *redact.Scrubber, adapters []agent.Adapter) []report.AgentInfo {
+func agentInfo(env platform.Env, files *fsys.FS, scrub *redact.Scrubber, adapters []agent.Adapter, installs []model.Install) []report.AgentInfo {
 	var out []report.AgentInfo
 	for _, a := range adapters {
 		d, ok := a.(agent.Describer)
@@ -145,8 +154,15 @@ func agentInfo(env platform.Env, files *fsys.FS, scrub *redact.Scrubber, adapter
 		}
 		dir := d.ConfigDir(env)
 		info, err := files.Stat(dir)
+		var mine []model.Install
+		for _, in := range installs {
+			if in.Agent == a.Agent() {
+				mine = append(mine, in)
+			}
+		}
 		out = append(out, report.AgentInfo{
 			Agent: a.Agent(), Name: d.Name(), ConfigDir: model.NewPath(scrub, dir), Found: err == nil && info.IsDir(),
+			Installs: mine,
 		})
 	}
 	return out
@@ -296,7 +312,7 @@ func plural(n int, one, many string) string {
 // scanRules is every rule a scan can report: finding's own and each
 // adapter's.
 func scanRules() (*finding.Registry, error) {
-	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules(), mcpconfig.Rules(), capability.Rules(), drift.Rules())
+	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules(), mcpconfig.Rules(), capability.Rules(), drift.Rules(), reach.Rules(), egress.Rules(), versions.Rules())
 	r, err := finding.NewRegistry(all...)
 	if err != nil {
 		return nil, fmt.Errorf("building the rule registry: %w", err)

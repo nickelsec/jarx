@@ -3,6 +3,7 @@ package codex
 import (
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/nickelsec/jarx/internal/finding"
@@ -123,11 +124,106 @@ func (v *view) permissions() (model.Permissions, bool) {
 			perm.Options = append(perm.Options, o)
 		}
 	}
-	perm.Rules = v.rules(perm, legacy)
+	for _, key := range v.dynamicKeys() {
+		if o, ok := v.option(key, legacy); ok {
+			perm.Options = append(perm.Options, o)
+		}
+	}
+	perm.Options = append(perm.Options, v.windowsRequirements()...)
+	perm.Rules = append(append(v.rules(perm, legacy), v.envRules()...), v.netRules()...)
 	v.sandboxFindings(legacy)
 	v.workspaceFindings(legacy)
 	v.profileFindings()
 	return perm, len(perm.Options) > 0 || len(perm.Rules) > 0
+}
+
+// windowsRequirements are the requirements other analyzers show as
+// options: the [windows] ones, so reach can tell whether the unelevated
+// sandbox (which doesn't support denied read paths) can run, and
+// allowed_web_search_modes, for where Codex talks to.
+func (v *view) windowsRequirements() []model.Option {
+	r := v.s.req
+	if r == nil {
+		return nil
+	}
+	var out []model.Option
+	add := func(key, val string) {
+		out = append(out, model.Option{Key: v.s.text(key), Setting: model.Setting[redact.Text]{
+			Layers: []model.Layer[redact.Text]{{Value: v.s.text(val), Origin: r.origin}},
+		}})
+	}
+	if r.windowsImpls != nil {
+		add("windows.allowed_sandbox_implementations", strings.Join(r.windowsImpls, ", "))
+	}
+	if r.allowMxc != nil {
+		add("windows.allow_mxc", strconv.FormatBool(*r.allowMxc))
+	}
+	if r.webSearch != nil {
+		add("requirements.allowed_web_search_modes", strings.Join(r.webSearch, ", "))
+	}
+	return out
+}
+
+// netRules are the network domain lists as rules. For each list and host
+// the highest loaded layer wins.
+func (v *view) netRules() []model.PermissionRule {
+	var out []model.PermissionRule
+	seen := map[string]bool{}
+	for _, l := range v.layers {
+		for _, r := range l.netRules {
+			o := l.origin
+			k := r.list + "\x00" + r.host
+			if o.InEffect && seen[k] {
+				o.InEffect, o.Why = false, v.s.text("overridden by a higher layer")
+			}
+			if o.InEffect {
+				seen[k] = true
+			}
+			out = append(out, model.PermissionRule{Action: r.action, Rule: v.s.text(r.list + " " + r.host), Target: v.s.text(r.host), Origin: o})
+		}
+	}
+	return out
+}
+
+// dynamicKeys are the keys under a name any layer sets: a profile's
+// extends and network switch, and each model provider's entries.
+func (v *view) dynamicKeys() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range v.layers {
+		for _, k := range sortedKeys(l.values) {
+			if (strings.HasPrefix(k, "permissions.") || strings.HasPrefix(k, "model_providers.")) && !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+// envRules are shell_environment_policy's pattern lists as rules. The
+// highest loaded layer that sets any of them wins; the docs don't say the
+// lists merge, and a lower list kept in effect could hide a var the agent
+// really gets.
+func (v *view) envRules() []model.PermissionRule {
+	var out []model.PermissionRule
+	won := false
+	for _, l := range v.layers {
+		if len(l.envRules) == 0 {
+			continue
+		}
+		o := l.origin
+		if o.InEffect && won {
+			o.InEffect, o.Why = false, v.s.text("overridden by a higher layer")
+		}
+		won = won || o.InEffect
+		for _, r := range l.envRules {
+			out = append(out, model.PermissionRule{
+				Action: r.action, Rule: v.s.text("shell_environment_policy." + r.list + " " + r.pattern), Target: v.s.text(r.pattern), Origin: o,
+			})
+		}
+	}
+	return out
 }
 
 // option builds one key's layers: the highest loaded layer that requirements
@@ -141,7 +237,7 @@ func (v *view) option(key string, legacy *layer) (model.Option, bool) {
 			continue
 		}
 		origin := l.origin
-		if why := v.optionWhy(key, val, legacy, won); origin.InEffect && why != "" {
+		if why := v.optionWhy(l, key, val, legacy, won); origin.InEffect && why != "" {
 			origin.InEffect, origin.Why = false, v.s.text(why)
 		}
 		won = won || origin.InEffect
@@ -151,7 +247,10 @@ func (v *view) option(key string, legacy *layer) (model.Option, bool) {
 }
 
 // optionWhy says why a loaded layer's value isn't the one in effect, or "".
-func (v *view) optionWhy(key, val string, legacy *layer, won bool) string {
+func (v *view) optionWhy(l *layer, key, val string, legacy *layer, won bool) string {
+	if l.origin.Scope == model.ScopeProject && ignoredInProject(key) {
+		return "Codex ignores " + key + " in a project's .codex/config.toml, and warns at startup"
+	}
 	if why := v.sandboxWhy(key, legacy); why != "" {
 		return why
 	}
@@ -172,6 +271,8 @@ func (v *view) sandboxWhy(key string, legacy *layer) string {
 	switch {
 	case key == keyDefaultPerm && legacy != nil:
 		return "sandbox_mode is set in " + legacy.origin.File.Text().String() + ", so Codex uses the legacy sandbox and ignores default_permissions"
+	case strings.HasPrefix(key, "permissions.") && legacy != nil:
+		return "sandbox_mode is set in " + legacy.origin.File.Text().String() + ", so Codex ignores permission profiles"
 	case key == keySandboxMode && v.s.req != nil && v.s.req.profiles != nil:
 		return "managed allowed_permission_profiles makes Codex use permission profiles instead"
 	case strings.HasPrefix(key, workspaceTable+"."):

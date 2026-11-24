@@ -56,3 +56,22 @@ func TestAProjectAddsItsOwnEnvFile(t *testing.T) {
 		t.Errorf("samples with no project = %q, want no project files", paths(""))
 	}
 }
+
+func TestSamplesFollowPlaces(t *testing.T) {
+	env := fakeEnv(t, "APPDATA=/appdata\nKUBECONFIG=/k/a\n")
+	env.GOOS = "windows"
+	got := map[string]string{}
+	for _, s := range Samples(env, "") {
+		got[s.Path] = s.Kind
+	}
+	for path, kind := range map[string]string{
+		env.MapPath("/appdata/GitHub CLI/hosts.yml"):   "gh",
+		env.MapPath("/appdata/gcloud/credentials"):     "gcloud",
+		env.MapPath("/k/a"):                            "kube",
+		filepath.Join(env.Home, ".aws", "credentials"): "aws",
+	} {
+		if got[path] != kind {
+			t.Errorf("Samples has %s as %q, want %q", path, got[path], kind)
+		}
+	}
+}

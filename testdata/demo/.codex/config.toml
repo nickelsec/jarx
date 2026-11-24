@@ -8,6 +8,12 @@ default_permissions = "locked"
 # Codex never sees approval_policy, so it keeps its default.
 aproval_policy = "on-request"
 
+# On native Windows, pin the MXC sandbox: the unelevated fallback doesn't
+# support denied read paths, so the profile's denies would only be a hope.
+# Pinning it also keeps the demo the same on every OS.
+[windows]
+sandbox = "mxc"
+
 [projects."/projects/app"]
 trust_level = "trusted"
 

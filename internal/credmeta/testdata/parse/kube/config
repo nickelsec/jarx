@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    certificate-authority-data: JARX-CANARY-KUBE1
+    server: https://prod.example.com:6443
+  name: prod
+contexts:
+- context:
+    cluster: prod
+    user: admin
+  name: prod-admin
+- name: dev
+  context:
+    cluster: prod
+    user: dev
+current-context: prod-admin
+users:
+- name: admin
+  user:
+    token: JARX-CANARY-KUBE2
+- name: dev
+  user:
+    client-certificate-data: JARX-CANARY-KUBE3
+    client-key-data: JARX-CANARY-KUBE4
+- name: gke
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: gke-gcloud-auth-plugin
+      args: ["--token", "JARX-CANARY-KUBE5"]
+      env:
+      - name: GKE_TOKEN
+        value: JARX-CANARY-KUBE7
+- name: legacy
+  user:
+    username: admin
+    password: JARX-CANARY-KUBE6

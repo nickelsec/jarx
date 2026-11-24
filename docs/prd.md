@@ -196,11 +196,49 @@ All paths below come from the official docs (see [Sources](#sources)). `~` is
 
 - Find every install of each agent (npm global, native installer, others in
   documented locations). Mark the one that wins on PATH.
-- Read the version from disk first (package.json, version dirs, config
-  fields). Only run `--version` on a binary that resolves to a known install
-  location. Otherwise report "version unknown".
+- Read the version from disk (package.json, version dirs, config fields).
+  jarx never runs an agent to ask its version: every install it knows gives
+  its version on disk, so `--version` would add a process and tell it
+  nothing new. Where the disk doesn't say, it reports "version unknown".
 - Check each install against an embedded advisory list (see
   [Advisory data](#advisory-data)).
+
+Where jarx looks, from the docs:
+
+- **Claude Code** (code.claude.com/docs/en/setup): the native installer's
+  launcher at `~/.local/bin/claude` (`claude.exe` on Windows) and its
+  versions in `~/.local/share/claude/versions`. On macOS and Linux the
+  launcher is a symlink to one of those, so the link names the version. If
+  it isn't a link and there's one version, that's the version. Otherwise
+  it's unknown. The npm package `@anthropic-ai/claude-code` installs the
+  same binary.
+- **Codex** (the openai/codex README): the npm package `@openai/codex`. The
+  standalone installers, Homebrew and release binaries are supported too,
+  but no doc says where they put Codex.
+- **npm** (docs.npmjs.com, "folders"): the global prefix is
+  `npm_config_prefix` when set, else `%AppData%\npm` on Windows and
+  `/usr/local` elsewhere. Packages are in `{prefix}/lib/node_modules` (Unix)
+  or `{prefix}/node_modules` (Windows). A prefix set in `.npmrc` isn't seen,
+  because that file can hold auth tokens and jarx never reads it.
+- **PATH:** the first dir with the agent's command wins, trying `PATHEXT`
+  in order on Windows. On Unix the file needs an exec bit. Nothing is run.
+  An install at a place the docs don't name (Homebrew, WinGet, apt, the
+  Codex installers) only shows up this way, as "unknown".
+
+Findings, in the user config group:
+
+- `JARX-VERSION-001` (high), `002` (medium), `003` (info): an install whose
+  version is in an advisory's affected range, by the worst advisory. A
+  critical counts as high and a low as info. The evidence names the worst
+  few and the version that fixes all of them.
+- `JARX-VERSION-004` (medium): an older install wins on PATH over a newer
+  one, so an update may not have taken.
+- `JARX-VERSION-005` (info): the command on PATH is at no install location
+  the docs name, so jarx can't tell its version.
+
+Each agent's row in the agents block gets a line with the install that
+runs, how many more there are, and "newer than jarx's tool list" when the
+version is past the built-in tools catalog. `--all` lists every install.
 
 ## Project discovery
 
@@ -394,6 +432,11 @@ whether an ssh key has a passphrase. Where a non-secret file exists, jarx
 reads that one instead (`~/.aws/config` over `credentials`, gh `hosts.yml` for
 host and user only).
 
+Paths come from each CLI's own docs, including the env vars that move them
+(`AWS_SHARED_CREDENTIALS_FILE`, `GH_CONFIG_DIR`, `CLOUDSDK_CONFIG`,
+`KUBECONFIG` and the rest), on Windows, macOS and Linux. design.md has the
+full table and what jarx keeps from each kind.
+
 When jarx has to open a secret-bearing file for metadata, it streams it, keeps
 only the allowed fields (section names, key names, cipher or kdf names) and
 drops everything else right away. A test feeds a fake secret through every
@@ -415,6 +458,27 @@ per-channel verdicts below:
 
 A credential can be in more than one state (for example, both can read and
 can use). The view shows the worst one first.
+
+How jarx tells, for each agent that knows the project:
+
+- **sees** comes from text the agent loads: an instruction file, rule,
+  import or output style in effect whose text holds a masked secret. jarx
+  never reads credential files, so it names the secret by its kind and
+  fingerprint, not by which file it came from. Session history adds to this
+  in phase 6.
+- **can read** is any channel whose verdict isn't blocked, so approval, a
+  bypassable deny and reads by the process all count.
+- **can use** is an MCP server the agent would start that gets the
+  credential: an env var it references (Claude's `${VAR}` and
+  `${VAR:-default}` in env, headers, args or the URL; Codex's `env_vars`,
+  `bearer_token_env_var` and `env_http_headers`), or a secret written into
+  its own definition, which is its own row.
+- **not reachable** is everything else.
+
+The scan shows one line per project, after what the agents load, counting
+each state per agent (`credentials: claude 1 sees - 12 can read - 1 can use
+- codex 11 can read`). `--all` lists each agent's view in full next to the
+per-channel verdicts.
 
 ### Reachability verdicts
 
@@ -455,6 +519,19 @@ it.
      `allowUnsandboxedCommands` is `false`. So that's **needs approval**, not
      blocked.
    - Commands matching `excludedCommands` always run unsandboxed.
+   - Who approves the unsandboxed retry depends on the mode and the rules
+     (sandboxing docs, "The unsandboxed retry escape hatch"): an allow rule
+     matching the command approves it with no prompt, so `Bash(cat *)`
+     makes a `denyRead` credential **readable silently**; `bypassPermissions`
+     runs it without asking; `dontAsk` denies it; an ask rule for
+     `Bash(dangerouslyDisableSandbox:true)` prompts on every retry, in every
+     mode.
+   - `sandbox.credentials.files` and `envVars` entries can `mask` instead of
+     `deny`: sandboxed commands get a stand-in. jarx counts a masked file as
+     blocked for reading, with a note that the docs say a mask matching
+     nothing leaves the real file readable.
+   - `sandbox.filesystem.disabled` (user or managed settings only) turns off
+     filesystem isolation, so the sandbox doesn't limit reads.
    - Native Windows has no sandbox. There, jarx treats the sandbox as off and
      adds an info finding.
 3. **Env vars:** Bash inherits the env secrets Claude Code has, whatever the
@@ -468,15 +545,66 @@ it.
 
 ### Codex channels
 
-1. **Shell and apply_patch:** the docs don't say `read-only` limits reads, so
-   paths count as readable unless a `[permissions.<name>]` profile with a
-   `filesystem` deny covers them. Protected paths under writable roots (`.git`,
-   `.codex`, `.aws`) are about writes, not reads.
+1. **Shell and apply_patch:** the sandbox modes and the built-in profiles
+   (`:read-only`, `:workspace`) limit writes, not reads: the docs say even
+   `read-only` can "read accessible files", and they don't say a built-in
+   limits reads, so jarx counts them as open. A custom
+   `[permissions.<name>]` profile reads only what its `filesystem` table
+   grants (`:minimal`, the workspace roots, a path, `:root` for broad reads),
+   unless it `extends` a built-in. Its `deny` entries block reads, a deny
+   wins an equally specific grant, and a narrower path can reopen a broader
+   deny. Protected paths under writable roots (`.git`, `.codex`, `.aws`) are
+   about writes. Codex has no separate file-read tool; `view_image` only
+   reads images.
+   - When the sandbox stops a read, Codex can ask to run the command outside
+     it. `approval_policy = never`, or granular `sandbox_approval = false`,
+     auto-rejects that (**blocked**); `approvals_reviewer = auto_review` has a
+     reviewer subagent approve instead of you (**readable silently**);
+     otherwise you approve it (**needs approval**). The docs don't give a
+     default `approval_policy`, so an unset one counts as `on-request`, the
+     interactive default and the worse case.
+   - Env vars reach commands through `shell_environment_policy`: `inherit =
+     none` or `core` keeps secrets out, `ignore_default_excludes` defaults to
+     `true` (so names with KEY, SECRET or TOKEN are kept unless it's
+     `false`), and `filters`, `exclude` and `include_only` patterns (case
+     insensitive, `*` for any text) drop or keep a name. The highest layer
+     that sets any of the lists wins.
+   - On native Windows the sandbox covers commands and their child
+     processes, but the `unelevated` implementation doesn't support denied
+     read paths, and Codex falls back to it when `elevated` setup isn't
+     available (Windows sandbox docs). So a profile deny only counts as
+     blocking there when `windows.sandbox` pins `mxc` (and requirements don't
+     set `windows.allow_mxc = false`), or requirements'
+     `windows.allowed_sandbox_implementations` leaves `unelevated` out.
+     Otherwise it's **readable, deny is bypassable**.
+   - A glob deny is matched when each sandboxed process starts, on every
+     platform, so a matching file created later stays readable to a process
+     already running. jarx notes this whenever a glob deny decides a
+     verdict.
 2. **Legacy override:** if `sandbox_mode` shows up in any loaded config, comes
    in via `--sandbox`, or is set by the selected profile, Codex uses the
-   legacy sandbox settings and ignores `default_permissions`. jarx resolves
-   verdicts the same way and flags it (rule `JARX-CODEX-*`).
+   legacy sandbox settings and ignores `default_permissions` and every
+   profile, `extends` included. jarx resolves verdicts the same way, notes a
+   profile deny it drops in the why trail, and flags the switch
+   (`JARX-CODEX-001`, `JARX-CODEX-002`).
 3. **MCP servers and hooks:** **readable by the process**.
+
+### The mode a session starts in
+
+With no `permissions.defaultMode` in effect, an interactive Claude session
+starts in `auto` from 2.1.283 on, unless a settings file sets
+`disableAutoMode` to `"disable"`, which makes it `default` (permission-modes
+docs, "Which mode a session starts in"; `claude -p` and the Agent SDK start
+in `default`). The Claude adapter works out this start mode for every
+project, even one with no settings files, and the verdicts and the
+capability view use it.
+
+In `auto`, a classifier approves instead of you, so jarx counts what would
+need your approval as **readable silently**, and says so in the why trail.
+Two things prompt in every mode, `auto` and `bypassPermissions` included:
+an explicit ask rule, and reads outside the working directories while
+`blockReadsOutsideWorkingDirectories` is on (unsandboxed retries too).
+`dontAsk` turns what would ask into **blocked**.
 
 ### Observed modes change the verdict
 
@@ -717,6 +845,18 @@ Rules that depend on an agent's precedence live in its adapter:
   command, like `Bash(git *)` (`git -c` and aliases).
 - Skill and command `allowed-tools` count as allows for 004, 005 and 008 to
   010. Only grants in effect count.
+- `JARX-PERMS-011` (high): a deny or ask rule whose tool is misspelled, like
+  `Raed(./.env)`. Claude has no such tool, so the rule applies to nothing
+  and the protection it was meant to add is off. The same idea as a
+  misspelled safety setting (`JARX-UNKNOWN-003`).
+- `JARX-PERMS-012` (info): any other rule naming a tool the built-in tools
+  catalog doesn't know: an allow typo, or a tool newer than the catalog.
+  MCP tools (`mcp__...`), old names the docs still accept (`Task` for
+  `Agent`) and removed tools aren't flagged.
+- `JARX-PERMS-013` (high): a deny or ask rule that gives `Grep`, `Glob` or
+  `Write` a path. The permissions docs say Claude accepts these but never
+  matches them (it checks against `Read` and `Edit` rules), so the rule
+  protects nothing.
 - Codex `sandbox_mode` silently overriding permission profiles: high when a
   project file does it (a repository turning off your deny rules), medium
   when it's your own layers.
@@ -776,7 +916,15 @@ Rules that depend on an agent's precedence live in its adapter:
 
 ### Exposure, drift and versions
 
-- A credential readable silently on any channel (from the verdicts).
+- `JARX-REACH-001` (medium): credentials an agent can read with its file
+  tools or the shell without asking you, readable silently or past a
+  bypassable deny. One finding per project and agent, naming the
+  credentials.
+- `JARX-REACH-002` (high): a deny for a credential that doesn't hold. For
+  Claude, a `Read` deny or ask the shell can get around (`grep -r`, a
+  script) because no sandbox backs it up. For Codex on native Windows, a
+  profile deny the `unelevated` sandbox can ignore. On the rule's own
+  file.
 - **Drift:** when a tool description's hash changes, that tool goes through
   the poison rules again. It isn't just flagged as "changed". The poison
   rules run on every tool's current text each scan, so the changed one is
@@ -787,7 +935,7 @@ Rules that depend on an agent's precedence live in its adapter:
     something new. A server seen for the first time isn't drift; the
     snapshot diff shows it as new.
 - **Vulnerable agent version:** an install whose package name and version fall
-  in an advisory's affected range.
+  in an advisory's affected range (`JARX-VERSION-001` to `003`).
 
 ### Vendor badge
 
@@ -808,9 +956,25 @@ tool it records what it does, whether it prompts by default, and which
 channel it belongs to. The channel verdicts and the effective permissions view
 use it.
 
-The catalog is stamped with the agent version it was built against. If an
-installed agent is newer than that, jarx shows a warning that the agent may
-have tools the catalog doesn't know about.
+The catalog is stamped with the agent version it was built against: the
+newest release on the day the docs were checked. If an installed agent is
+newer than that, jarx shows a warning that the agent may have tools the
+catalog doesn't know about. A version jarx can't find or read counts the
+same as newer. jarx never fetches the catalog at runtime; a refresh means
+checking the docs again and moving the stamp.
+
+The catalog can only make a verdict worse, never better. While the agent is
+newer than the catalog, or its version is unknown, jarx won't call a
+credential "not reachable" outright: it says "not reachable by the tools
+jarx knows" and names the catalog's version in the why trail. A rule naming
+a tool the catalog lacks is the other sign of a newer agent (or a typo),
+and works without any version (`JARX-PERMS-011`, `JARX-PERMS-012`). An agent
+older than the catalog may lack some listed tools, which only overstates
+reach.
+
+Where the docs don't say whether a tool asks first, the catalog says
+"unknown" instead of guessing. Codex's built-in tools have no permission
+rules of their own: `approval_policy` and the sandbox decide.
 
 ## Effective permissions view
 
@@ -850,6 +1014,40 @@ A dashboard panel and a CLI section, per project and per agent:
   rules, Codex permission profile `network.domains` and `network_access`.
 - **Codex web search:** the `web_search` mode (`disabled`, `cached`, `live`,
   `indexed`) and any `allowed_web_search_modes` requirement.
+
+What jarx reads for it, from the docs (Claude's env vars and settings
+references; Codex's config reference and advanced config):
+
+- Claude's env vars come from a fixed list in the catalog: the base URLs and
+  `CLAUDE_CODE_USE_*` switches, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, and
+  the TLS vars the docs name (`NODE_EXTRA_CA_CERTS`, `CLAUDE_CODE_CERT_STORE`,
+  the client cert and key paths). Only those keep their values, from the env
+  or a settings `env` block, with any password in a URL masked. For a
+  credential var (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN` and the like) jarx only notes that it's set.
+  Neither agent's docs name a setting that turns TLS checks off, so jarx
+  doesn't look for one.
+- Codex ignores `openai_base_url`, `chatgpt_base_url`, `model_provider`,
+  `model_providers` (and `notify`, `profile`, `profiles`, `otel`,
+  `experimental_realtime_ws_base_url`, `apps_mcp_product_sku`) in a
+  project's `.codex/config.toml`, and warns at startup. jarx marks those not
+  in effect, so a repository can't redirect Codex's endpoint.
+
+Findings:
+
+- `JARX-EGRESS-001` (high): a repository's `.claude/settings.json` that sets
+  the model endpoint or provider in its env block, so your prompts, code and
+  key go where the repository chose.
+- `JARX-EGRESS-002` (medium): a repository that sets a proxy for the agent
+  (Claude's `HTTPS_PROXY` or `HTTP_PROXY` in a project env block, Codex's
+  `features.network_proxy` URLs). `NO_PROXY` doesn't count.
+- `JARX-EGRESS-003` (info): a repository's Codex config that sets the
+  endpoint or provider. Codex ignores it, so it's a note, not a risk.
+
+The scan shows a `talks to:` line per project (`claude
+llm-gateway.example.com - 1 MCP host - proxy set - codex default API - web
+search cached`), and `--all` lists each agent's settings in full with where
+each was set.
 
 ## Optional LLM review
 
@@ -1147,6 +1345,9 @@ clean fixtures, written by us as the failing test before the rule exists.
 ## Limits
 
 Things jarx can't see, stated plainly in the README and the dashboard:
+
+- **Credentials the docs don't place.** GnuPG's Windows default dir and ssh
+  keys that `~/.ssh/config` points at outside `~/.ssh` aren't found.
 
 - **claude.ai cloud connectors.** They're set up in the claude.ai account,
   not on disk, so jarx can't list them. It notes that they may exist.

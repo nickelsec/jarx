@@ -1,0 +1,12 @@
+[distutils]
+index-servers =
+    pypi
+    private
+
+[pypi]
+username = __token__
+password = JARX-CANARY-PYPI1
+
+[private]
+repository = https://user:JARX-CANARY-PYPI2@pypi.example.com/simple
+password = JARX-CANARY-PYPI3

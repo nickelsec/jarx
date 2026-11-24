@@ -156,6 +156,101 @@ type Project struct {
 	// Servers are the MCP server definitions that apply here, from every
 	// scope, with whether the agent would start each one.
 	Servers []Server
+	// Credentials are the credential files in the project itself, like .env
+	// files and private keys. The machine-wide ones are on the scan.
+	Credentials []Credential
+	// Reach is, for each agent that knows the project, whether each
+	// credential is reachable on each channel, with why.
+	Reach []Reach
+	// Exposure is the credential view: each credential's states for each
+	// agent, worst first, built from Reach and what the agent loads.
+	Exposure []Exposure
+	// Egress is where each agent talks to from this project: its model
+	// endpoint, auth, proxies, TLS, MCP hosts, network domains and web
+	// search, each with where it was set.
+	Egress []Egress
+}
+
+// EgressArea is one part of where an agent talks to.
+type EgressArea string
+
+// Egress areas, from the PRD's "Where your agent talks to".
+const (
+	AreaModel     EgressArea = "model endpoint"
+	AreaAuth      EgressArea = "auth"
+	AreaProxy     EgressArea = "proxy"
+	AreaTLS       EgressArea = "tls"
+	AreaMCPHost   EgressArea = "mcp host"
+	AreaDomains   EgressArea = "network domains"
+	AreaWebSearch EgressArea = "web search"
+)
+
+// Egress is one thing about where an agent talks to.
+type Egress struct {
+	Agent  Agent
+	Area   EgressArea
+	What   redact.Text // the setting or env var, like ANTHROPIC_BASE_URL
+	Value  redact.Text // what it's set to, masked; empty when only its being set matters
+	Origin Origin      // where it was set; Origin.File is empty for the env
+	Note   redact.Text
+}
+
+// CredentialState is a credential's top-level state in a project.
+type CredentialState string
+
+// Credential states, worst first (the PRD's credential view).
+const (
+	StateSees        CredentialState = "sees"          // already in text the agent loads
+	StateCanRead     CredentialState = "can read"      // a channel can read it
+	StateCanUse      CredentialState = "can use"       // an MCP server holds it
+	StateUnreachable CredentialState = "not reachable" // every channel is blocked and nothing holds it
+)
+
+// Exposure is one credential's states for one agent in one project.
+type Exposure struct {
+	Agent  Agent
+	Kind   CredentialKind
+	Path   Path
+	Name   redact.Text
+	States []CredentialState
+	// Via names what holds or shows it: the MCP servers that hold it, or
+	// the secret's kind and fingerprint for one seen in text.
+	Via []redact.Text
+}
+
+// ReachChannel is a way an agent can get at a credential.
+type ReachChannel string
+
+// Reach channels.
+const (
+	ChannelFileTools ReachChannel = "file tools" // Read, Grep, Glob, LSP
+	ChannelShell     ReachChannel = "shell"      // Bash, PowerShell
+	ChannelMCP       ReachChannel = "mcp servers"
+	ChannelHooks     ReachChannel = "hooks"
+)
+
+// ReachVerdict is how reachable a credential is on one channel.
+type ReachVerdict string
+
+// Reach verdicts, from the PRD.
+const (
+	ReachBlocked      ReachVerdict = "blocked"
+	ReachApproval     ReachVerdict = "needs approval"
+	ReachSilent       ReachVerdict = "readable silently"
+	ReachBypassable   ReachVerdict = "readable, deny is bypassable"
+	ReachByTheProcess ReachVerdict = "readable by the process"
+)
+
+// Reach is one credential's verdict on one channel for one agent.
+type Reach struct {
+	Agent   Agent
+	Kind    CredentialKind
+	Path    Path
+	Name    redact.Text // an env var's name
+	Channel ReachChannel
+	Via     redact.Text // what on the channel, like which MCP servers
+	Verdict ReachVerdict
+	Why     []redact.Text // the rules, settings and modes that decided it
 }
 
 // Transport is how the agent talks to an MCP server.
@@ -410,7 +505,29 @@ const (
 	ReadTooLarge    ReadStatus = "too large, not read"
 	ReadFailed      ReadStatus = "couldn't read"
 	ReadNotFollowed ReadStatus = "not followed"
+	ReadExistsOnly  ReadStatus = "existence only"
 )
+
+// CredentialKind is a kind of credential location, like aws or ssh. The
+// values are credmeta's.
+type CredentialKind string
+
+// Credential is one credential file jarx found. jarx never reads its value:
+// Facts holds only the safe metadata credmeta's parser kept, like profile
+// names, hosts or whether a key has a passphrase.
+type Credential struct {
+	Kind CredentialKind
+	Path Path
+	// Name is an env var's name. An env var has no path, and jarx never
+	// reads its value.
+	Name redact.Text
+	Dir  bool // a credential dir, like gcloud's, counted as one
+	// Via is the env var that put it there, or "default". Empty for one
+	// found in a project.
+	Via   redact.Text
+	Read  ReadStatus // ReadOK when its metadata was read, ReadExistsOnly, or why it couldn't be
+	Facts []Pair
+}
 
 // Instruction is one text an agent reads as instructions.
 type Instruction struct {
@@ -444,6 +561,11 @@ const (
 	RuleDeny  RuleAction = "deny"
 	RuleRead  RuleAction = "read"  // a filesystem grant to read, like Codex's permission profiles
 	RuleWrite RuleAction = "write" // a filesystem grant to read and write
+	// RuleMask is a Claude sandbox credential entry that hands sandboxed
+	// commands a stand-in instead of the real value.
+	RuleMask RuleAction = "mask"
+	// RuleExclude is a command pattern Claude runs outside the sandbox.
+	RuleExclude RuleAction = "unsandboxed"
 )
 
 // PermissionRule is one rule from one file, like Bash(git *) or
@@ -456,6 +578,12 @@ type PermissionRule struct {
 	// empty for a rule that covers a whole tool, like Bash.
 	Target redact.Text
 	Origin Origin
+	// ToolUnknown marks a Claude rule naming a tool that's neither built in,
+	// by the catalog, nor an MCP tool: a typo, or a tool newer than the
+	// catalog. Claude has no such tool to apply the rule to. NearTool is the
+	// built-in tool it's most likely a typo of.
+	ToolUnknown bool
+	NearTool    redact.Text
 }
 
 // Permissions is one agent's permission settings for a project. Layers and
@@ -468,6 +596,15 @@ type Permissions struct {
 	// Options are named settings that shape permissions, each with every
 	// layer that sets it, like Codex's approval_policy or sandbox_mode.
 	Options []Option
+	// Env is the names of the env vars the agent's settings set, like
+	// Claude's env block, each with the file that sets it. Never values.
+	Env []Layer[redact.Text]
+	// StartMode is the mode a new interactive session starts in: the
+	// defaultMode in effect, else the agent's built-in default. StartWhy
+	// says which. Empty when the agent has no such thing or the docs don't
+	// say.
+	StartMode redact.Text
+	StartWhy  redact.Text
 }
 
 // Option is one named setting and its layers.
@@ -493,4 +630,30 @@ type Inventory struct {
 	// Instructions holds instruction texts jarx can't tie to one project,
 	// like auto memory folders whose project naming isn't documented.
 	Instructions []Instruction
+}
+
+// InstallMethod is how an agent was installed.
+type InstallMethod string
+
+// Install methods.
+const (
+	InstallNative InstallMethod = "native"
+	InstallNPM    InstallMethod = "npm"
+	// InstallUnknown is a command on PATH that's at no install location
+	// the docs name, so jarx can't tell its version.
+	InstallUnknown InstallMethod = "unknown"
+)
+
+// Install is one install of an agent, found on disk. jarx never runs it.
+type Install struct {
+	Agent  Agent
+	Method InstallMethod
+	Path   Path // the launcher, the package dir, or the command on PATH
+	BinDir Path // the dir its command is in, which PATH is matched against
+	// Version is empty when jarx couldn't tell. VersionFrom says how it
+	// knows: "launcher link", "only installed version" or "package.json",
+	// or why it doesn't.
+	Version     redact.Text
+	VersionFrom redact.Text
+	OnPath      bool // its command is the first one on PATH
 }

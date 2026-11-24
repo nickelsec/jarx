@@ -337,13 +337,150 @@ and flags it.
 
 ## Phase 5: Credentials and reach
 
-- [ ] `credmeta`: cred locations and safe metadata parsers
-- [ ] built-in tools catalog
-- [ ] `analyze/reach`: Claude channels and verdicts
-- [ ] `analyze/reach`: Codex channels and the legacy `sandbox_mode` switch
-- [ ] credential view
-- [ ] `analyze/egress`: where your agent talks to
-- [ ] `analyze/versions`: installs, PATH winner, advisories
+- [x] `credmeta`: cred locations and safe metadata parsers. One table of
+  places from each CLI's docs on Windows, macOS and Linux, with the env vars
+  that move them (`AWS_SHARED_CREDENTIALS_FILE`, `GH_CONFIG_DIR`,
+  `CLOUDSDK_CONFIG`, `GOOGLE_APPLICATION_CREDENTIALS`, `KUBECONFIG`,
+  `NETRC` and the rest). The phase 3 table had gh and gcloud wrong on
+  Windows and knew no env vars, so a moved credential got past the read
+  guard; the guard now checks every place and still the old defaults.
+  Parsers keep only the allowed fields for aws, gh, docker, kube, ssh (OpenSSH,
+  PEM, PKCS#8 and PuTTY keys), git, netrc, npm, pypi and `.env`, with line
+  readers for the two YAML shapes and no new dependency. gcloud, azure,
+  gnupg, aws's token caches and the agents' login files are existence only,
+  and a dir like gcloud's is one entry with its file count.
+  `fsys.CredentialFacts` is the one way past the guard, returns facts and
+  never bytes, and only `discover` may call it (lint). Also
+  `model.Credential` on the scan and on each project (`.env`, keys, a
+  project `.npmrc`), credentials in snapshots as hashes, a row in the
+  scanned block and the full list under `--all`, canaries in every secret
+  slot of the fixtures, ssh test keys built in code so nothing in the repo
+  reads as a private key, and fake credentials in the demo home
+  - Not covered yet: ssh keys `~/.ssh/config` points at elsewhere,
+    GnuPG's Windows default dir (both in Limits), the files inside gcloud's
+    config dir (not documented), `--kubeconfig` and other per-run flags,
+    aws `credential_process` and kube `exec` commands (named, never run),
+    and the per-project reach line (item 5) (3d7d47b)
+- [x] built-in tools catalog. `catalog/tools.tsv` with Claude's 53 tools
+  from the tools reference (what each does in our own words, whether it
+  prompts, its channel, and which rule's specifier covers it, like Read for
+  Grep), the `Task` alias for `Agent` and the removed `TaskOutput`, and
+  Codex's `shell`, `apply_patch`, `update_plan`, `view_image` and web search
+  from the Codex prompting guide and CLI features page. Each agent has a
+  stamp (Claude 2.1.330, Codex 0.171.0, checked 2026-11-24) and
+  `catalog.Covers` says whether an installed version is covered, newer or
+  unknown. The Claude adapter marks rules naming a tool the catalog doesn't
+  know, with the closest real name, and two new rules raise them:
+  `JARX-PERMS-011` (high) for a misspelled deny or ask and `JARX-PERMS-012`
+  (info) for the rest. The demo gains a misspelled deny
+  - Not covered yet: the "newer than the catalog" warning on the agents row
+    and the installed version it needs (item 7), "not reachable by the tools
+    jarx knows" in the verdicts (items 3 to 5), tool names in skill
+    `allowed-tools` and hook matchers (they only grant, so a typo is the
+    safe direction), and whether Codex's `view_image`, `update_plan` and web
+    search ask first, which the docs don't say (dcc5253)
+- [x] `analyze/reach`: Claude channels and verdicts. Per project, every
+  credential gets a verdict on Claude's file tools, shell, local MCP servers
+  and hooks, with a why trail naming the rule, setting or mode. The doc
+  check found that with no `defaultMode` a session starts in `auto` (2.1.283
+  and later), so the Claude adapter now works out a start mode for every
+  project and capability uses it too; auto counts as something other than
+  you approving. Ask rules and `blockReadsOutsideWorkingDirectories` prompt
+  in every mode, an allow approves the unsandboxed retry, and the sandbox
+  path prefixes (`./` is `~/.claude` in user settings) are a shared
+  `perms.SandboxPath`. The adapter now reads
+  `blockReadsOutsideWorkingDirectories`, `sandbox.filesystem.disabled`,
+  `sandbox.excludedCommands`, `sandbox.credentials` deny and mask entries,
+  and the names (never values) in a settings `env` block. Secret-looking env
+  vars are credentials by name (`catalog.SecretName`, the masker's own name
+  rule). Three rules: `JARX-REACH-001`, `JARX-REACH-002` and
+  `JARX-PERMS-013`. The verdicts are listed per project under `--all`, and a
+  finding about a whole project now sits in that project's group
+  - Not covered yet: observed modes from history (phase 6), the per-project
+    reach line and the credential view's states (item 5), "not reachable by
+    the tools jarx knows" once installs are known (item 7), PowerShell's
+    own read-only set (it's treated like Bash), what an excluded command
+    reads, a settings env block's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` (jarx
+    doesn't read env values there, so only the real env counts), the
+    sandbox's Linux wildcard limits, and Codex (item 4) (c5e1e3a)
+- [x] `analyze/reach`: Codex channels and the legacy `sandbox_mode` switch.
+  Codex verdicts for every project it knows: shell and apply_patch through
+  the legacy sandbox modes, the built-in profiles and custom profiles
+  (grants, denies, the most specific entry, `:root`, `:workspace_roots`
+  subpaths, `extends`), then the escalation out of the sandbox by
+  `approval_policy`, granular `sandbox_approval` and `approvals_reviewer`;
+  env vars through `shell_environment_policy`; and local MCP servers and
+  hooks, shared with Claude. Under the legacy switch a profile deny Codex
+  drops is named in the why trail. The Codex adapter now reads each
+  profile's `extends` (off under the legacy sandbox),
+  `approval_policy.granular.sandbox_approval`, and the env policy's
+  `filters`, `exclude` and `include_only` lists. `JARX-REACH-001` is one
+  finding per project and agent, and `--all` lists each agent's verdicts
+  under its own heading. On native Windows a profile deny only blocks when
+  `unelevated` can't run (`windows.sandbox` pinned to an allowed `mxc`, or
+  requirements leaving `unelevated` out), since that fallback doesn't
+  support denied read paths; otherwise it's bypassable and raises
+  `JARX-REACH-002` for Codex. The adapter reads `windows.sandbox` and the
+  `[windows]` requirements, glob denies note that they're matched per
+  process, and the demo pins `mxc` so it reads the same on every OS
+  - Not covered yet: a profile that extends another custom profile (it
+    counts as open), Codex's `--sandbox` and `-c` flags per run,
+    `shell_environment_policy.set` and `experimental_use_profile`, what
+    `inherit = core` keeps exactly (the docs don't list it, so it counts as
+    keeping no secrets), Codex's managed network rules, and observed modes
+    (phase 6) (fb96776)
+- [x] credential view. Each project gets each credential's states per
+  agent, worst first: sees (a masked secret in text the agent loads, named
+  by kind and fingerprint), can read (any channel that isn't blocked), can
+  use (an MCP server that would start and references the env var, or a
+  secret written into a server's own definition, as its own row), and not
+  reachable. The scan shows a `credentials:` line per project after "loads
+  here", counting each state per agent, and `--all` lists each agent's view
+  next to its verdicts
+  - Not covered yet: a file credential a server uses by path (like
+    `--kubeconfig ~/.kube/config`), secrets seen in session history
+    (phase 6), and which credential file a seen secret came from (jarx
+    never reads credential values to compare) (02322e1)
+- [x] `analyze/egress`: where your agent talks to. Per project and agent:
+  model endpoint (or the vendor's default), auth source (credential vars by
+  name only, Claude's `apiKeyHelper`, login method and auth refresh
+  commands, Codex's credential store, login method and provider `env_key`
+  and `auth.command`, the login files), proxies with "proxy set, probes
+  went direct", the TLS vars Claude documents, remote MCP hosts with their
+  probe status, network domain rules (Claude's sandbox lists and WebFetch
+  domain rules, Codex's network proxy and active profile domains), and
+  Codex web search with its requirement. The adapters now read these keys;
+  Claude's settings `env` block keeps values only for the catalog's
+  non-secret egress vars, URL passwords masked, and Codex marks the keys it
+  ignores in project config. Three rules, `JARX-EGRESS-001` to `003`, a
+  `talks to:` line per project and the full list under `--all`. The demo
+  points Claude's endpoint at a gateway from a repo's settings, and tries
+  the same for Codex
+  - Not covered yet: `--settings`, `-c` and other per-run flags, Bedrock and
+    Vertex regions and auth (named only when set as env vars), Codex
+    provider `http_headers` and `query_params`, Codex's managed
+    `experimental_network` requirements, and TLS for Codex (its docs don't
+    give a CA setting outside OpenTelemetry) (b0e31f2)
+- [x] `analyze/versions`: installs, PATH winner, advisories. Each adapter
+  finds its installs at the places its docs name: Claude's native launcher
+  and versions dir (the launcher's symlink names the version) and both
+  agents' npm packages, with the npm prefix from npm's folders doc.
+  Discover marks the install that wins on PATH, using `PATHEXT` on Windows
+  and the exec bit on Unix, and a command on PATH at no known place is an
+  "unknown" install. No agent is ever run. `catalog/advisories.tsv` holds
+  the 33 published CLI advisories (32 Claude Code, 1 Codex), as of
+  2026-11-24, which `jarx --version` prints. Five rules, `JARX-VERSION-001`
+  to `005`. The agents block gets a line per agent with the install that
+  runs and the "newer than jarx's tool list" note, and `--all` lists every
+  install. fsys gained `Lstat` and `Readlink`, and a fake home's
+  `.jarx-env` may start values and PATH entries with `~`, with `;` between
+  PATH entries on every OS, so the demo works wherever it's copied. The
+  demo has a native Claude 2.1.120 and an npm Codex 0.38.0, both in
+  advisories
+  - Not covered yet: Homebrew, WinGet, apt, dnf and apk installs and the
+    Codex standalone installer, whose docs don't give a location (they show
+    up as "unknown" on PATH), a prefix set in `.npmrc`, Claude Desktop and
+    IDE extension advisories, and installs in the snapshot diff (bebd378)
 
 **Run it:** `jarx scan --home testdata/demo` shows credential states,
 per-channel verdicts and the egress panel.

@@ -103,6 +103,43 @@ func (f *FS) Stat(path string) (fs.FileInfo, error) {
 	return info, nil
 }
 
+// Lstat returns the file info for path itself, so a symlink shows as one.
+func (f *FS) Lstat(path string) (fs.FileInfo, error) {
+	rel, err := f.resolve(path)
+	if err != nil {
+		return nil, err
+	}
+	var info fs.FileInfo
+	if f.root != nil {
+		info, err = f.root.Lstat(rel)
+	} else {
+		info, err = os.Lstat(path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lstat: %w", err)
+	}
+	return info, nil
+}
+
+// Readlink returns a symlink's target as written. It reads nothing at the
+// target, so a link to a version file names the version without opening it.
+func (f *FS) Readlink(path string) (string, error) {
+	rel, err := f.resolve(path)
+	if err != nil {
+		return "", err
+	}
+	var target string
+	if f.root != nil {
+		target, err = f.root.Readlink(rel)
+	} else {
+		target, err = os.Readlink(path)
+	}
+	if err != nil {
+		return "", fmt.Errorf("readlink: %w", err)
+	}
+	return target, nil
+}
+
 // Open opens path for streaming. It has no size cap. Only plain files open.
 func (f *FS) Open(path string) (io.ReadCloser, error) {
 	file, err := f.openFile(path)
@@ -200,6 +237,12 @@ func (f *FS) openFile(path string) (*os.File, error) {
 	if err := f.guard(path); err != nil {
 		return nil, err
 	}
+	return f.openPlain(path)
+}
+
+// openPlain is openFile without the credential guard. Only CredentialFacts
+// uses it, and it hands the file to credmeta's parsers, never to a caller.
+func (f *FS) openPlain(path string) (*os.File, error) {
 	info, err := f.Stat(path)
 	if err != nil {
 		return nil, err

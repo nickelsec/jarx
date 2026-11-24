@@ -15,31 +15,44 @@ type Sample struct {
 	Kind string
 }
 
-// Samples is one path for every kind of credential location: the agents'
-// login files, the fixed files under the home dir, a file in each
-// credential dir, and, for a project dir, its .env and a private key.
+// Samples is one path for every kind of credential location: every place
+// env puts a credential (a file in each credential dir), the defaults under
+// the home dir, and, for a project dir, its .env and a private key.
 func Samples(env platform.Env, project string) []Sample {
-	out := []Sample{
-		{filepath.Join(configDir(env, "CLAUDE_CONFIG_DIR", ".claude"), ".credentials.json"), "claude_login"},
-		{filepath.Join(configDir(env, "CODEX_HOME", ".codex"), "auth.json"), "codex_login"},
+	var out []Sample
+	seen := map[string]bool{}
+	add := func(path, kind string) {
+		if !seen[path] {
+			seen[path] = true
+			out = append(out, Sample{path, kind})
+		}
+	}
+	for _, p := range Places(env) {
+		if p.Dir {
+			add(filepath.Join(p.Path, sampleName(p.Kind)), p.Kind)
+		} else {
+			add(p.Path, p.Kind)
+		}
 	}
 	for _, rel := range sortedKeys(homeFiles) {
-		out = append(out, Sample{filepath.Join(env.Home, filepath.FromSlash(rel)), homeFiles[rel]})
+		add(filepath.Join(env.Home, filepath.FromSlash(rel)), homeFiles[rel])
 	}
 	for _, rel := range sortedKeys(homeDirs) {
-		name := "credentials"
-		if homeDirs[rel] == "ssh" {
-			name = keyNames[len(keyNames)-1] // id_ed25519, the usual key name
-		}
-		out = append(out, Sample{filepath.Join(env.Home, filepath.FromSlash(rel), name), homeDirs[rel]})
+		add(filepath.Join(env.Home, filepath.FromSlash(rel), sampleName(homeDirs[rel])), homeDirs[rel])
 	}
 	if project != "" {
-		out = append(out,
-			Sample{filepath.Join(project, ".env"), "env_file"},
-			Sample{filepath.Join(project, "deploy"+keyExts[0]), "private_key"},
-		)
+		add(filepath.Join(project, ".env"), KindEnvFile)
+		add(filepath.Join(project, "deploy"+keyExts[0]), KindPrivateKey)
 	}
 	return out
+}
+
+// sampleName is a file name to put in a credential dir of the kind.
+func sampleName(kind string) string {
+	if kind == KindSSH {
+		return keyNames[len(keyNames)-1] // id_ed25519, the usual key name
+	}
+	return "credentials"
 }
 
 func sortedKeys(m map[string]string) []string {

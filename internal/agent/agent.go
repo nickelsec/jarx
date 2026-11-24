@@ -53,3 +53,12 @@ type InstructionReader interface {
 type ExtensionReader interface {
 	Extensions(c Context, projects []model.Project) []finding.Finding
 }
+
+// InstallReader is an adapter that finds where its agent is installed, at
+// the locations its docs name. It reads versions from disk and never runs
+// the agent.
+type InstallReader interface {
+	// Command is the agent's command name, which discover looks up on PATH.
+	Command() string
+	Installs(c Context) []model.Install
+}
