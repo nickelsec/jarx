@@ -27,6 +27,8 @@ type ScanView struct {
 	Agents []AgentInfo
 
 	Projects     []model.Project
+	Sessions     []model.Session     // from history (observed, not documented)
+	HistoryFiles int                 // history files looked at
 	Instructions []model.Instruction // not tied to a project
 	Unknown      []model.Unknown
 	Findings     []finding.Finding

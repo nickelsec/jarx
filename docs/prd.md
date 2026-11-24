@@ -650,6 +650,50 @@ Rules:
   [design.md](design.md)).
 - JSONL and zstd files are streamed line by line. Files over 200 MB are
   skipped with an info finding.
+- A session with no timestamp still counts toward the mode tallies, and
+  the line says how many were undated ("14 of 20 sessions in bypass, 2
+  undated").
+- A session that switched modes counts in every mode it ran a prompt in,
+  so one prompt in `bypassPermissions` puts it in "sessions in bypass".
+  jarx doesn't guess in the agent's favor.
+
+### Claude history
+
+Where the files are comes from the docs (code.claude.com, "Manage
+sessions" and "Explore the .claude directory"):
+
+- Transcripts at `~/.claude/projects/<project>/<session-id>.jsonl`, moved
+  by `CLAUDE_CONFIG_DIR`. `<project>` is the cwd with every
+  non-alphanumeric turned into `-` (truncated with a hash past 200
+  characters), so it can't be turned back into a path. The real cwd comes
+  from the records.
+- A session's set-aside copies sit next to it
+  (`<session>.orphaned-<ts>-<suffix>.jsonl`,
+  `<session>.jsonl.superseded-<ts>`). They're the same session, so they
+  merge by id.
+- `<session>/subagents/` and `<session>/tool-results/` aren't sessions,
+  so only top-level files are read.
+- `~/.claude/history.jsonl` holds the prompts you typed, with their
+  project path. It's read for leaks only.
+
+What's inside is observed: a `permission-mode` record with
+`permissionMode` and `sessionId`, and `permissionMode`, `cwd`,
+`sessionId` and `timestamp` on prompts. A mode is kept only when it's
+letters, and a session id only when it's id characters, so the cursor
+can't pick up content through them. A file with no session id takes the
+id from its name. Under `--home`, a cwd maps into the fake home like
+every other agent record.
+
+Findings:
+
+- `JARX-HISTORY-001` (medium): a secret in session history. The evidence
+  is the line, the type and the fingerprint (`line 4: named_secret
+  REDACTED:named_secret:<fingerprint>`), plus how many other history files
+  hold it. A likely placeholder doesn't count.
+- `JARX-HISTORY-002` (info): a history file over 200 MB, not read.
+
+The scanned block gets a `sessions` row with the session and history
+file counts, how many are undated, and "observed, not documented".
 
 ### Observed formats
 

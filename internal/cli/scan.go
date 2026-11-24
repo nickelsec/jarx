@@ -29,6 +29,7 @@ import (
 	"github.com/nickelsec/jarx/internal/discover"
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/fsys"
+	"github.com/nickelsec/jarx/internal/history"
 	"github.com/nickelsec/jarx/internal/jarxdir"
 	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/netguard"
@@ -85,13 +86,11 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	}
 
 	adapters := []agent.Adapter{claude.Adapter{}, codex.Adapter{}}
-	res := discover.Run(
-		agent.Context{Env: env, Files: files, Scrub: scrub},
-		append(slices.Clone(adapters), discover.Saved(configPath(env), cfg.Repos)),
-		fs.Args(),
-	)
+	c := agent.Context{Env: env, Files: files, Scrub: scrub}
+	res := discover.Run(c, append(slices.Clone(adapters), discover.Saved(configPath(env), cfg.Repos)), fs.Args())
+	cursor, hist := readHistory(c, &res)
 	self, _ := os.Executable() // runs the demo server under --home; probe never uses it elsewhere
-	probe.Run(context.Background(), agent.Context{Env: env, Files: files, Scrub: scrub}, res.Projects, probe.Options{
+	probe.Run(context.Background(), c, res.Projects, probe.Options{
 		Disabled: *noProbe, Client: netguard.New(), Self: self,
 	})
 	findings, err := analyze(scrub, env, res, lastSnapshot(env, files, scrub))
@@ -110,13 +109,27 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		Agents:   agentInfo(env, files, scrub, adapters, res.Installs),
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown,
 		Findings: findings, Rules: rules, All: *all, Credentials: res.Credentials,
+		Sessions: hist.Sessions, HistoryFiles: hist.Files,
 	}
 	view.Since, view.Note, view.Changes, view.SaveErr = saveSnapshot(env, scrub, snapshot.Input{
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
 		Credentials: res.Credentials,
 	})
+	// Saved after --all printed the state dir as it was. A cursor that
+	// can't be saved only means the next scan reads more.
+	_ = cursor.Save(env)
 	p.Scan(view)
 	return exitOK
+}
+
+// readHistory reads session history from where the last scan left off,
+// adding its findings to res. The cursor is saved later, once --all has
+// shown the state dir as it was.
+func readHistory(c agent.Context, res *discover.Result) (history.Cursor, history.Result) {
+	cursor := history.Load(c.Env)
+	hist := history.Claude(c, &cursor, claude.Adapter{}.ConfigDir(c.Env))
+	res.Findings = append(res.Findings, hist.Findings...)
+	return cursor, hist
 }
 
 // analyze settles what's in effect and runs every analyzer.
@@ -312,7 +325,7 @@ func plural(n int, one, many string) string {
 // scanRules is every rule a scan can report: finding's own and each
 // adapter's.
 func scanRules() (*finding.Registry, error) {
-	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules(), mcpconfig.Rules(), capability.Rules(), drift.Rules(), reach.Rules(), egress.Rules(), versions.Rules())
+	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules(), mcpconfig.Rules(), capability.Rules(), drift.Rules(), reach.Rules(), egress.Rules(), versions.Rules(), history.Rules())
 	r, err := finding.NewRegistry(all...)
 	if err != nil {
 		return nil, fmt.Errorf("building the rule registry: %w", err)

@@ -1,0 +1,2 @@
+{"type":"permission-mode","permissionMode":"auto","sessionId":"demo0003-0000-4000-8000-000000000003"}
+{"type":"user","uuid":"u1","sessionId":"demo0003-0000-4000-8000-000000000003","cwd":"/projects/tools","permissionMode":"auto","message":{"role":"user","content":"tidy the build script"}}

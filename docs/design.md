@@ -776,7 +776,14 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
    status.
 4. **history** loads its cursor and reads only new bytes. It records
    permission modes, cwds and secret fingerprints. Codex sqlite is opened
-   read-only in place.
+   read-only in place. The cursor is read without creating the state dir
+   (`jarxdir.ReadState`) and saved at the end of the scan, after `--all`
+   has shown the state dir as it was. With no history and no old cursor,
+   nothing is written. Each file's entry keeps its read position (size,
+   mtime, offset, line count, a hash of the first 4 KB as of the offset)
+   and what was found before it, so a scan that reads only new lines still
+   gives the whole answer. A file that shrank or whose head changed is
+   read again, and a file that's gone takes its results with it.
 5. Each **analyzer** reads the model and emits findings:
    `finding.Finding{ID, Severity, Origin, Evidence redact.Text}`.
 6. With `--llm`, **llm** shows the preview, sends redacted artifacts,
@@ -821,7 +828,8 @@ Where later phases go:
   up with the project counts, so they're never cut off.
 - New things jarx reads (MCP servers and tools, credential locations,
   history sessions) become rows of counts in the scanned block, with
-  skips as notes.
+  skips as notes. History's row is `N sessions - M history files`, noted
+  with how many are undated and "observed, not documented".
 - Findings from new analyzers join the same groups: the project a file is
   in, or the user config group. They never get a block of their own.
 - Per-project facts that aren't findings (an MCP server's tools, a

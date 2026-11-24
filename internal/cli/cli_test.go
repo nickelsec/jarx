@@ -617,6 +617,7 @@ func TestScanDemoHome(t *testing.T) {
 		}
 	}
 	assertAllShowsEverything(t, all.stdout)
+	assertCursorHoldsNoContent(t, demo, string(data))
 	assertDemoNoLeak(t, string(data), got.stdout+got.stderr)
 	assertDemoNoLeak(t, string(data), all.stdout+all.stderr)
 }
@@ -626,7 +627,7 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 	t.Helper()
 	// The demo's planted secrets are made up to dodge push protection, and
 	// jarx still has to mask every one.
-	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here", "demo-0000-not-a-real-token", "demoKey7Qx2Lm9Pz4Rw8Tb1Nc-fake"} {
+	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here", "demo-0000-not-a-real-token", "demoKey7Qx2Lm9Pz4Rw8Tb1Nc-fake", "demoHist4Kq9Zx2Wp7Lr3Tn8Vb-fake"} {
 		if strings.Contains(out, planted) {
 			t.Errorf("output contains the planted %q", planted)
 		}
@@ -644,8 +645,8 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 39 {
-		t.Errorf("--all shows %d findings, want all 39", len(titles))
+	if len(titles) != 40 {
+		t.Errorf("--all shows %d findings, want all 40", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
@@ -667,6 +668,8 @@ func assertAllShowsEverything(t *testing.T, out string) {
 		"    claude talks to\n      model endpoint  ANTHROPIC_BASE_URL  https://llm-gateway.example.invalid\n",
 		"    codex talks to\n      model endpoint  default  OpenAI's API\n",
 		"A repo tries to set Codex's endpoint  EGRESS-003\n",
+		// The token pasted into a demo session: its line and type, masked.
+		"line 4: named_secret REDACTED:named_secret:",
 		// Every install, found on disk without running either agent: an
 		// npm Codex in an advisory's range, the PATH winner.
 		"  codex  npm  0.38.0  ",
@@ -703,9 +706,10 @@ scanned
 +- 7 MCP servers                     1 not started - 1 approval unknown
 +- 6 permission rules - 7 mode settings
 +- 11 credential locations
-\- 6 config files                    1 unknown setting
++- 6 config files                    1 unknown setting
+\- 3 sessions - 4 history files      1 undated - observed, not documented
 
-39 findings   15 HIGH - 18 MED - 6 INFO   changes: first scan
+40 findings   15 HIGH - 19 MED - 6 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -719,6 +723,9 @@ your user config - applies to every project
 |
 +- HIGH  Agent version has a high advisory  VERSION-001
 |  \- {install}
+|
++- MED   A secret is in session history  HISTORY-001
+|  \- ~{S}.claude{S}projects\-projects-app{S}demo0001-0000-4000-8000-000000000001.j...
 |
 \- MED   A secret is in a config file or hook  SECRET-002
    \- ~{S}.claude.json  named_secret, fingerprint FP, written in the ...
@@ -867,6 +874,22 @@ func assertDemoInstalls(t *testing.T, view string) {
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view =\n%s\nwant the install finding %q", view, want)
+		}
+	}
+}
+
+// assertCursorHoldsNoContent checks the history cursor a demo scan wrote
+// for the demo's secrets and for text from its sessions.
+func assertCursorHoldsNoContent(t *testing.T, demo, env string) {
+	t.Helper()
+	cursor, err := os.ReadFile(filepath.Join(demo, ".jarx-state", "history-cursor.json")) //nolint:gosec // G304: the test's own demo copy
+	if err != nil {
+		t.Fatalf("the demo scan wrote no history cursor: %v", err)
+	}
+	assertDemoNoLeak(t, env, string(cursor))
+	for _, content := range []string{"deploy the app", "check the logs"} {
+		if strings.Contains(string(cursor), content) {
+			t.Errorf("the history cursor holds %q from a session", content)
 		}
 	}
 }

@@ -487,8 +487,22 @@ per-channel verdicts and the egress panel.
 
 ## Phase 6: History
 
-- [ ] history cursor and Claude transcripts, including the real `cwd` behind
-  each `~/.claude/projects/` folder
+- [x] history cursor and Claude transcripts, including the real `cwd` behind
+  each `~/.claude/projects/` folder. `internal/history` streams Claude's
+  top-level transcripts (set-aside copies too) and `history.jsonl`
+  through fsys, line by line, with a 200 MB file cap and a 16 MiB line
+  cap. The cursor in jarx's state dir keeps each file's position and
+  results (session ids, real cwds, modes, last timestamps, leaks as type,
+  fingerprint and line), no content, so later scans read only new lines.
+  Sessions merge by id across replays and copies, and an undated session
+  is kept. Two rules, `JARX-HISTORY-001` (a secret in history) and `002`
+  (a file too large). The scanned block gets a sessions row. jarxdir
+  gained `ReadState`, which never creates the dir. The demo has three
+  fake sessions (a `bypassPermissions` to `default` switch with replay and
+  a pasted token, a plain `default` one, an undated `auto` one) and a
+  `history.jsonl`, and the offline job checks the cursor holds none of it
+  - Not covered yet: subagent transcripts and spilled tool results (leaks
+    there aren't found), and using sessions anywhere else (item 3)
 - [ ] Codex rollouts (zstd) and sqlite
 - [ ] observed modes into reach, "sees" state, session cwds into discover,
   `--no-history`

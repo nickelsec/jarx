@@ -12,16 +12,17 @@ import (
 // counts is what the scanned block counts, each thing once even when
 // several projects share it.
 type counts struct {
-	projects, notScanned          int
-	notScannedWhy                 map[string]int
-	instructions, imports         int
-	credentials, unread           int
-	skills, hooks, scripts        int
-	rules, modes, configs         int
-	unknowns                      int
-	servers, serversOff, approval int
-	creds, credsFailed            int
-	tooLarge, unreadable, partial int
+	projects, notScanned            int
+	notScannedWhy                   map[string]int
+	instructions, imports           int
+	credentials, unread             int
+	skills, hooks, scripts          int
+	rules, modes, configs           int
+	unknowns                        int
+	servers, serversOff, approval   int
+	creds, credsFailed              int
+	tooLarge, unreadable, partial   int
+	sessions, undated, historyFiles int
 }
 
 // counter fills counts, keeping each thing once by a key.
@@ -48,6 +49,12 @@ func countAll(v ScanView) counts {
 		k.instruction(in)
 	}
 	k.creds(v.Credentials)
+	k.c.sessions, k.c.historyFiles = len(v.Sessions), v.HistoryFiles
+	for _, s := range v.Sessions {
+		if s.Last.IsZero() {
+			k.c.undated++
+		}
+	}
 	k.c.unknowns = len(v.Unknown)
 	k.findings(v.Findings)
 	return k.c
@@ -183,6 +190,12 @@ func (c counts) rows(sep string) []scanRow {
 			nonEmpty(ifPos(c.credsFailed, strconv.Itoa(c.credsFailed)+" couldn't read"))},
 		{[]string{plural(c.configs, "config file", "config files")},
 			nonEmpty(ifPos(c.unknowns, plural(c.unknowns, "unknown setting", "unknown settings")))},
+	}
+	if c.historyFiles > 0 {
+		rows = append(rows, scanRow{
+			[]string{plural(c.sessions, "session", "sessions"), plural(c.historyFiles, "history file", "history files")},
+			nonEmpty(ifPos(c.undated, strconv.Itoa(c.undated)+" undated"), "observed, not documented"),
+		})
 	}
 	if skipped := nonEmpty(
 		ifPos(c.tooLarge, plural(c.tooLarge, "file too large to read", "files too large to read")),

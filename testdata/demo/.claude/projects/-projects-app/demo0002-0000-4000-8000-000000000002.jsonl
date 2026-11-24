@@ -1,0 +1,2 @@
+{"type":"permission-mode","permissionMode":"default","sessionId":"demo0002-0000-4000-8000-000000000002"}
+{"type":"user","uuid":"u1","sessionId":"demo0002-0000-4000-8000-000000000002","cwd":"/projects/app","timestamp":"2026-11-21T14:00:00.000Z","permissionMode":"default","message":{"role":"user","content":"add a test for the login form"}}

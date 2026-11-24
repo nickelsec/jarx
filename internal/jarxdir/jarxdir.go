@@ -115,3 +115,22 @@ func check(name string) error {
 	}
 	return nil
 }
+
+// ReadState reads one state file without creating the state dir, so a scan
+// that ends up saving nothing writes nothing. A missing dir or file is
+// fs.ErrNotExist.
+func ReadState(env platform.Env, name string) ([]byte, error) {
+	if err := check(name); err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(env.StateDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening state dir: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	data, err := root.ReadFile(name)
+	if err != nil {
+		return nil, fmt.Errorf("reading state: %w", err)
+	}
+	return data, nil
+}

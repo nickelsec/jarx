@@ -9,6 +9,8 @@
 package model
 
 import (
+	"time"
+
 	"github.com/nickelsec/jarx/internal/redact"
 )
 
@@ -656,4 +658,18 @@ type Install struct {
 	Version     redact.Text
 	VersionFrom redact.Text
 	OnPath      bool // its command is the first one on PATH
+}
+
+// Session is one agent session found in history (observed, not
+// documented). Its records replay, so one session can span several files;
+// it's merged by id.
+type Session struct {
+	Agent Agent
+	ID    redact.Text
+	File  Path // the transcript, or the first file that held the session
+	CWD   Path // the real working dir, from the records; zero when none had one
+	// Modes are the permission modes the session ran in, each once, in the
+	// order first seen. Claude writes them on mode records and on prompts.
+	Modes []redact.Text
+	Last  time.Time // the newest record's timestamp; zero when undated
 }
