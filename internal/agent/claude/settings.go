@@ -534,6 +534,8 @@ func (r *layerReader) allowedKey(key string, raw json.RawMessage) {
 		r.sandbox(raw)
 	case "env":
 		r.envNames(raw)
+	case "apiKeyHelper", "forceLoginMethod", "awsAuthRefresh", "gcpAuthRefresh":
+		r.optionValue(key, raw) // a command or a login method, scrubbed like any text
 	case keyAllProjectMCP:
 		r.optionValue(key, raw)
 	}

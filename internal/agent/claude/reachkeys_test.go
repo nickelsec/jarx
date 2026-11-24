@@ -132,3 +132,62 @@ func TestTheBuiltInStartSaysClaudePStartsInDefault(t *testing.T) {
 		t.Errorf("start reason = %q, want it to say claude -p starts in default, since auto only applies to interactive sessions", perm.StartWhy)
 	}
 }
+
+// optionValue is an option's value in effect, or "".
+func optionValue(perm model.Permissions, key string) string {
+	if o, ok := optionNamed(perm, key); ok {
+		if eff, in := o.Setting.Effective(); in {
+			return eff.Value.String()
+		}
+	}
+	return ""
+}
+
+func TestTheSettingsEgressNeedsAreRead(t *testing.T) {
+	c := fakeHome(t, map[string]string{".claude/settings.json": `{
+		"apiKeyHelper": "~/bin/get-key.sh",
+		"forceLoginMethod": "console",
+		"awsAuthRefresh": "aws sso login",
+		"env": {"ANTHROPIC_BASE_URL": "https://llm.example.com", "HTTPS_PROXY": "http://proxy.example.com:3128",
+			"DEPLOY_TOKEN": "demo-not-a-real-token", "NODE_EXTRA_CA_CERTS": "/etc/ca.pem"},
+		"sandbox": {"network": {"allowedDomains": ["github.com", "*.npmjs.org"], "deniedDomains": ["evil.example"], "httpProxyPort": 8080}}
+	}`})
+
+	perm, _, _ := settingsFor(t, c, model.TrustTrusted)
+
+	for key, want := range map[string]string{ //nolint:gosec // G101: setting names and made-up values
+		"apiKeyHelper":                  "~/bin/get-key.sh",
+		"forceLoginMethod":              "console",
+		"awsAuthRefresh":                "aws sso login",
+		"env.ANTHROPIC_BASE_URL":        "https://llm.example.com",
+		"env.HTTPS_PROXY":               "http://proxy.example.com:3128",
+		"env.NODE_EXTRA_CA_CERTS":       "/etc/ca.pem",
+		"sandbox.network.httpProxyPort": "8080",
+	} {
+		if got := optionValue(perm, key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+	if got := optionValue(perm, "env.DEPLOY_TOKEN"); got != "" {
+		t.Errorf("env.DEPLOY_TOKEN = %q: a secret's value became an option", got)
+	}
+	for rule, want := range map[string]model.RuleAction{
+		"sandbox.network.allowedDomains github.com":  model.RuleAllow,
+		"sandbox.network.allowedDomains *.npmjs.org": model.RuleAllow,
+		"sandbox.network.deniedDomains evil.example": model.RuleDeny,
+	} {
+		if r := findRule(t, perm, rule, model.ScopeUser); r.Action != want {
+			t.Errorf("%s = %s, want %s", rule, r.Action, want)
+		}
+	}
+}
+
+func TestAProxyWithUserInfoIsMasked(t *testing.T) {
+	c := fakeHome(t, map[string]string{".claude/settings.json": `{"env": {"HTTPS_PROXY": "http://me:hunter2-demo-pass@proxy.example.com:3128"}}`}) //nolint:gosec // G101: a made-up password
+
+	perm, _, _ := settingsFor(t, c, model.TrustTrusted)
+
+	if got := optionValue(perm, "env.HTTPS_PROXY"); strings.Contains(got, "hunter2") || got == "" {
+		t.Errorf("env.HTTPS_PROXY = %q, want it there with the password masked", got)
+	}
+}

@@ -629,8 +629,8 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 35 {
-		t.Errorf("--all shows %d findings, want all 35", len(titles))
+	if len(titles) != 37 {
+		t.Errorf("--all shows %d findings, want all 37", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
@@ -649,6 +649,11 @@ func assertAllShowsEverything(t *testing.T, out string) {
 		"    claude reach\n", "    codex reach\n",
 		// The credential view: the secret the demo planted in CLAUDE.md is
 		// seen, and the user's search server holds an inline key.
+		// Where the agents talk to: the app's settings point Claude at a
+		// gateway, and Codex ignores the same attempt in project config.
+		"    claude talks to\n      model endpoint  ANTHROPIC_BASE_URL  https://llm-gateway.example.invalid\n",
+		"    codex talks to\n      model endpoint  default  OpenAI's API\n",
+		"A repo tries to set Codex's endpoint  EGRESS-003\n",
 		"    claude credential view\n", "  sees: named_secret, fingerprint\n",
 		"      inline_secret  MCP server search in ~" + string(filepath.Separator) + ".claude.json  can use:\n",
 		"  env_var  GITHUB_TOKEN  via environment  existence only\n",
@@ -676,11 +681,11 @@ scanned
 +- 2 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
 +- 7 MCP servers                     1 not started - 1 approval unknown
-+- 6 permission rules - 5 mode settings
++- 6 permission rules - 7 mode settings
 +- 11 credential locations
 \- 6 config files                    1 unknown setting
 
-35 findings   12 HIGH - 18 MED - 5 INFO   changes: first scan
+37 findings   13 HIGH - 18 MED - 6 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -702,6 +707,9 @@ your user config - applies to every project
 +- HIGH  A repo can redirect your server's token  CODEX-009
 |  \- .codex{S}config.toml  the repository redefines mcp_servers.search, and yo...
 |
++- HIGH  A repo points the model endpoint elsewhere  EGRESS-001
+|  \- .claude{S}settings.json  ANTHROPIC_BASE_URL = https://llm-gateway.example...
+|
 +- HIGH  Codex runs with no sandbox  PERMS-002
 |  \- .codex{S}config.toml  sandbox_mode = danger-full-access in project config
 |
@@ -720,15 +728,15 @@ your user config - applies to every project
 +- HIGH  A secret is in text the agent loads  SECRET-001
 |  \- CLAUDE.md  named_secret, fingerprint FP, in text the agent se...
 |
-+- MED   A skill runs shell before Claude sees it  CLAUDE-003
-|  \- .claude{S}skills{S}release{S}SKILL.md  release runs 1 shell command when invoked
-|
-+- ... 11 more: 7 MED - 4 INFO  (jarx scan --all)
++- ... 13 more: 8 MED - 5 INFO  (jarx scan --all)
 |
 +- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
 |              1 MCP server - codex 1 MCP server
 |
-\- credentials: claude 1 sees - 12 can read - 1 can use - codex 11 can read
++- credentials: claude 1 sees - 12 can read - 1 can use - codex 11 can read
+|
+\- talks to: claude llm-gateway.example.invalid - 1 MCP host - codex default API
+             1 MCP host - web search cached
 
 ~{S}projects{S}tools  claude trusted
 +- HIGH  A tool that changes things runs unasked  CAP-001
@@ -763,7 +771,9 @@ your user config - applies to every project
 |
 +- loads here: claude 1 instruction - 4 MCP servers - codex 1 MCP server
 |
-\- credentials: claude 10 can read - 2 can use
++- credentials: claude 10 can read - 2 can use
+|
+\- talks to: claude default API - 2 MCP hosts
 
 ~{S}projects{S}notes  codex untrusted
 +- MED   Credentials are readable without asking  REACH-001
@@ -771,7 +781,9 @@ your user config - applies to every project
 |
 +- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
 |
-\- credentials: codex 10 can read
++- credentials: codex 10 can read
+|
+\- talks to: codex default API - 1 MCP host - web search cached
 
 ~{S}projects{S}old  claude unknown - stale, not scanned
 

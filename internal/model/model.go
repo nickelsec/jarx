@@ -165,6 +165,34 @@ type Project struct {
 	// Exposure is the credential view: each credential's states for each
 	// agent, worst first, built from Reach and what the agent loads.
 	Exposure []Exposure
+	// Egress is where each agent talks to from this project: its model
+	// endpoint, auth, proxies, TLS, MCP hosts, network domains and web
+	// search, each with where it was set.
+	Egress []Egress
+}
+
+// EgressArea is one part of where an agent talks to.
+type EgressArea string
+
+// Egress areas, from the PRD's "Where your agent talks to".
+const (
+	AreaModel     EgressArea = "model endpoint"
+	AreaAuth      EgressArea = "auth"
+	AreaProxy     EgressArea = "proxy"
+	AreaTLS       EgressArea = "tls"
+	AreaMCPHost   EgressArea = "mcp host"
+	AreaDomains   EgressArea = "network domains"
+	AreaWebSearch EgressArea = "web search"
+)
+
+// Egress is one thing about where an agent talks to.
+type Egress struct {
+	Agent  Agent
+	Area   EgressArea
+	What   redact.Text // the setting or env var, like ANTHROPIC_BASE_URL
+	Value  redact.Text // what it's set to, masked; empty when only its being set matters
+	Origin Origin      // where it was set; Origin.File is empty for the env
+	Note   redact.Text
 }
 
 // CredentialState is a credential's top-level state in a project.

@@ -440,8 +440,27 @@ and flags it.
   - Not covered yet: a file credential a server uses by path (like
     `--kubeconfig ~/.kube/config`), secrets seen in session history
     (phase 6), and which credential file a seen secret came from (jarx
-    never reads credential values to compare)
-- [ ] `analyze/egress`: where your agent talks to
+    never reads credential values to compare) (02322e1)
+- [x] `analyze/egress`: where your agent talks to. Per project and agent:
+  model endpoint (or the vendor's default), auth source (credential vars by
+  name only, Claude's `apiKeyHelper`, login method and auth refresh
+  commands, Codex's credential store, login method and provider `env_key`
+  and `auth.command`, the login files), proxies with "proxy set, probes
+  went direct", the TLS vars Claude documents, remote MCP hosts with their
+  probe status, network domain rules (Claude's sandbox lists and WebFetch
+  domain rules, Codex's network proxy and active profile domains), and
+  Codex web search with its requirement. The adapters now read these keys;
+  Claude's settings `env` block keeps values only for the catalog's
+  non-secret egress vars, URL passwords masked, and Codex marks the keys it
+  ignores in project config. Three rules, `JARX-EGRESS-001` to `003`, a
+  `talks to:` line per project and the full list under `--all`. The demo
+  points Claude's endpoint at a gateway from a repo's settings, and tries
+  the same for Codex
+  - Not covered yet: `--settings`, `-c` and other per-run flags, Bedrock and
+    Vertex regions and auth (named only when set as env vars), Codex
+    provider `http_headers` and `query_params`, Codex's managed
+    `experimental_network` requirements, and TLS for Codex (its docs don't
+    give a CA setting outside OpenTelemetry)
 - [ ] `analyze/versions`: installs, PATH winner, advisories
 
 **Run it:** `jarx scan --home testdata/demo` shows credential states,

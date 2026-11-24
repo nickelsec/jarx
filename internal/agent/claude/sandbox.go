@@ -3,8 +3,11 @@ package claude
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
+	"strconv"
 	"strings"
 
+	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/redact"
 )
@@ -57,8 +60,10 @@ func (r *layerReader) optionValue(key string, raw json.RawMessage) {
 		}
 	case string:
 		s = x
+	case float64:
+		s = strconv.FormatFloat(x, 'f', -1, 64)
 	default:
-		r.problem(key + " isn't a bool or a string, skipped")
+		r.problem(key + " isn't a bool, a number or a string, skipped")
 		return
 	}
 	r.l.options = append(r.l.options, option{key: key, value: r.scrub(s), raw: s})
@@ -76,18 +81,77 @@ func (r *layerReader) sandbox(raw json.RawMessage) {
 			r.optionValue("sandbox."+key, v)
 		}
 	}
-	if v, ok := sb["filesystem"]; ok {
-		r.sandboxFilesystem(v)
+	for key, read := range map[string]func(json.RawMessage){
+		"filesystem": r.sandboxFilesystem, "excludedCommands": r.excludedCommands,
+		"credentials": r.sandboxCredentials, "network": r.sandboxNetwork,
+	} {
+		if v, ok := sb[key]; ok {
+			read(v)
+		}
 	}
-	if v, ok := sb["excludedCommands"]; ok && r.readable("sandbox.excludedCommands") {
-		for _, cmd := range r.strings("sandbox.excludedCommands", v) {
+}
+
+// excludedCommands reads the command patterns Claude runs outside the
+// sandbox.
+func (r *layerReader) excludedCommands(raw json.RawMessage) {
+	if !r.readable("sandbox.excludedCommands") {
+		return
+	}
+	for _, cmd := range r.strings("sandbox.excludedCommands", raw) {
+		r.l.rules = append(r.l.rules, model.PermissionRule{
+			Action: model.RuleExclude, Rule: r.scrub("sandbox.excludedCommands " + cmd.String()), Target: cmd, Origin: r.l.origin,
+		})
+	}
+}
+
+// maskUserInfo masks a password in a URL value, like a proxy's
+// http://user:pass@host, before it's kept. It doesn't rely on the secret
+// patterns catching it.
+func (r *layerReader) maskUserInfo(raw json.RawMessage) json.RawMessage {
+	var v string
+	if json.Unmarshal(raw, &v) != nil {
+		return raw
+	}
+	u, err := url.Parse(v)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	pw, ok := u.User.Password()
+	if !ok || pw == "" {
+		return raw
+	}
+	masked, _ := r.c.Scrub.Secret("url_password", pw)
+	out, err := json.Marshal(strings.Replace(v, ":"+pw+"@", ":"+masked.String()+"@", 1))
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// sandboxNetwork reads the sandbox's domain lists as rules and its proxy
+// ports as options, for where Claude talks to.
+func (r *layerReader) sandboxNetwork(raw json.RawMessage) {
+	var nw map[string]json.RawMessage
+	if json.Unmarshal(raw, &nw) != nil {
+		r.problem("sandbox.network isn't a JSON object")
+		return
+	}
+	for list, action := range map[string]model.RuleAction{"allowedDomains": model.RuleAllow, "deniedDomains": model.RuleDeny} {
+		key := "sandbox.network." + list
+		v, ok := nw[list]
+		if !ok || !r.readable(key) {
+			continue
+		}
+		for _, d := range r.strings(key, v) {
 			r.l.rules = append(r.l.rules, model.PermissionRule{
-				Action: model.RuleExclude, Rule: r.scrub("sandbox.excludedCommands " + cmd.String()), Target: cmd, Origin: r.l.origin,
+				Action: action, Rule: r.scrub(key + " " + d.String()), Target: d, Origin: r.l.origin,
 			})
 		}
 	}
-	if v, ok := sb["credentials"]; ok {
-		r.sandboxCredentials(v)
+	for _, port := range []string{"httpProxyPort", "socksProxyPort"} {
+		if v, ok := nw[port]; ok && r.readable("sandbox.network."+port) {
+			r.optionValue("sandbox.network."+port, v)
+		}
 	}
 }
 
@@ -166,6 +230,9 @@ func (r *layerReader) envNames(raw json.RawMessage) {
 		var skip json.RawMessage
 		if d.Decode(&skip) != nil {
 			return
+		}
+		if _, ok := catalog.EgressVarArea(name); ok {
+			r.optionValue("env."+name, r.maskUserInfo(skip)) // a URL, path or switch, never a secret
 		}
 		clear(skip)
 		r.l.env = append(r.l.env, r.scrub(name))

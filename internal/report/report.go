@@ -128,6 +128,7 @@ func (p *Printer) Projects(ps []model.Project) {
 		}
 		p.instructions(proj)
 		p.extensions(proj)
+		p.egressList(proj)
 		p.credentialView(proj)
 		p.reach(proj)
 		if len(proj.Credentials) > 0 {

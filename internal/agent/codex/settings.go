@@ -45,6 +45,29 @@ var optionKeys = []string{
 	"sandbox_workspace_write.network_access",
 	"shell_environment_policy.inherit", "shell_environment_policy.ignore_default_excludes",
 	"approval_policy.granular.sandbox_approval", keyWindowsSandbox,
+	"openai_base_url", "chatgpt_base_url", "model_provider", "cli_auth_credentials_store", "forced_login_method",
+	"features.network_proxy.enabled", "features.network_proxy.proxy_url", "features.network_proxy.socks_url",
+}
+
+// projectIgnored are the keys Codex ignores in a project's
+// .codex/config.toml, with a startup warning (advanced config, "Project
+// config files"): they'd redirect credentials or change provider auth.
+//
+//nolint:gochecknoglobals // fixed list, read only
+var projectIgnored = []string{
+	"openai_base_url", "chatgpt_base_url", "apps_mcp_product_sku", "model_provider", "model_providers",
+	"notify", "profile", "profiles", "experimental_realtime_ws_base_url", "otel",
+}
+
+// ignoredInProject says whether Codex ignores key in project config: the
+// key itself or anything under it.
+func ignoredInProject(key string) bool {
+	for _, k := range projectIgnored {
+		if key == k || strings.HasPrefix(key, k+".") {
+			return true
+		}
+	}
+	return false
 }
 
 const (
@@ -220,6 +243,7 @@ type layer struct {
 	hasMarks bool                         // project_root_markers is set, maybe to []
 	legacy   bool                         // has [profiles] or a profile key
 	envRules []envRule                    // shell_environment_policy's pattern lists
+	netRules []netRule                    // network domain lists
 	raw      map[string]any               // the decoded file
 	text     redact.Text                  // the whole file, scrubbed
 	_        struct{}
@@ -234,6 +258,7 @@ type requirements struct {
 	// unset, and allowMxc is [windows] allow_mxc, nil when unset.
 	windowsImpls []string
 	allowMxc     *bool
+	webSearch    []string       // allowed_web_search_modes as written, nil when unset
 	raw          map[string]any // the decoded file, for hooks and features
 	text         redact.Text    // the whole file, scrubbed
 }
@@ -432,9 +457,58 @@ func parseLayer(origin model.Origin, raw map[string]any) *layer {
 		if ext, ok := profile["extends"].(string); ok {
 			l.values["permissions."+name+".extends"] = ext
 		}
+		network, _ := profile["network"].(map[string]any)
+		if on, ok := network["enabled"].(bool); ok {
+			l.values["permissions."+name+".network.enabled"] = strconv.FormatBool(on)
+		}
+		l.netRules = append(l.netRules, domainRules("permissions."+name+".network.domains", network)...)
 	}
+	features, _ := raw["features"].(map[string]any)
+	proxy, _ := features["network_proxy"].(map[string]any)
+	l.netRules = append(l.netRules, domainRules("features.network_proxy.domains", proxy)...)
+	readProviders(raw, l.values)
 	l.envRules = parseEnvPolicy(raw)
 	return l
+}
+
+// netRule is one host in a network domain list.
+type netRule struct {
+	list, host string
+	action     model.RuleAction
+}
+
+// domainRules reads a table's domains map: host to allow or deny.
+func domainRules(list string, table map[string]any) []netRule {
+	domains, _ := table["domains"].(map[string]any)
+	out := make([]netRule, 0, len(domains))
+	for _, host := range sortedKeys(domains) {
+		action := model.RuleAllow
+		if v, _ := domains[host].(string); v == "deny" {
+			action = model.RuleDeny
+		}
+		out = append(out, netRule{list, host, action})
+	}
+	return out
+}
+
+// readProviders keeps each model provider's base URL, env_key and auth
+// command, for where Codex talks to. env_key is a var's name, never its
+// value.
+func readProviders(raw map[string]any, values map[string]string) {
+	providers, _ := raw["model_providers"].(map[string]any)
+	for id, v := range providers {
+		p, _ := v.(map[string]any)
+		for _, k := range []string{"base_url", "env_key"} {
+			if s, ok := p[k].(string); ok {
+				values["model_providers."+id+"."+k] = s
+			}
+		}
+		if auth, ok := p["auth"].(map[string]any); ok {
+			if cmd, ok := auth["command"].(string); ok {
+				values["model_providers."+id+".auth.command"] = cmd
+			}
+		}
+	}
 }
 
 // envRule is one pattern from shell_environment_policy: allow keeps a
@@ -552,6 +626,7 @@ func (s *settings) readRequirements(path string) *requirements {
 			}
 		}
 		if key == keyWebSearch {
+			r.webSearch = append([]string{}, vals...)
 			vals = append(vals, "disabled") // always allowed, per the docs
 		}
 		r.allowed[key] = vals

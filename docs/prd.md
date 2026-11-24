@@ -977,6 +977,40 @@ A dashboard panel and a CLI section, per project and per agent:
 - **Codex web search:** the `web_search` mode (`disabled`, `cached`, `live`,
   `indexed`) and any `allowed_web_search_modes` requirement.
 
+What jarx reads for it, from the docs (Claude's env vars and settings
+references; Codex's config reference and advanced config):
+
+- Claude's env vars come from a fixed list in the catalog: the base URLs and
+  `CLAUDE_CODE_USE_*` switches, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, and
+  the TLS vars the docs name (`NODE_EXTRA_CA_CERTS`, `CLAUDE_CODE_CERT_STORE`,
+  the client cert and key paths). Only those keep their values, from the env
+  or a settings `env` block, with any password in a URL masked. For a
+  credential var (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN` and the like) jarx only notes that it's set.
+  Neither agent's docs name a setting that turns TLS checks off, so jarx
+  doesn't look for one.
+- Codex ignores `openai_base_url`, `chatgpt_base_url`, `model_provider`,
+  `model_providers` (and `notify`, `profile`, `profiles`, `otel`,
+  `experimental_realtime_ws_base_url`, `apps_mcp_product_sku`) in a
+  project's `.codex/config.toml`, and warns at startup. jarx marks those not
+  in effect, so a repository can't redirect Codex's endpoint.
+
+Findings:
+
+- `JARX-EGRESS-001` (high): a repository's `.claude/settings.json` that sets
+  the model endpoint or provider in its env block, so your prompts, code and
+  key go where the repository chose.
+- `JARX-EGRESS-002` (medium): a repository that sets a proxy for the agent
+  (Claude's `HTTPS_PROXY` or `HTTP_PROXY` in a project env block, Codex's
+  `features.network_proxy` URLs). `NO_PROXY` doesn't count.
+- `JARX-EGRESS-003` (info): a repository's Codex config that sets the
+  endpoint or provider. Codex ignores it, so it's a note, not a risk.
+
+The scan shows a `talks to:` line per project (`claude
+llm-gateway.example.com - 1 MCP host - proxy set - codex default API - web
+search cached`), and `--all` lists each agent's settings in full with where
+each was set.
+
 ## Optional LLM review
 
 Off unless the user sets it up. Without it, jarx is rules only.

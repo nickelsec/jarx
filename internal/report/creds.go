@@ -24,7 +24,7 @@ func (p *Printer) credential(indent string, cr model.Credential) {
 		where = cr.Name.String() // an env var has a name, not a path
 	}
 	parts := []string{string(cr.Kind), where}
-	if v := cr.Via.String(); v != "" && v != "default" {
+	if v := cr.Via.String(); v != "" && v != valueDefault {
 		parts = append(parts, "via "+v)
 	}
 	facts := make([]string, 0, len(cr.Facts))
@@ -73,6 +73,9 @@ func (p *Printer) reach(proj model.Project) {
 		p.Out.Printf("        %s\n", p.text(ch+"  "+string(r.Verdict)+": "+strings.Join(why, "; ")))
 	}
 }
+
+// valueDefault is how jarx says a setting is the agent's default.
+const valueDefault = "default"
 
 // credentialStates are the credential view's states, worst first.
 //

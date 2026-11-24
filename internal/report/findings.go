@@ -136,11 +136,11 @@ func (p *Printer) projectGroup(v ScanView, g group) {
 	}
 	p.emit(head)
 	nodes := p.findingNodes(v, g.findings, proj.Path)
-	if loads := p.loads(proj); loads != nil {
-		nodes = append(nodes, loads)
-	}
-	if creds := p.credentialLine(proj); creds != nil {
-		nodes = append(nodes, creds)
+	// The project's facts that aren't findings, each a line of its own.
+	for _, fact := range []func(model.Project) node{p.loads, p.credentialLine, p.talksTo} {
+		if n := fact(proj); n != nil {
+			nodes = append(nodes, n)
+		}
 	}
 	p.spacedTree(nodes)
 }
