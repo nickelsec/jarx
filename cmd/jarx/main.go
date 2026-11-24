@@ -17,5 +17,5 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == probe.DemoMode {
 		os.Exit(cli.ServeDemo(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
-	os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr, version))
+	os.Exit(cli.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, version))
 }

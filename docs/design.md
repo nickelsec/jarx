@@ -78,7 +78,7 @@ with a `cmd.exe` metacharacter to a `.bat` or `.cmd` file, and the server
 shows as "failed to start" with that reason.
 
 This makes `golang.org/x/sys/windows` a direct dependency. It was already an
-indirect one through go-keyring and modernc sqlite.
+indirect one through modernc sqlite.
 
 Sources: https://github.com/golang/go/issues/79927,
 https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
@@ -686,6 +686,35 @@ blocks inline script, and `frame-ancestors 'none'` stops framing.
 Sources: https://www.calhoun.io/csrf-protection-via-headers-in-go-125,
 https://developer.mozilla.org/en-US/docs/Web/Security/Attacks/CSRF
 
+### The LLM key stays in an env var
+
+v1 never stores the key. There's no keychain and no go-keyring.
+`jarxdir.Config` holds the base URL, the model and the env var's name, and
+the key is read from that var only when a review or the connection test
+runs. It goes in the `Authorization` header to the base URL and nowhere
+else.
+
+- **Nothing that looks like a key gets saved.** The base URL, the model and
+  the var name go through the scrubber before they're saved, and a match is
+  refused. A base URL with a user, a password or a query string is refused
+  too, since that's where keys hide in URLs.
+- **The base URL check is netguard's.** `netguard.CheckURL` runs the same
+  rules as a request (`https`, plain `http` only to loopback, no metadata
+  names or addresses) on the URL text, so setup says what's wrong right
+  away. The dial-time check still runs on every request.
+- **A key in a shell profile reaches the agents.** It's in every agent's
+  env, and the agents' shells can read it. So setup tells you to
+  set it only in the terminal you run jarx from, with commands that keep it
+  out of shell history. Both read the key without echo, and the history only
+  gets the command:
+  - PowerShell (5.1 and 7): `$env:JARX_LLM_KEY = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'key')).Password`
+  - bash and zsh: `read -rs JARX_LLM_KEY && export JARX_LLM_KEY`. zsh's
+    `-p` means something else (a coprocess), so neither command uses a
+    prompt flag.
+
+Sources: https://zsh.sourceforge.io/Doc/Release/Shell-Builtin-Commands.html,
+https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/read-host
+
 ## Guarantees enforced by structure
 
 The PRD's promises shouldn't depend on everyone remembering them. Each one has
@@ -702,7 +731,8 @@ a spot in the code that makes breaking it hard.
 | Never reads a credential value | `fsys` refuses content reads of any path `credmeta.Location` calls a credential, checked on the path and on where its symlinks lead, so following an `@import` or a symlinked rule can't open one. Stat still works for existence checks. The one way past the guard is `fsys.FS.CredentialFacts`: it hands the file to credmeta's parser for its kind and returns only the kept facts, so no caller ever gets a credential's bytes. A `forbidigo` rule lets only `discover` call it. |
 | Never writes agent config | `fsys` has no write methods. The only writer is `jarxdir`, which is rooted at jarx's state dir (`os.UserConfigDir()/jarx`, or `<home>/.jarx-state` with `--home`) with `os.Root`. `forbidigo` bans `os.WriteFile`, `os.Create`, `os.Mkdir*`, `os.Remove*`, `os.Rename` and friends everywhere else (tests may write fixtures). |
 | Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, PATH, state dir, system roots). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`, and bans `os.Open`, `os.ReadFile`, `os.Stat`, `os.OpenRoot`, `filepath.Walk*` and friends outside `fsys`, `jarxdir` and `platform`. Under `--home`, `fsys` confines every read to the fake home with `os.Root`, so a fixture that points at a real path, a `..` trick or a symlink can't reach the real machine. `--home` builds a `platform.Env` with no system roots, registry, plists, real env or real PATH. |
-| Only approved dependencies | golangci `depguard` lists the five approved modules plus stdlib. A new import fails lint until someone approves it. |
+| The LLM key is never stored | `jarxdir.Config` has a field for the key's env var name and none for a key. Setup puts the base URL, model and var name through the scrubber and refuses a match, and refuses a URL with a user, password or query. Only `llm` reads the var's value, and only for a request. A test sets a canary key in the env, runs setup and the connection test, and checks it never shows up in `config.json`, stdout or stderr. |
+| Only approved dependencies | golangci `depguard` lists the four approved modules plus stdlib. A new import fails lint until someone approves it. |
 
 ## Architecture
 
@@ -922,6 +952,49 @@ Where later phases go:
 - A version too long to sit next to it, like a dev build's, gets its own
   line instead of being cut.
 
+### Questions
+
+Some commands ask before they act: `jarx setup llm` walks through its
+settings, and `jarx scan --llm` asks before it sends anything.
+
+```
+1/3  base url
+     an OpenAI-compatible endpoint: https, or http on loopback only
+     like https://api.openai.com/v1 or http://127.0.0.1:11434/v1
+  >  http://llm.internal:8080/v1
+     └─ plain http only goes to loopback (127.0.0.1, ::1, localhost)
+  >  https://llm.internal:8080/v1
+     └─ ok  https · llm.internal:8080
+
+save to ~\AppData\Roaming\jarx\config.json?  [Y/n]
+  >  y
+saved
+```
+
+- One question at a time. A step in a series starts with `n/total`, two
+  spaces, then the question in bold lowercase words. A default goes after
+  it in brackets, like `[JARX_LLM_KEY]`, and Enter takes it.
+- Hints sit under the question, indented five spaces to line up with it,
+  and dim. They wrap at spaces instead of being cut.
+- The answer goes after `  >  `, which is always ASCII.
+- What jarx says about an answer hangs off it on a tree branch (`└─`): `ok`
+  in green when it's fine, or why it isn't, and then the same question is
+  asked again.
+- Yes or no questions end in `?` and `[Y/n]` or `[y/N]`, with the default
+  in capitals. Anything that sends data off the machine defaults to no. Only
+  `y`, `yes`, `n`, `no` and Enter count.
+- A command meant to be copied, like how to set an env var, sits on its own
+  line and is never cut, even past the width, since a cut command doesn't
+  work.
+- A summary before saving is an ordinary block: a bold heading and a tree.
+- Ctrl+C or the end of input stops the questions, and jarx says what it
+  did: `cancelled, nothing saved`, or `cancelled. the settings are saved`
+  when it came after a save. jarx catches Ctrl+C only while it asks, so a
+  scan still stops the usual way. Ctrl+C exits 130.
+- A question is only ever asked when both input and output are terminals.
+  Otherwise the command asks nothing and says what to run instead, or
+  refuses and says why.
+
 ### `--all`
 
 `--all` is the same report with nothing held back: no caps, the evidence
@@ -974,8 +1047,7 @@ demo scan at 80 columns, so a layout change shows up as a test change.
 | `internal/analyze/unknown` | the unknown settings report | Unknown settings report |
 | `internal/report` | the only output writer: `Out` and `Err` streams that take a literal format and `redact.Text` values, and an `Error` that scrubs error text. Also the scan report (see "Terminal output"), laid out for the terminal's width, colors and charset, and the banner. | CLI |
 | `internal/ui` | server, middleware (host, token, CSRF, CSP), templates, embedded static files | Dashboard |
-| `internal/keystore` | go-keyring for jarx's own entry, or an env var name | Optional LLM review |
-| `internal/llm` | OpenAI-compatible client over netguard, preview, schema check and retry, quote check, cache | Optional LLM review |
+| `internal/llm` | OpenAI-compatible client over netguard, with the key read from the env var the user named and never stored. The connection test, preview, schema check and retry, quote check, cache | Optional LLM review |
 | `internal/fakemcp` | a tiny MCP server (stdio and HTTP) with scripted tools, used by probe tests and the demo home | MCP probing, Demo home |
 | `tools/vendorseed` | dev-only registry seeding where the namespace matches the vendor domain. Never linked into jarx. | Vendor badge |
 | `testdata/<agent>/<version>/` | fake home trees per agent version | Fixtures per agent version |
@@ -1011,7 +1083,6 @@ demo scan at 80 columns, so a layout change shows up as a test change.
 Stdlib plus these, and depguard enforces the list:
 
 - `github.com/BurntSushi/toml`
-- `github.com/zalando/go-keyring`
 - `github.com/klauspost/compress` (zstd)
 - `modernc.org/sqlite`
 - `golang.org/x/sys` (Windows job objects, the console mode and terminal
@@ -1213,9 +1284,10 @@ write actions (repo add and remove, rescan).
 
 ### Phase 8: LLM review
 
-`keystore`, `jarx setup llm`, the `llm` client (preview, schema check and
-retry, quote check, cache), the canary test, `jarx scan --llm` and the
-dashboard button.
+`jarx setup llm` (env var only, with `setup llm off` and the connection
+test), the `llm` client (preview, schema check and retry, quote check,
+cache), the canary test and `jarx scan --llm`. It's built before phase 7,
+so the dashboard button comes with the dashboard.
 
 - It's optional, off by default, and the only feature that sends content off
   the machine. It goes last, so it sits on top of a finished redact, netguard

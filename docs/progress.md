@@ -548,14 +548,36 @@ masked leak.
 - [ ] `ui` server and security middleware with tests
 - [ ] pages
 - [ ] snapshot picker and write actions (repo add and remove, rescan)
+- [ ] the LLM review button and LLM settings (phase 8 came first)
 
 **Run it:** `jarx ui --home testdata/demo`.
 
 ## Phase 8: LLM review
 
-- [ ] `keystore` and `jarx setup llm`
+Built before phase 7, so the dashboard button moved there. The key stays
+in an env var you name; jarx never stores it.
+
+- [x] `jarx setup llm`: one question at a time for the base URL, model and
+  key env var name, `setup llm off`, the one-line flag version, the
+  connection test, and the llm row in `jarx setup`. `netguard.CheckURL`
+  checks a URL by its text with the same rules a request gets, and also
+  refuses a user, password, query or fragment. An answer that looks like a
+  key is refused, checked with a scrubber that has no fingerprint key so a
+  refused answer writes nothing. `llm.Key` prints as `[key]` and encodes
+  as null, and `llm.Ping` sends one fixed chat request and names what went
+  wrong without quoting the reply or the URL. `report` gained the question
+  pieces from the new Questions section and the settings tree, so `jarx
+  setup` is a block now. `cli.Run` takes stdin, and questions need both
+  stdin and stdout to be terminals (`platform.IsTerminal`). go-keyring is
+  out of depguard and the docs. While it asks, setup catches ctrl+c itself and says "cancelled, nothing saved" (exit
+  130), or that the settings are saved when it comes after the save, and
+  ctrl+c stops a running connection test
+  - Not covered yet: the questions are tested with a forced terminal and a
+    fake ctrl+c, not a real one; endpoints that want the key in a header other than `Authorization:
+    Bearer` (like Azure's `api-key`); a fish command for setting the key;
+    and LLM settings in the dashboard (phase 7)
 - [ ] `llm` client: preview, schema check and retry, quote check, cache,
   canary test
-- [ ] `jarx scan --llm` and the dashboard button
+- [ ] `jarx scan --llm`: the preview and the yes or no question
 
 **Run it:** `jarx setup llm`, then `jarx scan --llm --home testdata/demo`.

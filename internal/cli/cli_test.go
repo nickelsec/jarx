@@ -37,7 +37,7 @@ func run(args ...string) result {
 		return result{code: -1, stderr: "test helper: refusing a real-machine scan, pass --home"}
 	}
 	var stdout, stderr bytes.Buffer
-	code := Run(args, &stdout, &stderr, "v1.2.3-test")
+	code := Run(args, strings.NewReader(""), &stdout, &stderr, "v1.2.3-test")
 	// Every run starts with the banner. Tests check it once, in
 	// TestEveryRunShowsTheBanner, and the rest look at what comes after.
 	out, banner := strings.CutPrefix(stdout.String(), bannerText)

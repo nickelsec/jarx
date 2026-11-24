@@ -9,7 +9,8 @@ credentials. Single Go binary with a CLI and a local dashboard.
   names. Ambient CLI creds (aws, gh, gcloud, ssh, etc) get existence plus safe
   metadata like profile names or whether an ssh key has a passphrase. The
   agents' own login files get existence only. jarx never reads other apps'
-  OS keychain entries. It may store and read its own LLM key there.
+  OS keychain entries. jarx never stores its own LLM key either: it reads
+  it from the env var the user named, only when a review runs.
 - Any secret jarx finds inside a config file is masked in memory and never
   reaches the LLM, logs, test output or the dashboard.
 - jarx lists MCP servers and tools but never calls them.

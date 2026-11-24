@@ -49,9 +49,9 @@ func TestSetupWithNothingSaved(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
 	}
 	for _, want := range []string{
-		"state dir    " + filepath.Join(home, ".jarx-state") + "  (not created yet)",
-		"repos (0)\n",
-		"llm          not set up\n",
+		"+- state dir  " + tilde(".jarx-state") + "  not created yet\n",
+		"+- repos      none\n",
+		`\- llm        off  (jarx setup llm)`,
 	} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
@@ -74,7 +74,7 @@ func TestSetupRepoAddSavesItAndScanFindsIt(t *testing.T) {
 	if repos := savedRepos(t, home); !slices.Equal(repos, []string{dir}) {
 		t.Errorf("saved repos = %q, want just %s", repos, dir)
 	}
-	if got := run("setup", "--home", home); !strings.Contains(got.stdout, "repos (1)\n  "+dir+"  (exists)\n") {
+	if got := run("setup", "--home", home); !strings.Contains(got.stdout, "+- repos      1\n|  \\- "+tilde("work")+"\n") {
 		t.Errorf("setup = %q, want the repo listed", got.stdout)
 	}
 	// The full inventory lists it, from ~ when it's in the home dir.

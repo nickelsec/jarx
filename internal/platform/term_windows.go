@@ -29,3 +29,9 @@ func termOS(f *os.File) termFacts {
 	}
 	return facts
 }
+
+// isTTY asks whether f is a console, without changing its mode.
+func isTTY(f *os.File) bool {
+	var mode uint32
+	return windows.GetConsoleMode(windows.Handle(f.Fd()), &mode) == nil
+}

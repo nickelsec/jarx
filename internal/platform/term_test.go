@@ -1,6 +1,10 @@
 package platform
 
-import "testing"
+import (
+	"bytes"
+	"os"
+	"testing"
+)
 
 func envOf(m map[string]string) func(string) (string, bool) {
 	return func(k string) (string, bool) {
@@ -67,5 +71,27 @@ func TestTermDecisions(t *testing.T) {
 		if got := decideTerm(tc.facts); got != tc.want {
 			t.Errorf("%s: decideTerm() = %+v, want %+v", name, got, tc.want)
 		}
+	}
+}
+
+func TestIsTerminalIsFalseForBuffersPipesAndFiles(t *testing.T) {
+	if IsTerminal(&bytes.Buffer{}) {
+		t.Error("IsTerminal(buffer) = true, want false")
+	}
+	f, err := os.CreateTemp(t.TempDir(), "in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if IsTerminal(f) {
+		t.Error("IsTerminal(file) = true, want false")
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close(); _ = w.Close() }()
+	if IsTerminal(r) {
+		t.Error("IsTerminal(pipe) = true, want false")
 	}
 }
