@@ -613,6 +613,6 @@ in an env var you name; jarx never stores it.
   `platform.LookupReal` in `cli.Run`), so the demo never needs a real key
   in a file, and setup reads it the same way
   - Not covered yet: the dashboard button (phase 7), and a review of
-    servers' prompts and resources
+    servers' prompts and resources (cf1cc61)
 
 **Run it:** `jarx setup llm`, then `jarx scan --llm --home testdata/demo`.
