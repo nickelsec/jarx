@@ -31,6 +31,7 @@ import (
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/history"
 	"github.com/nickelsec/jarx/internal/jarxdir"
+	"github.com/nickelsec/jarx/internal/llm"
 	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/netguard"
 	"github.com/nickelsec/jarx/internal/platform"
@@ -40,7 +41,7 @@ import (
 	"github.com/nickelsec/jarx/internal/snapshot"
 )
 
-const scanUsage = `usage: jarx scan [--home <dir>] [--all] [--no-probe] [--no-history] [path...]
+const scanUsage = `usage: jarx scan [--home <dir>] [--all] [--no-probe] [--no-history] [--llm] [path...]
 
 Scans what Claude Code and Codex can see and reach on this machine.
 
@@ -52,54 +53,105 @@ flags:
   --all         show every finding in full, and the whole inventory
   --no-probe    don't start or contact any MCP server
   --no-history  don't read session history
+  --llm         after showing what it would send and asking, send the
+                masked artifacts to the LLM set up with jarx setup llm
   -h, --help    show this help
 `
 
 func scanHelp(s *report.Stream) { s.Printf(scanUsage) }
 
-func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
+// scanFlags are jarx scan's flags.
+type scanFlags struct {
+	home                         string
+	all, noProbe, noHistory, llm bool
+	paths                        []string
+}
+
+// parseScan checks the flags. When ok is false, the caller returns code.
+// --llm without a terminal is refused here, before anything is scanned.
+func parseScan(p *report.Printer, plain *redact.Scrubber, args []string, st streams) (scanFlags, int, bool) {
+	var f scanFlags
 	fs := newFlagSet("scan")
-	home := fs.String("home", "", "")
-	all := fs.Bool("all", false, "")
-	noProbe := fs.Bool("no-probe", false, "")
-	noHistory := fs.Bool("no-history", false, "")
+	fs.StringVar(&f.home, "home", "", "")
+	fs.BoolVar(&f.all, "all", false, "")
+	fs.BoolVar(&f.noProbe, "no-probe", false, "")
+	fs.BoolVar(&f.noHistory, "no-history", false, "")
+	fs.BoolVar(&f.llm, "llm", false, "")
 	if code, ok := parse(p, plain, fs, args, scanHelp); !ok {
+		return f, code, false
+	}
+	if emptyHome(fs, f.home) {
+		return f, usageError(p, scanHelp, scrubbed(plain, "--home needs a directory")), false
+	}
+	if f.llm && !st.interactive {
+		p.Err.Printf("jarx: jarx scan --llm asks before sending anything, so it needs a terminal. run it in one, or drop --llm\n")
+		return f, exitUsage, false
+	}
+	f.paths = fs.Args()
+	return f, exitOK, true
+}
+
+// scanSetup is what a scan needs before it reads anything about the agents.
+type scanSetup struct {
+	env    platform.Env
+	files  *fsys.FS
+	scrub  *redact.Scrubber
+	cfg    jarxdir.Config
+	rules  *finding.Registry
+	review *llmRun // nil without --llm
+}
+
+// openScan builds the env, loads jarx's config and the rules, and with
+// --llm checks the review can run. The caller closes files.
+func openScan(p *report.Printer, f scanFlags, st streams) (scanSetup, bool) {
+	env, files, scrub, err := openEnv(f.home)
+	if err != nil {
+		p.Error(err)
+		return scanSetup{}, false
+	}
+	ss := scanSetup{env: env, files: files, scrub: scrub}
+	if ss.cfg, err = jarxdir.LoadConfig(env); err == nil {
+		ss.rules, err = scanRules()
+	}
+	if err != nil {
+		_ = files.Close()
+		p.Error(err)
+		return scanSetup{}, false
+	}
+	if f.llm {
+		if ss.review, err = prepareLLM(p, scrub, ss.cfg, st); err != nil {
+			_ = files.Close()
+			return scanSetup{}, false
+		}
+	}
+	return ss, true
+}
+
+func runScan(p *report.Printer, plain *redact.Scrubber, args []string, st streams) int {
+	f, code, ok := parseScan(p, plain, args, st)
+	if !ok {
 		return code
 	}
-	if emptyHome(fs, *home) {
-		return usageError(p, scanHelp, scrubbed(plain, "--home needs a directory"))
-	}
-
-	env, files, scrub, err := openEnv(*home)
-	if err != nil {
-		p.Error(err)
+	ss, ok := openScan(p, f, st)
+	if !ok {
 		return exitError
 	}
-	defer func() { _ = files.Close() }()
-	cfg, err := jarxdir.LoadConfig(env)
-	if err != nil {
-		p.Error(err)
-		return exitError
-	}
-	rules, err := scanRules()
-	if err != nil {
-		p.Error(err)
-		return exitError
-	}
+	defer func() { _ = ss.files.Close() }()
+	env, files, scrub := ss.env, ss.files, ss.scrub
 
 	adapters := []agent.Adapter{claude.Adapter{}, codex.Adapter{}}
 	c := agent.Context{Env: env, Files: files, Scrub: scrub}
-	res, cursor, hist := discoverAll(c, append(slices.Clone(adapters), discover.Saved(configPath(env), cfg.Repos)), fs.Args(), *noHistory)
+	res, cursor, hist := discoverAll(c, append(slices.Clone(adapters), discover.Saved(configPath(env), ss.cfg.Repos)), f.paths, f.noHistory)
 	self, _ := os.Executable() // runs the demo server under --home; probe never uses it elsewhere
 	probe.Run(context.Background(), c, res.Projects, probe.Options{
-		Disabled: *noProbe, Client: netguard.New(), Self: self,
+		Disabled: f.noProbe, Client: netguard.New(), Self: self,
 	})
 	findings, err := analyze(scrub, env, res, lastSnapshot(env, files, scrub))
 	if err != nil {
 		p.Error(err)
 		return exitError
 	}
-	if *all {
+	if f.all {
 		// What platform resolved, in full, and before the scan saves its
 		// snapshot, so the state dir shows as it was.
 		p.Wrapped(model.Path{}, func() { printEnv(p.Out, scrub, env, files) })
@@ -109,9 +161,22 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		Fake: env.Fake(), Home: model.NewPath(scrub, env.Home), GOOS: env.GOOS,
 		Agents:   agentInfo(env, files, scrub, adapters, res.Installs),
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown,
-		Findings: findings, Rules: rules, All: *all, Credentials: res.Credentials,
+		Findings: findings, Rules: ss.rules, All: f.all, Credentials: res.Credentials,
 		Sessions: hist.Sessions, HistoryFiles: hist.Files,
 	}
+	p.ScanHead(view)
+	code = exitOK
+	if ss.review != nil {
+		more, c, stop := ss.review.run(env, res.Projects)
+		if stop {
+			return c
+		}
+		code = c
+		view.Findings = append(slices.Clone(findings), more...)
+	}
+	// The snapshot keeps the rules' findings only. The LLM's depend on the
+	// model and on whether --llm was passed, so they'd show as changes on
+	// every scan that differs.
 	view.Since, view.Note, view.Changes, view.SaveErr = saveSnapshot(env, scrub, snapshot.Input{
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
 		Credentials: res.Credentials,
@@ -119,8 +184,8 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	// Saved after --all printed the state dir as it was. A cursor that
 	// can't be saved only means the next scan reads more.
 	_ = cursor.Save(env)
-	p.Scan(view)
-	return exitOK
+	p.ScanBody(view)
+	return code
 }
 
 // readHistory reads session history from where the last scan left off.
@@ -374,7 +439,7 @@ func plural(n int, one, many string) string {
 // scanRules is every rule a scan can report: finding's own and each
 // adapter's.
 func scanRules() (*finding.Registry, error) {
-	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules(), mcpconfig.Rules(), capability.Rules(), drift.Rules(), reach.Rules(), egress.Rules(), versions.Rules(), history.Rules())
+	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules(), mcpconfig.Rules(), capability.Rules(), drift.Rules(), reach.Rules(), egress.Rules(), versions.Rules(), history.Rules(), llm.Rules())
 	r, err := finding.NewRegistry(all...)
 	if err != nil {
 		return nil, fmt.Errorf("building the rule registry: %w", err)

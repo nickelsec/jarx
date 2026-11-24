@@ -48,7 +48,13 @@ type streams struct {
 	out, err    io.Writer
 	interactive bool
 	interrupt   func() (<-chan os.Signal, func())
+	lookupKey   keyLookup // the terminal's env, where the LLM key is; nil means no key
 }
+
+// keyLookup reads one env var from the terminal jarx runs in. It's how the
+// LLM key is read, even with --home, since the key is set in the terminal
+// and never in a file.
+type keyLookup func(string) (string, bool)
 
 // catchInterrupt catches ctrl+c until stop is called, so a command that's
 // asking questions can say what it did and didn't save.
@@ -62,7 +68,7 @@ func catchInterrupt() (<-chan os.Signal, func()) {
 // code. ldflagsVersion is the version set at build time, or "".
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, ldflagsVersion string) int {
 	interactive := platform.DetectTerm(stdout).TTY && platform.IsTerminal(stdin)
-	return runWith(args, streams{in: stdin, out: stdout, err: stderr, interactive: interactive}, ldflagsVersion)
+	return runWith(args, streams{in: stdin, out: stdout, err: stderr, interactive: interactive, lookupKey: platform.LookupReal}, ldflagsVersion)
 }
 
 func runWith(args []string, st streams, ldflagsVersion string) int {
@@ -98,7 +104,7 @@ func runWith(args []string, st streams, ldflagsVersion string) int {
 	}
 	switch rest[0] {
 	case "scan":
-		return runScan(p, plain, rest[1:])
+		return runScan(p, plain, rest[1:], st)
 	case "setup":
 		return runSetup(p, plain, rest[1:], st)
 	default:

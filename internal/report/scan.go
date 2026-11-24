@@ -49,12 +49,25 @@ const maxChanges = 8
 
 // Scan prints the scan report: what jarx checked, then what it found.
 func (p *Printer) Scan(v ScanView) {
+	p.ScanHead(v)
+	p.ScanBody(v)
+}
+
+// ScanHead prints what jarx checked: the header, the agents and the
+// scanned block. jarx scan --llm asks its question between the head and
+// the body, so the LLM findings join the body.
+func (p *Printer) ScanHead(v ScanView) {
 	p.header(v)
 	p.blank()
 	p.agents(v)
 	p.blank()
 	p.scanned(v)
 	p.blank()
+}
+
+// ScanBody prints what jarx found: the summary line, what changed, the
+// groups of findings and the pointer to --all, or the inventory.
+func (p *Printer) ScanBody(v ScanView) {
 	p.summary(v)
 	p.changes(v)
 	p.groups(v)

@@ -18,42 +18,59 @@ import (
 // or in jarx's config.
 const canaryLLMKey = "CANARYllmkey-0000-not-a-real-key"
 
+// opts is how a test runs jarx: what's on stdin, whether it's a terminal,
+// how ctrl+c arrives, and the env vars set in the terminal, where jarx
+// reads the LLM key from. Nothing comes from the real env.
+type opts struct {
+	in          io.Reader
+	interactive bool
+	interrupt   func() (<-chan os.Signal, func())
+	keys        map[string]string
+}
+
+// terminal is a terminal with these env vars set.
+func terminal(keys map[string]string) opts { return opts{interactive: true, keys: keys} }
+
 // ask runs jarx as if a person typed input into a terminal.
-func ask(input string, args ...string) result {
-	return runWithInput(input, true, args...)
+func ask(input string, args ...string) result { return opts{interactive: true}.ask(input, args...) }
+
+// ask runs jarx with input typed into o's terminal.
+func (o opts) ask(input string, args ...string) result {
+	o.in = strings.NewReader(input)
+	return o.run(args...)
 }
 
 // answers is what a person types: one answer per line, "" for Enter.
 func answers(lines ...string) string { return strings.Join(lines, "\n") + "\n" }
 
 // runIn runs jarx with input on stdin that isn't a terminal, like a pipe.
-func runIn(input string, args ...string) result {
-	return runWithInput(input, false, args...)
-}
+func runIn(input string, args ...string) result { return opts{}.ask(input, args...) }
 
-func runWithInput(input string, interactive bool, args ...string) result {
-	return runStreams(strings.NewReader(input), nil, interactive, args...)
-}
-
-func runStreams(in io.Reader, interrupt func() (<-chan os.Signal, func()), interactive bool, args ...string) result {
+func (o opts) run(args ...string) result {
 	if !strings.Contains(strings.Join(args, " "), "--home") {
 		return result{code: -1, stderr: "test helper: refusing a real-machine run, pass --home"}
 	}
+	if o.in == nil {
+		o.in = strings.NewReader("")
+	}
+	keys := o.keys
+	lookup := func(name string) (string, bool) { v, ok := keys[name]; return v, ok }
 	var stdout, stderr bytes.Buffer
-	code := runWith(args, streams{in: in, out: &stdout, err: &stderr, interactive: interactive, interrupt: interrupt}, "v1.2.3-test")
+	code := runWith(args, streams{in: o.in, out: &stdout, err: &stderr, interactive: o.interactive, interrupt: o.interrupt, lookupKey: lookup}, "v1.2.3-test")
 	out, banner := strings.CutPrefix(stdout.String(), bannerText)
 	return result{code: code, stdout: out, stderr: stderr.String(), banner: banner}
 }
 
-// askThenCtrlC types input into a terminal, then presses ctrl+c once jarx
-// has read all of it and waits for more.
-func askThenCtrlC(t *testing.T, input string, args ...string) result {
+// askThenCtrlC types input into o's terminal, then presses ctrl+c once
+// jarx has read all of it and waits for more.
+func (o opts) askThenCtrlC(t *testing.T, input string, args ...string) result {
 	t.Helper()
 	sig := make(chan os.Signal, 1)
 	in := &ctrlCReader{data: []byte(input), press: func() { sig <- os.Interrupt }, done: make(chan struct{})}
 	t.Cleanup(func() { close(in.done) })
-	interrupt := func() (<-chan os.Signal, func()) { return sig, func() {} }
-	return runStreams(in, interrupt, true, args...)
+	o.in, o.interactive = in, true
+	o.interrupt = func() (<-chan os.Signal, func()) { return sig, func() {} }
+	return o.run(args...)
 }
 
 // ctrlCReader gives its data, then presses ctrl+c and blocks like a
@@ -243,10 +260,10 @@ func TestSetupLLMFlagsRefuseBadAnswers(t *testing.T) {
 }
 
 func TestSetupShowsTheLLMRowOnceSaved(t *testing.T) {
-	home := fakeHome(t, "JARX_LLM_KEY="+canaryLLMKey+"\n")
+	home := fakeHome(t, "")
 	runIn("", "setup", "llm", "--home", home, "--url", "https://llm.example.com/v1", "--model", "m-1", "--key-env", "JARX_LLM_KEY")
 
-	got := run("setup", "--home", home)
+	got := opts{keys: map[string]string{"JARX_LLM_KEY": canaryLLMKey}}.run("setup", "--home", home)
 
 	if want := `\- llm        https://llm.example.com/v1 - m-1 - key from JARX_LLM_KEY  set` + "\n"; !strings.HasSuffix(got.stdout, want) {
 		t.Errorf("setup stdout\n%s\nwant it to end with\n%s", got.stdout, want)
@@ -392,9 +409,9 @@ func TestSetupLLMAnsweringNoSavesNothing(t *testing.T) {
 }
 
 func TestSetupLLMSaysWhenTheVarIsSet(t *testing.T) {
-	home := fakeHome(t, "MY_KEY="+canaryLLMKey+"\n")
+	home := fakeHome(t, "")
 
-	got := ask("https://llm.example.com/v1\nm-1\nMY_KEY\ny\nn\n", "setup", "--home", home, "llm")
+	got := terminal(map[string]string{"MY_KEY": canaryLLMKey}).ask("https://llm.example.com/v1\nm-1\nMY_KEY\ny\nn\n", "setup", "--home", home, "llm")
 
 	for _, want := range []string{`\- ok  MY_KEY is set in this terminal`, "key       from MY_KEY  set in this terminal", "test the connection?  [y/N]\n"} {
 		if !strings.Contains(got.stdout, want) {
@@ -429,11 +446,12 @@ func (f *fakeLLM) serve(t *testing.T, status int) string {
 }
 
 func TestSetupLLMTestsTheConnectionOnlyWhenAsked(t *testing.T) {
-	home := fakeHome(t, "JARX_LLM_KEY="+canaryLLMKey+"\n")
+	home := fakeHome(t, "")
+	term := terminal(map[string]string{"JARX_LLM_KEY": canaryLLMKey})
 	f := &fakeLLM{}
 	base := f.serve(t, http.StatusOK)
 
-	got := ask(base+"\nm-1\n\ny\n\n", "setup", "--home", home, "llm")
+	got := term.ask(base+"\nm-1\n\ny\n\n", "setup", "--home", home, "llm")
 
 	if got.code != 0 || f.requests != 0 {
 		t.Errorf("exit %d with %d requests, want 0 and none: the test defaults to no", got.code, f.requests)
@@ -442,7 +460,7 @@ func TestSetupLLMTestsTheConnectionOnlyWhenAsked(t *testing.T) {
 		t.Errorf("stdout = %q, want the test question to say what it sends and where", got.stdout)
 	}
 
-	got = ask(answers(base, "m-1", "", "y", "y"), "setup", "--home", home, "llm")
+	got = term.ask(answers(base, "m-1", "", "y", "y"), "setup", "--home", home, "llm")
 
 	if got.code != 0 || f.requests != 1 {
 		t.Fatalf("exit %d with %d requests, want 0 and one (stderr %q)", got.code, f.requests, got.stderr)
@@ -460,11 +478,11 @@ func TestSetupLLMTestsTheConnectionOnlyWhenAsked(t *testing.T) {
 }
 
 func TestSetupLLMConnectionTestFailureSaysWhy(t *testing.T) {
-	home := fakeHome(t, "JARX_LLM_KEY="+canaryLLMKey+"\n")
+	home := fakeHome(t, "")
 	f := &fakeLLM{}
 	base := f.serve(t, http.StatusUnauthorized)
 
-	got := ask(answers(base, "m-1", "", "y", "y"), "setup", "--home", home, "llm")
+	got := terminal(map[string]string{"JARX_LLM_KEY": canaryLLMKey}).ask(answers(base, "m-1", "", "y", "y"), "setup", "--home", home, "llm")
 
 	if got.code != 1 || !strings.Contains(got.stdout, "the endpoint rejected the key (HTTP 401)") {
 		t.Errorf("exit %d, stdout %q; want 1 with the reason", got.code, got.stdout)
@@ -480,7 +498,7 @@ func TestSetupLLMConnectionTestFailureSaysWhy(t *testing.T) {
 func TestSetupLLMCtrlCSavesNothingAndSaysSo(t *testing.T) {
 	home := fakeHome(t, "")
 
-	got := askThenCtrlC(t, answers("https://llm.example.com/v1"), "setup", "--home", home, "llm")
+	got := opts{}.askThenCtrlC(t, answers("https://llm.example.com/v1"), "setup", "--home", home, "llm")
 
 	if got.code != 130 || !strings.HasSuffix(got.stdout, "  >  \ncancelled, nothing saved\n") {
 		t.Errorf("exit %d, stdout %q; want 130 ending in cancelled, nothing saved", got.code, got.stdout)
@@ -491,16 +509,29 @@ func TestSetupLLMCtrlCSavesNothingAndSaysSo(t *testing.T) {
 }
 
 func TestSetupLLMCtrlCAfterSavingSaysTheSettingsAreSaved(t *testing.T) {
-	home := fakeHome(t, "JARX_LLM_KEY="+canaryLLMKey+"\n")
+	home := fakeHome(t, "")
 	f := &fakeLLM{}
 	base := f.serve(t, http.StatusOK)
 
-	got := askThenCtrlC(t, answers(base, "m-1", "", "y"), "setup", "--home", home, "llm")
+	got := terminal(map[string]string{"JARX_LLM_KEY": canaryLLMKey}).askThenCtrlC(t, answers(base, "m-1", "", "y"), "setup", "--home", home, "llm")
 
 	if got.code != 130 || !strings.HasSuffix(got.stdout, "\ncancelled. the settings are saved\n") {
 		t.Errorf("exit %d, stdout %q; want 130 ending in cancelled, settings saved", got.code, got.stdout)
 	}
 	if _, llm := savedConfig(t, home); llm == nil || f.requests != 0 {
 		t.Errorf("saved %+v with %d requests, want saved and no test sent", llm, f.requests)
+	}
+}
+
+func TestTheKeyComesFromTheTerminalNotTheFakeHome(t *testing.T) {
+	// Under --home every other var comes from .jarx-env, but the key is set
+	// in the terminal jarx runs in, so a key in a file never counts.
+	home := fakeHome(t, "JARX_LLM_KEY="+canaryLLMKey+"\n")
+	runIn("", "setup", "llm", "--home", home, "--url", "https://llm.example.com/v1", "--model", "m-1", "--key-env", "JARX_LLM_KEY")
+
+	got := run("setup", "--home", home)
+
+	if !strings.HasSuffix(got.stdout, "key from JARX_LLM_KEY  not set\n") {
+		t.Errorf("setup stdout = %q, want the key not set: .jarx-env doesn't count", got.stdout)
 	}
 }

@@ -33,23 +33,23 @@ func envWith(t *testing.T, jarxEnv string) platform.Env {
 	return env
 }
 
-func TestKeyFromEnvReadsOnlyTheNamedVar(t *testing.T) {
+func TestKeyFromReadsOnlyTheNamedVar(t *testing.T) {
 	env := envWith(t, "JARX_LLM_KEY="+canaryKey+"\nOPENAI_API_KEY=other\nEMPTY=\n")
 
-	if _, ok := KeyFromEnv(env, "JARX_LLM_KEY"); !ok {
-		t.Error("KeyFromEnv(JARX_LLM_KEY) not found, want it")
+	if _, ok := KeyFrom(env.Lookup, "JARX_LLM_KEY"); !ok {
+		t.Error("KeyFrom(JARX_LLM_KEY) not found, want it")
 	}
-	if _, ok := KeyFromEnv(env, "MISSING"); ok {
-		t.Error("KeyFromEnv(MISSING) found, want not set")
+	if _, ok := KeyFrom(env.Lookup, "MISSING"); ok {
+		t.Error("KeyFrom(MISSING) found, want not set")
 	}
-	if _, ok := KeyFromEnv(env, "EMPTY"); ok {
-		t.Error("KeyFromEnv(EMPTY) found, want an empty var to count as no key")
+	if _, ok := KeyFrom(env.Lookup, "EMPTY"); ok {
+		t.Error("KeyFrom(EMPTY) found, want an empty var to count as no key")
 	}
 }
 
 func TestKeyNeverPrintsOrEncodes(t *testing.T) {
 	env := envWith(t, "K="+canaryKey+"\n")
-	key, _ := KeyFromEnv(env, "K")
+	key, _ := KeyFrom(env.Lookup, "K")
 
 	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
 		if got := fmt.Sprintf(verb, key); strings.Contains(got, canaryKey) || strings.Contains(got, fmt.Sprintf("%x", canaryKey)) {
@@ -96,7 +96,7 @@ const okReply = `{"id":"x","object":"chat.completion","model":"m-1","choices":[{
 
 func testKey(t *testing.T) Key {
 	t.Helper()
-	key, ok := KeyFromEnv(envWith(t, "K="+canaryKey+"\n"), "K")
+	key, ok := KeyFrom(envWith(t, "K="+canaryKey+"\n").Lookup, "K")
 	if !ok {
 		t.Fatal("no test key")
 	}

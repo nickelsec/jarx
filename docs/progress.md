@@ -596,7 +596,23 @@ in an env var you name; jarx never stores it.
   - Not covered yet: the review isn't wired into `jarx scan` yet (item 3);
     one request at a time, with no concurrency or backoff on a 429; prompts
     and resources servers offer; and the token count is bytes over four,
-    not a real tokenizer
-- [ ] `jarx scan --llm`: the preview and the yes or no question
+    not a real tokenizer (2357bff)
+- [x] `jarx scan --llm`: the preview and the yes or no question. Before
+  scanning it refuses without a terminal, when the review isn't set up,
+  and when the key's var isn't set in this terminal (with the commands
+  that set it). After the scanned block it shows the `llm review` block
+  (artifacts by kind, rough tokens, what's cached, host, model and key
+  var) and asks `[y/N]`. Nothing cached and nothing sent are said on their
+  own line, all cached asks nothing, and ctrl+c at the question or during
+  the review stops the scan with exit 130. The findings join the groups,
+  and the snapshot keeps the rules' findings only, so a scan without
+  `--llm` doesn't show them as removed. A rejected key or an unreachable
+  endpoint says why, prints the rest and exits 1. `report.Scan` split into
+  `ScanHead` and `ScanBody` for the block in between. The key is read
+  from the terminal's env even with `--home` (`cli.streams.lookupKey`,
+  `platform.LookupReal` in `cli.Run`), so the demo never needs a real key
+  in a file, and setup reads it the same way
+  - Not covered yet: the dashboard button (phase 7), and a review of
+    servers' prompts and resources
 
 **Run it:** `jarx setup llm`, then `jarx scan --llm --home testdata/demo`.

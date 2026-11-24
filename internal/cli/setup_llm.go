@@ -70,7 +70,7 @@ func runSetupLLM(p *report.Printer, plain *redact.Scrubber, args []string, home 
 	case f.off:
 		return llmOff(p, scrub, env, cfg)
 	case f.set > 0:
-		return llmFromFlags(p, scrub, env, cfg, f)
+		return llmFromFlags(p, scrub, env, cfg, f, st.lookupKey)
 	default:
 		return askLLM(p, scrub, env, cfg, st)
 	}
@@ -78,16 +78,26 @@ func runSetupLLM(p *report.Printer, plain *redact.Scrubber, args []string, home 
 
 // askLLM asks the setup questions, catching ctrl+c while it does.
 func askLLM(p *report.Printer, scrub *redact.Scrubber, env platform.Env, cfg jarxdir.Config, st streams) int {
+	a, done := newAsker(p, scrub, st)
+	defer done()
+	return a.setup(env, cfg)
+}
+
+// newAsker starts reading answers from st's input and catching ctrl+c.
+// Call done when the questions are over, so ctrl+c works the usual way
+// again.
+func newAsker(p *report.Printer, scrub *redact.Scrubber, st streams) (*asker, func()) {
 	notify := st.interrupt
 	if notify == nil {
 		notify = catchInterrupt
 	}
 	sig, stop := notify()
-	defer stop()
-	a := &asker{p: p, s: scrub, r: bufio.NewReader(st.in), sig: sig, lines: make(chan readLine), done: make(chan struct{})}
-	defer close(a.done)
+	a := &asker{p: p, s: scrub, r: bufio.NewReader(st.in), sig: sig, lines: make(chan readLine), done: make(chan struct{}), lookup: st.lookupKey}
 	go a.read()
-	return a.setup(env, cfg)
+	return a, func() {
+		close(a.done)
+		stop()
+	}
 }
 
 // openLLMSetup builds the env and loads jarx's config. Setup only checks
@@ -164,7 +174,7 @@ func llmUsageProblem(f llmFlags, rest []string) string {
 	return ""
 }
 
-func llmFromFlags(p *report.Printer, s *redact.Scrubber, env platform.Env, cfg jarxdir.Config, f llmFlags) int {
+func llmFromFlags(p *report.Printer, s *redact.Scrubber, env platform.Env, cfg jarxdir.Config, f llmFlags, lookup keyLookup) int {
 	base, err := checkBaseURL(s, f.url)
 	if err != nil {
 		p.Error(fmt.Errorf("--url: %w", err))
@@ -185,7 +195,7 @@ func llmFromFlags(p *report.Printer, s *redact.Scrubber, env platform.Env, cfg j
 		p.Error(err)
 		return exitError
 	}
-	p.LLMSummary(llmView(s, env, *cfg.LLM))
+	p.LLMSummary(llmView(s, lookup, *cfg.LLM))
 	p.Blank()
 	p.Say(scrubbed(s, "saved to "+homeShort(env, configPath(env))))
 	return exitOK
@@ -209,8 +219,8 @@ func llmOff(p *report.Printer, s *redact.Scrubber, env platform.Env, cfg jarxdir
 
 // llmView is the LLM settings as report shows them, with whether the key's
 // var is set here. It never holds the key.
-func llmView(s *redact.Scrubber, env platform.Env, c jarxdir.LLM) report.LLMView {
-	_, set := llm.KeyFromEnv(env, c.KeyEnv)
+func llmView(s *redact.Scrubber, lookup keyLookup, c jarxdir.LLM) report.LLMView {
+	_, set := llm.KeyFrom(lookup, c.KeyEnv)
 	return report.LLMView{
 		BaseURL: scrubbed(s, c.BaseURL),
 		Model:   scrubbed(s, c.Model),
@@ -301,6 +311,8 @@ type asker struct {
 	sig   <-chan os.Signal // ctrl+c
 	lines chan readLine    // unbuffered, so nothing is read ahead of a question
 	done  chan struct{}    // closed when setup returns
+
+	lookup keyLookup // the terminal's env, for the key
 
 	interrupted bool // ctrl+c, not the end of input, stopped it
 	saved       bool
@@ -441,7 +453,7 @@ func (a *asker) setup(env platform.Env, cfg jarxdir.Config) int {
 		"enter keeps the default"+a.p.Sep()+"ctrl+c quits without saving",
 	))
 	a.p.Blank()
-	next, ok := a.ask(env, cur)
+	next, ok := a.ask(cur)
 	if !ok {
 		return a.quit()
 	}
@@ -450,7 +462,7 @@ func (a *asker) setup(env platform.Env, cfg jarxdir.Config) int {
 	if !saved {
 		return code
 	}
-	key, keySet := llm.KeyFromEnv(env, next.KeyEnv)
+	key, keySet := llm.KeyFrom(a.lookup, next.KeyEnv)
 	if !keySet {
 		a.p.Hint(a.text("set " + next.KeyEnv + ", then run jarx setup llm again to test the connection"))
 		return exitOK
@@ -460,7 +472,7 @@ func (a *asker) setup(env platform.Env, cfg jarxdir.Config) int {
 
 // ask asks the three questions, with cur's values as the defaults. ok is
 // false at the end of input.
-func (a *asker) ask(env platform.Env, cur jarxdir.LLM) (jarxdir.LLM, bool) {
+func (a *asker) ask(cur jarxdir.LLM) (jarxdir.LLM, bool) {
 	a.p.Question(stepURL, llmSteps, a.text("base url"), a.text(cur.BaseURL), a.texts(
 		"an OpenAI-compatible endpoint: https, or http on loopback only",
 		"like https://api.openai.com/v1 or http://127.0.0.1:11434/v1",
@@ -488,7 +500,7 @@ func (a *asker) ask(env platform.Env, cur jarxdir.LLM) (jarxdir.LLM, bool) {
 	if !ok {
 		return jarxdir.LLM{}, false
 	}
-	if _, set := llm.KeyFromEnv(env, keyEnv); set {
+	if _, set := llm.KeyFrom(a.lookup, keyEnv); set {
 		a.p.AnswerOK(a.text(keyEnv+" is set in this terminal"), redact.Text{})
 	} else {
 		a.p.AnswerNote(a.text(keyEnv + " isn't set in this terminal. to set it without it landing in shell history:"))
@@ -501,7 +513,7 @@ func (a *asker) ask(env platform.Env, cur jarxdir.LLM) (jarxdir.LLM, bool) {
 // confirmSave shows the summary and saves on a yes. When saved is false,
 // the caller returns code.
 func (a *asker) confirmSave(env platform.Env, cfg jarxdir.Config) (bool, int) {
-	a.p.LLMSummary(llmView(a.s, env, *cfg.LLM))
+	a.p.LLMSummary(llmView(a.s, a.lookup, *cfg.LLM))
 	a.p.Blank()
 	a.p.YesNo(a.text("save to "+homeShort(env, configPath(env))+"?"), true, nil)
 	yes, ok := a.yesNo(true)
@@ -524,10 +536,18 @@ func (a *asker) confirmSave(env platform.Env, cfg jarxdir.Config) (bool, int) {
 // setKeyCommands are the commands that set the key's var without echo and
 // keep the key out of shell history.
 func setKeyCommands(a *asker, name string) []report.Command {
+	ps, sh := keyCommands(name)
 	return []report.Command{
-		{Label: a.text("powershell"), Text: a.text("$env:" + name + " = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'key')).Password")},
-		{Label: a.text("bash, zsh"), Text: a.text("read -rs " + name + " && export " + name)},
+		{Label: a.text("powershell"), Text: a.text(ps)},
+		{Label: a.text("bash, zsh"), Text: a.text(sh)},
 	}
+}
+
+// keyCommands are the PowerShell and the bash and zsh commands that set
+// the var name without echo.
+func keyCommands(name string) (string, string) {
+	return "$env:" + name + " = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'key')).Password",
+		"read -rs " + name + " && export " + name
 }
 
 // offerTest asks whether to test the connection (default no, since it's a
@@ -559,7 +579,21 @@ func (a *asker) offerTest(c jarxdir.LLM, key llm.Key) int {
 
 // ping runs the connection test, and stops it on ctrl+c.
 func (a *asker) ping(c jarxdir.LLM, key llm.Key) (time.Duration, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), pingWait)
+	var took time.Duration
+	var err error
+	a.whileCatching(pingWait, func(ctx context.Context) {
+		took, err = llm.Ping(ctx, netguard.NewLLM(), c.BaseURL, c.Model, key)
+	})
+	return took, err //nolint:wrapcheck // llm errors already say what failed
+}
+
+// whileCatching runs f with a context that ctrl+c cancels, and a timeout
+// when one is given. After ctrl+c, a.interrupted is set.
+func (a *asker) whileCatching(timeout time.Duration, f func(context.Context)) {
+	ctx, cancel := context.WithCancel(context.Background())
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	}
 	defer cancel()
 	stopped := make(chan struct{})
 	go func() {
@@ -570,12 +604,11 @@ func (a *asker) ping(c jarxdir.LLM, key llm.Key) (time.Duration, error) {
 		case <-ctx.Done():
 		}
 	}()
-	took, err := llm.Ping(ctx, netguard.NewLLM(), c.BaseURL, c.Model, key)
+	f(ctx)
 	cancel()
 	select {
 	case <-stopped:
 		a.interrupted = true
 	default:
 	}
-	return took, err //nolint:wrapcheck // llm errors already say what failed
 }

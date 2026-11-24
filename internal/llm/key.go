@@ -3,11 +3,7 @@
 // env var the user named. jarx never stores the key.
 package llm
 
-import (
-	"fmt"
-
-	"github.com/nickelsec/jarx/internal/platform"
-)
+import "fmt"
 
 // Key is the LLM key, read from the env var the user named. Like
 // model.Launch it keeps its value unexported: it prints as [key] for every
@@ -20,10 +16,14 @@ type Key struct {
 
 const keyMask = "[key]"
 
-// KeyFromEnv reads the key from the env var name. An unset or empty var is
-// no key.
-func KeyFromEnv(env platform.Env, name string) (Key, bool) {
-	v, ok := env.Lookup(name)
+// KeyFrom reads the key from the env var name through lookup. jarx passes
+// the real terminal's env, even with --home: the key is set in the
+// terminal jarx runs in, never in a file. An unset or empty var is no key.
+func KeyFrom(lookup func(string) (string, bool), name string) (Key, bool) {
+	if lookup == nil {
+		return Key{}, false
+	}
+	v, ok := lookup(name)
 	if !ok || v == "" {
 		return Key{}, false
 	}

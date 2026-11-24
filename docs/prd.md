@@ -1298,7 +1298,10 @@ jarx's state goes in `<dir>/.jarx-state/`, which the repo's `.gitignore`
 ignores under `testdata/`, so demo runs never dirty the repo. With
 `--home`, jarx doesn't read managed policy dirs, the Windows registry, macOS
 plists, the real env or the real PATH. Env vars for the env var channel come
-from `<dir>/.jarx-env` instead. Absolute paths inside the fake home's agent
+from `<dir>/.jarx-env` instead. The one exception is the LLM key: it's
+read from the env var you named in the terminal jarx runs in, even with
+`--home`, so the demo never needs a real key in a file. A key in
+`.jarx-env` doesn't count. Absolute paths inside the fake home's agent
 records are read relative to `<dir>`, so `/projects/app` in the demo's
 `.claude.json` means `<dir>/projects/app` on any machine.
 

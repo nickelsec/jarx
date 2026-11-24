@@ -775,7 +775,7 @@ a spot in the code that makes breaking it hard.
 | Only discover runs a process | `forbidigo` bans `exec.Command`, `exec.CommandContext`, `exec.LookPath` (it reads the real PATH), `os.StartProcess` and `syscall.Exec`/`ForkExec` outside `discover`, which only runs hardened git. `proc` joins it in phase 4. git is found through `platform.Env`'s PATH, never under `--home`. |
 | Never reads a credential value | `fsys` refuses content reads of any path `credmeta.Location` calls a credential, checked on the path and on where its symlinks lead, so following an `@import` or a symlinked rule can't open one. Stat still works for existence checks. The one way past the guard is `fsys.FS.CredentialFacts`: it hands the file to credmeta's parser for its kind and returns only the kept facts, so no caller ever gets a credential's bytes. A `forbidigo` rule lets only `discover` call it. |
 | Never writes agent config | `fsys` has no write methods. The only writer is `jarxdir`, which is rooted at jarx's state dir (`os.UserConfigDir()/jarx`, or `<home>/.jarx-state` with `--home`) with `os.Root`. `forbidigo` bans `os.WriteFile`, `os.Create`, `os.Mkdir*`, `os.Remove*`, `os.Rename` and friends everywhere else (tests may write fixtures). |
-| Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, PATH, state dir, system roots). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`, and bans `os.Open`, `os.ReadFile`, `os.Stat`, `os.OpenRoot`, `filepath.Walk*` and friends outside `fsys`, `jarxdir` and `platform`. Under `--home`, `fsys` confines every read to the fake home with `os.Root`, so a fixture that points at a real path, a `..` trick or a symlink can't reach the real machine. `--home` builds a `platform.Env` with no system roots, registry, plists, real env or real PATH. |
+| Tests and demos never touch the real machine | Adapters take an injected `platform.Env` (home, GOOS, env, PATH, state dir, system roots). `forbidigo` bans `os.UserHomeDir`, `os.Getenv` and friends outside `platform`, and bans `os.Open`, `os.ReadFile`, `os.Stat`, `os.OpenRoot`, `filepath.Walk*` and friends outside `fsys`, `jarxdir` and `platform`. Under `--home`, `fsys` confines every read to the fake home with `os.Root`, so a fixture that points at a real path, a `..` trick or a symlink can't reach the real machine. `--home` builds a `platform.Env` with no system roots, registry, plists, real env or real PATH. The one real var jarx reads under `--home` is the LLM key's, through `platform.LookupReal`, which `cli.Run` hands to `llm.KeyFrom`; tests pass their own lookup, so they never read the real env. |
 | The LLM key is never stored | `jarxdir.Config` has a field for the key's env var name and none for a key. Setup puts the base URL, model and var name through the scrubber and refuses a match, and refuses a URL with a user, password or query. Only `llm` reads the var's value, and only for a request. A test sets a canary key in the env, runs setup and the connection test, and checks it never shows up in `config.json`, stdout or stderr. |
 | Only approved dependencies | golangci `depguard` lists the four approved modules plus stdlib. A new import fails lint until someone approves it. |
 
@@ -913,6 +913,9 @@ Where later phases go:
   here", and in full under `--all`. The lines come in this order: loads
   here, credentials, talks to, sessions.
 - Full lists and views go in the `--all` inventory, after the findings.
+- `jarx scan --llm` puts its `llm review` block and question between the
+  scanned block and the summary line, then one line on how the review
+  went. Its findings join the same groups as the rules' findings.
 
 ### Blocks
 

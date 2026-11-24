@@ -57,7 +57,7 @@ func runSetup(p *report.Printer, plain *redact.Scrubber, args []string, st strea
 	}
 
 	if len(rest) == 0 {
-		showSetup(p, scrub, env, files, cfg)
+		showSetup(p, scrub, env, files, cfg, st.lookupKey)
 		return exitOK
 	}
 	if err := changeRepos(p.Out, scrub, env, files, cfg, rest[1], rest[2]); err != nil {
@@ -102,7 +102,7 @@ func changeRepos(out *report.Stream, s *redact.Scrubber, env platform.Env, files
 	return rmRepo(out, s, env, cfg, path)
 }
 
-func showSetup(p *report.Printer, s *redact.Scrubber, env platform.Env, files *fsys.FS, cfg jarxdir.Config) {
+func showSetup(p *report.Printer, s *redact.Scrubber, env platform.Env, files *fsys.FS, cfg jarxdir.Config, lookup keyLookup) {
 	v := report.SettingsView{
 		Home:     scrubbed(s, env.Home),
 		StateDir: scrubbed(s, env.StateDir),
@@ -112,7 +112,7 @@ func showSetup(p *report.Printer, s *redact.Scrubber, env platform.Env, files *f
 		v.Repos = append(v.Repos, report.RepoRow{Path: scrubbed(s, r), Missing: pathStatus(files, r) == statusMissing})
 	}
 	if cfg.LLM != nil {
-		view := llmView(s, env, *cfg.LLM)
+		view := llmView(s, lookup, *cfg.LLM)
 		v.LLM = &view
 	}
 	p.Settings(v)
