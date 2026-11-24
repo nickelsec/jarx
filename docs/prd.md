@@ -486,14 +486,48 @@ it.
 
 ### Codex channels
 
-1. **Shell and apply_patch:** the docs don't say `read-only` limits reads, so
-   paths count as readable unless a `[permissions.<name>]` profile with a
-   `filesystem` deny covers them. Protected paths under writable roots (`.git`,
-   `.codex`, `.aws`) are about writes, not reads.
+1. **Shell and apply_patch:** the sandbox modes and the built-in profiles
+   (`:read-only`, `:workspace`) limit writes, not reads: the docs say even
+   `read-only` can "read accessible files", and they don't say a built-in
+   limits reads, so jarx counts them as open. A custom
+   `[permissions.<name>]` profile reads only what its `filesystem` table
+   grants (`:minimal`, the workspace roots, a path, `:root` for broad reads),
+   unless it `extends` a built-in. Its `deny` entries block reads, a deny
+   wins an equally specific grant, and a narrower path can reopen a broader
+   deny. Protected paths under writable roots (`.git`, `.codex`, `.aws`) are
+   about writes. Codex has no separate file-read tool; `view_image` only
+   reads images.
+   - When the sandbox stops a read, Codex can ask to run the command outside
+     it. `approval_policy = never`, or granular `sandbox_approval = false`,
+     auto-rejects that (**blocked**); `approvals_reviewer = auto_review` has a
+     reviewer subagent approve instead of you (**readable silently**);
+     otherwise you approve it (**needs approval**). The docs don't give a
+     default `approval_policy`, so an unset one counts as `on-request`, the
+     interactive default and the worse case.
+   - Env vars reach commands through `shell_environment_policy`: `inherit =
+     none` or `core` keeps secrets out, `ignore_default_excludes` defaults to
+     `true` (so names with KEY, SECRET or TOKEN are kept unless it's
+     `false`), and `filters`, `exclude` and `include_only` patterns (case
+     insensitive, `*` for any text) drop or keep a name. The highest layer
+     that sets any of the lists wins.
+   - On native Windows the sandbox covers commands and their child
+     processes, but the `unelevated` implementation doesn't support denied
+     read paths, and Codex falls back to it when `elevated` setup isn't
+     available (Windows sandbox docs). So a profile deny only counts as
+     blocking there when `windows.sandbox` pins `mxc` (and requirements don't
+     set `windows.allow_mxc = false`), or requirements'
+     `windows.allowed_sandbox_implementations` leaves `unelevated` out.
+     Otherwise it's **readable, deny is bypassable**.
+   - A glob deny is matched when each sandboxed process starts, on every
+     platform, so a matching file created later stays readable to a process
+     already running. jarx notes this whenever a glob deny decides a
+     verdict.
 2. **Legacy override:** if `sandbox_mode` shows up in any loaded config, comes
    in via `--sandbox`, or is set by the selected profile, Codex uses the
-   legacy sandbox settings and ignores `default_permissions`. jarx resolves
-   verdicts the same way and flags it (rule `JARX-CODEX-*`).
+   legacy sandbox settings and ignores `default_permissions` and every
+   profile, `extends` included. jarx resolves verdicts the same way, notes a
+   profile deny it drops in the why trail, and flags the switch
+   (`JARX-CODEX-001`, `JARX-CODEX-002`).
 3. **MCP servers and hooks:** **readable by the process**.
 
 ### The mode a session starts in
@@ -823,12 +857,15 @@ Rules that depend on an agent's precedence live in its adapter:
 
 ### Exposure, drift and versions
 
-- `JARX-REACH-001` (medium): credentials the agent can read with its file
+- `JARX-REACH-001` (medium): credentials an agent can read with its file
   tools or the shell without asking you, readable silently or past a
-  bypassable deny. One finding per project, naming the credentials.
-- `JARX-REACH-002` (high): a `Read` deny or ask rule for a credential that
-  the shell can get around (`grep -r`, a script) because no sandbox backs
-  it up. On the rule's own file.
+  bypassable deny. One finding per project and agent, naming the
+  credentials.
+- `JARX-REACH-002` (high): a deny for a credential that doesn't hold. For
+  Claude, a `Read` deny or ask the shell can get around (`grep -r`, a
+  script) because no sandbox backs it up. For Codex on native Windows, a
+  profile deny the `unelevated` sandbox can ignore. On the rule's own
+  file.
 - **Drift:** when a tool description's hash changes, that tool goes through
   the poison rules again. It isn't just flagged as "changed". The poison
   rules run on every tool's current text each scan, so the changed one is

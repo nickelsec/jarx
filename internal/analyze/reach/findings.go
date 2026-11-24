@@ -24,9 +24,38 @@ func ReadableSilently() finding.Rule {
 func BypassableDeny() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-REACH-002", Severity: finding.High, Title: "A credential's deny rule can be bypassed",
-		Detail: "a Read deny or ask rule covers a credential, but it only catches shell commands that name the file, like cat; grep -r or a script that opens the file reads it anyway, and no sandbox backs the rule up",
-		Fix:    "turn on the sandbox with a denyRead or credentials.files entry for it, and set allowUnsandboxedCommands to false",
+		Detail: "a deny for a credential doesn't hold: for Claude, a Read deny only catches shell commands that name the file, like cat, and no sandbox backs it up; for Codex on native Windows, the unelevated sandbox doesn't support denied read paths",
+		Fix:    "Claude: turn on the sandbox with a denyRead or credentials.files entry, and set allowUnsandboxedCommands to false. Codex: pin windows.sandbox to mxc, or leave unelevated out of allowed_sandbox_implementations",
 	}
+}
+
+// codexBypassable is one REACH-002 per Codex profile deny the unelevated
+// Windows sandbox can get around, on the deny's own file.
+func codexBypassable(s *redact.Scrubber, env platform.Env, p model.Project) []finding.Finding {
+	x := newCodex(s, env, p, permissionsOf(p, model.AgentCodex))
+	byRule := map[string][]string{}
+	var order []model.PermissionRule
+	for _, r := range p.Reach {
+		if r.Agent != model.AgentCodex || r.Channel != model.ChannelShell || r.Verdict != model.ReachBypassable {
+			continue
+		}
+		m, ok := x.profileMatch(model.Credential{Kind: r.Kind, Path: r.Path})
+		if !ok || m.Action != model.RuleDeny {
+			continue
+		}
+		key := m.Origin.File.Raw() + "\x00" + m.Rule.String()
+		if _, had := byRule[key]; !had {
+			order = append(order, m)
+		}
+		byRule[key] = append(byRule[key], label(r))
+	}
+	out := make([]finding.Finding, 0, len(order))
+	for _, m := range order {
+		key := m.Origin.File.Raw() + "\x00" + m.Rule.String()
+		ev, _ := s.Scrub("deny " + m.Rule.String() + " covers " + strings.Join(byRule[key], ", ") + ", but " + x.denyUnenforced())
+		out = append(out, BypassableDeny().New(m.Origin, ev))
+	}
+	return out
 }
 
 // Rules returns the analyzer's rules.
@@ -43,8 +72,11 @@ func Analyze(s *redact.Scrubber, env platform.Env, projects []model.Project) []f
 		if len(p.Reach) == 0 {
 			continue
 		}
-		out = append(out, readable(s, p)...)
+		for _, a := range []model.Agent{model.AgentClaude, model.AgentCodex} {
+			out = append(out, readable(s, p, a)...)
+		}
 		out = append(out, bypassable(s, env, p)...)
+		out = append(out, codexBypassable(s, env, p)...)
 	}
 	return out
 }
@@ -57,14 +89,16 @@ func label(r model.Reach) string {
 	return string(r.Kind) + " " + r.Path.Text().String()
 }
 
-// readable is one finding per project for the credentials the file tools
-// or the shell read without asking.
-func readable(s *redact.Scrubber, p model.Project) []finding.Finding {
+// silentNames are the credentials an agent's file tools or shell read
+// without asking, once each.
+func silentNames(p model.Project, a model.Agent) []string {
 	var names []string
 	seen := map[string]bool{}
 	for _, r := range p.Reach {
-		silent := r.Verdict == model.ReachSilent || r.Verdict == model.ReachBypassable // a bypassable deny reads silently too
-		if !silent || (r.Channel != model.ChannelFileTools && r.Channel != model.ChannelShell) {
+		if r.Agent != a || r.Channel != model.ChannelFileTools && r.Channel != model.ChannelShell {
+			continue
+		}
+		if r.Verdict != model.ReachSilent && r.Verdict != model.ReachBypassable { // a bypassable deny reads silently too
 			continue
 		}
 		if l := label(r); !seen[l] {
@@ -72,6 +106,13 @@ func readable(s *redact.Scrubber, p model.Project) []finding.Finding {
 			names = append(names, l)
 		}
 	}
+	return names
+}
+
+// readable is one finding per project for the credentials the file tools
+// or the shell read without asking.
+func readable(s *redact.Scrubber, p model.Project, a model.Agent) []finding.Finding {
+	names := silentNames(p, a)
 	if len(names) == 0 {
 		return nil
 	}
@@ -82,12 +123,12 @@ func readable(s *redact.Scrubber, p model.Project) []finding.Finding {
 	if rest := len(names) - len(shown); rest > 0 {
 		list += " and " + strconv.Itoa(rest) + " more"
 	}
-	ev := strconv.Itoa(len(names)) + " credentials (" + list + ")"
+	ev := string(a) + ": " + strconv.Itoa(len(names)) + " credentials (" + list + ")"
 	if len(names) == 1 {
-		ev = "1 credential (" + names[0] + ")"
+		ev = string(a) + ": 1 credential (" + names[0] + ")"
 	}
 	t, _ := s.Scrub(ev)
-	o := model.Origin{Agent: model.AgentClaude, File: p.Path, InEffect: true}
+	o := model.Origin{Agent: a, File: p.Path, InEffect: true}
 	return []finding.Finding{ReadableSilently().New(o, t)}
 }
 
@@ -98,7 +139,7 @@ func bypassable(s *redact.Scrubber, env platform.Env, p model.Project) []finding
 	byRule := map[string][]string{}
 	var order []model.PermissionRule
 	for _, r := range p.Reach {
-		if r.Channel != model.ChannelShell || r.Verdict != model.ReachBypassable {
+		if r.Agent != model.AgentClaude || r.Channel != model.ChannelShell || r.Verdict != model.ReachBypassable {
 			continue
 		}
 		cr := model.Credential{Kind: r.Kind, Path: r.Path}

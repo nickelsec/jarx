@@ -44,13 +44,17 @@ var optionKeys = []string{
 	"approval_policy", "approvals_reviewer", keySandboxMode, keyDefaultPerm, keyWebSearch,
 	"sandbox_workspace_write.network_access",
 	"shell_environment_policy.inherit", "shell_environment_policy.ignore_default_excludes",
+	"approval_policy.granular.sandbox_approval", keyWindowsSandbox,
 }
 
 const (
 	keySandboxMode = "sandbox_mode"
 	keyDefaultPerm = "default_permissions"
 	keyWebSearch   = "web_search"
-	goosWindows    = "windows"
+	// keyWindowsSandbox picks the native Windows sandbox: mxc, elevated or
+	// unelevated (Windows sandbox docs).
+	keyWindowsSandbox = "windows.sandbox"
+	goosWindows       = "windows"
 )
 
 // RepoDropsPermissions is the finding for a project config whose
@@ -215,6 +219,7 @@ type layer struct {
 	markers  []string                     // project_root_markers
 	hasMarks bool                         // project_root_markers is set, maybe to []
 	legacy   bool                         // has [profiles] or a profile key
+	envRules []envRule                    // shell_environment_policy's pattern lists
 	raw      map[string]any               // the decoded file
 	text     redact.Text                  // the whole file, scrubbed
 	_        struct{}
@@ -225,8 +230,12 @@ type requirements struct {
 	origin   model.Origin
 	allowed  map[string][]string // option key to allowed values
 	profiles map[string]bool     // allowed_permission_profiles
-	raw      map[string]any      // the decoded file, for hooks and features
-	text     redact.Text         // the whole file, scrubbed
+	// windowsImpls is [windows] allowed_sandbox_implementations, nil when
+	// unset, and allowMxc is [windows] allow_mxc, nil when unset.
+	windowsImpls []string
+	allowMxc     *bool
+	raw          map[string]any // the decoded file, for hooks and features
+	text         redact.Text    // the whole file, scrubbed
 }
 
 // The adapter reads settings.
@@ -364,6 +373,36 @@ func (s *settings) problem(origin model.Origin, why string) {
 	s.findings = append(s.findings, finding.UnreadableRecord().New(origin, s.text(why)))
 }
 
+// readWindows reads the [windows] requirements: which legacy sandbox
+// implementations may run, and whether MXC may. A config windows.sandbox
+// they rule out isn't the one in effect.
+func (r *requirements) readWindows(raw map[string]any) {
+	w, _ := raw["windows"].(map[string]any)
+	if list, ok := w["allowed_sandbox_implementations"].([]any); ok {
+		r.windowsImpls = []string{}
+		for _, v := range list {
+			if s, ok := v.(string); ok {
+				r.windowsImpls = append(r.windowsImpls, s)
+			}
+		}
+	}
+	if b, ok := w["allow_mxc"].(bool); ok {
+		r.allowMxc = &b
+	}
+	if r.windowsImpls == nil && r.allowMxc == nil {
+		return
+	}
+	allowed := r.windowsImpls
+	if allowed == nil {
+		allowed = []string{"elevated", "unelevated"}
+	}
+	allowed = append([]string{}, allowed...)
+	if r.allowMxc == nil || *r.allowMxc {
+		allowed = append(allowed, "mxc") // the list doesn't restrict mxc
+	}
+	r.allowed[keyWindowsSandbox] = allowed
+}
+
 // parseLayer picks the settings jarx records out of a decoded file.
 func parseLayer(origin model.Origin, raw map[string]any) *layer {
 	l := &layer{origin: origin, values: map[string]string{}, profiles: map[string]map[string]string{}, raw: raw}
@@ -390,8 +429,47 @@ func parseLayer(origin model.Origin, raw map[string]any) *layer {
 		rules := map[string]string{}
 		flattenRules(fsTable, "", rules)
 		l.profiles[name] = rules
+		if ext, ok := profile["extends"].(string); ok {
+			l.values["permissions."+name+".extends"] = ext
+		}
 	}
+	l.envRules = parseEnvPolicy(raw)
 	return l
+}
+
+// envRule is one pattern from shell_environment_policy: allow keeps a
+// matching var (include filters and include_only), deny drops it (exclude
+// filters and the legacy exclude list).
+type envRule struct {
+	list    string
+	pattern string
+	action  model.RuleAction
+}
+
+// parseEnvPolicy reads shell_environment_policy's filters, exclude and
+// include_only lists, sorted so the rules come out the same each time.
+func parseEnvPolicy(raw map[string]any) []envRule {
+	pol, _ := raw["shell_environment_policy"].(map[string]any)
+	var out []envRule
+	if filters, ok := pol["filters"].(map[string]any); ok {
+		for _, pattern := range sortedKeys(filters) {
+			action := model.RuleDeny
+			if v, _ := filters[pattern].(string); v == "include" {
+				action = model.RuleAllow
+			}
+			out = append(out, envRule{"filters", pattern, action})
+		}
+	}
+	for list, action := range map[string]model.RuleAction{"exclude": model.RuleDeny, "include_only": model.RuleAllow} {
+		items, _ := pol[list].([]any)
+		for _, it := range items {
+			if p, ok := it.(string); ok {
+				out = append(out, envRule{list, p, action})
+			}
+		}
+	}
+	slices.SortStableFunc(out, func(a, b envRule) int { return strings.Compare(a.list, b.list) })
+	return out
 }
 
 // flattenRules turns a filesystem table into path to access, with nested
@@ -478,6 +556,7 @@ func (s *settings) readRequirements(path string) *requirements {
 		}
 		r.allowed[key] = vals
 	}
+	r.readWindows(l.raw)
 	if t, ok := l.raw["allowed_permission_profiles"].(map[string]any); ok {
 		r.profiles = map[string]bool{}
 		for name, v := range t {

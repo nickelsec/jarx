@@ -402,8 +402,33 @@ and flags it.
     own read-only set (it's treated like Bash), what an excluded command
     reads, a settings env block's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` (jarx
     doesn't read env values there, so only the real env counts), the
-    sandbox's Linux wildcard limits, and Codex (item 4)
-- [ ] `analyze/reach`: Codex channels and the legacy `sandbox_mode` switch
+    sandbox's Linux wildcard limits, and Codex (item 4) (c5e1e3a)
+- [x] `analyze/reach`: Codex channels and the legacy `sandbox_mode` switch.
+  Codex verdicts for every project it knows: shell and apply_patch through
+  the legacy sandbox modes, the built-in profiles and custom profiles
+  (grants, denies, the most specific entry, `:root`, `:workspace_roots`
+  subpaths, `extends`), then the escalation out of the sandbox by
+  `approval_policy`, granular `sandbox_approval` and `approvals_reviewer`;
+  env vars through `shell_environment_policy`; and local MCP servers and
+  hooks, shared with Claude. Under the legacy switch a profile deny Codex
+  drops is named in the why trail. The Codex adapter now reads each
+  profile's `extends` (off under the legacy sandbox),
+  `approval_policy.granular.sandbox_approval`, and the env policy's
+  `filters`, `exclude` and `include_only` lists. `JARX-REACH-001` is one
+  finding per project and agent, and `--all` lists each agent's verdicts
+  under its own heading. On native Windows a profile deny only blocks when
+  `unelevated` can't run (`windows.sandbox` pinned to an allowed `mxc`, or
+  requirements leaving `unelevated` out), since that fallback doesn't
+  support denied read paths; otherwise it's bypassable and raises
+  `JARX-REACH-002` for Codex. The adapter reads `windows.sandbox` and the
+  `[windows]` requirements, glob denies note that they're matched per
+  process, and the demo pins `mxc` so it reads the same on every OS
+  - Not covered yet: a profile that extends another custom profile (it
+    counts as open), Codex's `--sandbox` and `-c` flags per run,
+    `shell_environment_policy.set` and `experimental_use_profile`, what
+    `inherit = core` keeps exactly (the docs don't list it, so it counts as
+    keeping no secrets), Codex's managed network rules, and observed modes
+    (phase 6)
 - [ ] credential view
 - [ ] `analyze/egress`: where your agent talks to
 - [ ] `analyze/versions`: installs, PATH winner, advisories

@@ -44,7 +44,7 @@ func newClaude(s *redact.Scrubber, env platform.Env, p model.Project, perm model
 		c.blockReads = f
 	}
 	c.sandboxOff = c.whySandboxOff()
-	if v, f := c.option("sandbox.allowUnsandboxedCommands"); v == "false" {
+	if v, f := c.option("sandbox.allowUnsandboxedCommands"); v == valueFalse {
 		c.noRetry = f
 	}
 	c.readRules()
@@ -57,8 +57,11 @@ func newClaude(s *redact.Scrubber, env platform.Env, p model.Project, perm model
 	return c
 }
 
-// valueTrue is how a settings switch reads when it's on.
-const valueTrue = "true"
+// How a settings switch reads when it's on or off.
+const (
+	valueTrue  = "true"
+	valueFalse = "false"
+)
 
 // readRules picks out the rules that change a verdict beyond file rules:
 // an ask on the unsandboxed retry, an allow that approves a read's retry,
@@ -122,7 +125,7 @@ func (c *claude) option(key string) (string, string) {
 }
 
 func (c *claude) whySandboxOff() string {
-	if c.env.GOOS == "windows" {
+	if c.env.GOOS == goosWindows {
 		return "Claude's sandbox doesn't run on native Windows"
 	}
 	if v, _ := c.option("sandbox.enabled"); v != valueTrue {
@@ -218,10 +221,16 @@ func (c *claude) insideWorkingDirs(cr model.Credential) bool {
 
 // verdicts are every channel's verdict for one credential.
 func (c *claude) verdicts(cr model.Credential) []model.Reach {
+	pc := process{s: c.s, p: c.p, agent: model.AgentClaude, strips: c.scrubs}
 	if cr.Kind == credmeta.KindEnvVar {
-		return append([]model.Reach{c.envShell(cr)}, c.processChannels(cr, true)...)
+		return append([]model.Reach{c.envShell(cr)}, pc.channels(cr, true)...)
 	}
-	return append([]model.Reach{c.fileTools(cr), c.shell(cr)}, c.processChannels(cr, false)...)
+	return append([]model.Reach{c.fileTools(cr), c.shell(cr)}, pc.channels(cr, false)...)
+}
+
+// reachOf starts a Claude verdict.
+func (c *claude) reachOf(cr model.Credential, ch model.ReachChannel) model.Reach {
+	return reachOf(model.AgentClaude, cr, ch)
 }
 
 // withMode is a verdict that needs your approval, after the mode: bypass
@@ -248,7 +257,7 @@ func (c *claude) withMode(r model.Reach, why ...string) model.Reach {
 // fileTools is Read, Grep, Glob and LSP: Read deny, ask and allow rules
 // (an Edit allow grants reads too), then the working dirs and the mode.
 func (c *claude) fileTools(cr model.Credential) model.Reach {
-	r := reachOf(cr, model.ChannelFileTools)
+	r := c.reachOf(cr, model.ChannelFileTools)
 	if d, ok := c.fileRule(cr, model.RuleDeny, "Read"); ok {
 		r.Verdict, r.Why = model.ReachBlocked, c.texts("denied by "+in(d))
 		return r
@@ -277,7 +286,7 @@ func (c *claude) fileTools(cr model.Credential) model.Reach {
 // catches commands that name the file. With it, the sandbox's read policy
 // decides, then the unsandboxed retry.
 func (c *claude) shell(cr model.Credential) model.Reach {
-	r := reachOf(cr, model.ChannelShell)
+	r := c.reachOf(cr, model.ChannelShell)
 	outside := !c.insideWorkingDirs(cr)
 	if c.sandboxOff != "" {
 		return c.unsandboxedShell(r, cr, outside)
@@ -417,7 +426,7 @@ func (c *claude) scrubs(name string) bool { return c.scrub && !githubToken(name)
 // envShell is an env var through Bash, which inherits Claude's env whatever
 // the file rules say.
 func (c *claude) envShell(cr model.Credential) model.Reach {
-	r := reachOf(cr, model.ChannelShell)
+	r := c.reachOf(cr, model.ChannelShell)
 	name := cr.Name.String()
 	if c.scrubs(name) {
 		r.Verdict, r.Why = model.ReachBlocked, c.texts("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 strips it from Bash, hooks and stdio MCP servers")

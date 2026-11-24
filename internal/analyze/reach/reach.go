@@ -7,6 +7,7 @@
 package reach
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/nickelsec/jarx/internal/catalog"
@@ -22,13 +23,22 @@ func Settle(s *redact.Scrubber, env platform.Env, projects []model.Project, mach
 	for i := range projects {
 		p := &projects[i]
 		p.Reach = nil
-		if p.Status != model.ProjectOK || !knows(*p, model.AgentClaude) {
+		if p.Status != model.ProjectOK {
 			continue
 		}
-		perm := permissionsOf(*p, model.AgentClaude)
-		c := newClaude(s, env, *p, perm)
-		for _, cr := range credentialsFor(s, *p, perm, machine) {
-			p.Reach = append(p.Reach, c.verdicts(cr)...)
+		if knows(*p, model.AgentClaude) {
+			perm := permissionsOf(*p, model.AgentClaude)
+			c := newClaude(s, env, *p, perm)
+			for _, cr := range credentialsFor(s, *p, perm, machine) {
+				p.Reach = append(p.Reach, c.verdicts(cr)...)
+			}
+		}
+		if knows(*p, model.AgentCodex) {
+			perm := permissionsOf(*p, model.AgentCodex)
+			x := newCodex(s, env, *p, perm)
+			for _, cr := range credentialsFor(s, *p, perm, machine) {
+				p.Reach = append(p.Reach, x.verdicts(cr)...)
+			}
 		}
 	}
 }
@@ -76,36 +86,50 @@ func credentialsFor(s *redact.Scrubber, p model.Project, perm model.Permissions,
 }
 
 // reachOf starts a verdict for a credential on a channel.
-func reachOf(cr model.Credential, ch model.ReachChannel) model.Reach {
-	return model.Reach{Agent: model.AgentClaude, Kind: cr.Kind, Path: cr.Path, Name: cr.Name, Channel: ch}
+func reachOf(a model.Agent, cr model.Credential, ch model.ReachChannel) model.Reach {
+	return model.Reach{Agent: a, Kind: cr.Kind, Path: cr.Path, Name: cr.Name, Channel: ch}
 }
 
-// processChannels are the channels that run code as you, outside any
-// sandbox: local MCP servers that start, and hooks. They can read any file
-// you can, and they get Claude's env unless the scrub is on.
-func (c *claude) processChannels(cr model.Credential, isEnv bool) []model.Reach {
+// process is what the channels that run code as you need: the project,
+// the agent, and whether the agent strips a var from subprocesses.
+type process struct {
+	s      *redact.Scrubber
+	p      model.Project
+	agent  model.Agent
+	strips func(name string) bool
+}
+
+func (pc process) text(v string) redact.Text {
+	t, _ := pc.s.Scrub(v)
+	return t
+}
+
+// channels are the channels that run code as you, outside any sandbox:
+// local MCP servers that start, and hooks. They can read any file you can,
+// and hooks get the agent's env unless it strips the var.
+func (pc process) channels(cr model.Credential, isEnv bool) []model.Reach {
 	var out []model.Reach
-	if names := c.localServers(); len(names) > 0 && !isEnv {
-		r := reachOf(cr, model.ChannelMCP)
-		r.Via = c.text(strings.Join(names, ", "))
+	if names := pc.localServers(); len(names) > 0 && !isEnv {
+		r := reachOf(pc.agent, cr, model.ChannelMCP)
+		r.Via = pc.text(strings.Join(names, ", "))
 		r.Verdict = model.ReachByTheProcess
-		r.Why = c.texts("MCP servers that run on this machine (" + strings.Join(names, ", ") + ") run as you, outside the sandbox")
+		r.Why = []redact.Text{pc.text("MCP servers that run on this machine (" + strings.Join(names, ", ") + ") run as you, outside the sandbox")}
 		out = append(out, r)
 	}
-	if n := c.hooks(); n > 0 && (!isEnv || !c.scrubs(cr.Name.String())) {
-		r := reachOf(cr, model.ChannelHooks)
-		r.Via = c.text(plural(n, "hook", "hooks"))
+	if n := pc.hooks(); n > 0 && (!isEnv || !pc.strips(cr.Name.String())) {
+		r := reachOf(pc.agent, cr, model.ChannelHooks)
+		r.Via = pc.text(plural(n, "hook", "hooks"))
 		r.Verdict = model.ReachByTheProcess
-		r.Why = c.texts("hooks run as you, outside the sandbox")
+		r.Why = []redact.Text{pc.text("hooks run as you, outside the sandbox")}
 		out = append(out, r)
 	}
 	return out
 }
 
-func (c *claude) localServers() []string {
+func (pc process) localServers() []string {
 	var out []string
-	for _, srv := range c.p.Servers {
-		if srv.Origin.Agent != model.AgentClaude || srv.Transport != model.TransportStdio {
+	for _, srv := range pc.p.Servers {
+		if srv.Origin.Agent != pc.agent || srv.Transport != model.TransportStdio {
 			continue
 		}
 		if srv.Start == model.StartYes || srv.Start == model.StartMaybe {
@@ -115,10 +139,10 @@ func (c *claude) localServers() []string {
 	return out
 }
 
-func (c *claude) hooks() int {
+func (pc process) hooks() int {
 	n := 0
-	for _, h := range c.p.Hooks {
-		if h.Origin.Agent == model.AgentClaude && h.Origin.InEffect {
+	for _, h := range pc.p.Hooks {
+		if h.Origin.Agent == pc.agent && h.Origin.InEffect {
 			n++
 		}
 	}
@@ -129,16 +153,5 @@ func plural(n int, one, many string) string {
 	if n == 1 {
 		return "1 " + one
 	}
-	return itoa(n) + " " + many
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for ; n > 0; n /= 10 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-	}
-	return string(b)
+	return strconv.Itoa(n) + " " + many
 }

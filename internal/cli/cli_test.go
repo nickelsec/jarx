@@ -629,8 +629,8 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 33 {
-		t.Errorf("--all shows %d findings, want all 33", len(titles))
+	if len(titles) != 35 {
+		t.Errorf("--all shows %d findings, want all 35", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
@@ -645,6 +645,8 @@ func assertAllShowsEverything(t *testing.T, out string) {
 		// The demo's fake credentials: only what credmeta keeps, never the
 		// planted token (assertDemoNoLeak checks that).
 		"credentials (10)\n",
+		// Both agents' verdicts, each under its own heading.
+		"    claude reach\n", "    codex reach\n",
 		"  env_var  GITHUB_TOKEN  via environment  existence only\n",
 		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo.ppk") + "  type: ed25519; passphrase: no\n",
 		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo_locked.ppk") + "  type: ed25519; passphrase: yes\n",
@@ -670,11 +672,11 @@ scanned
 +- 2 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
 +- 7 MCP servers                     1 not started - 1 approval unknown
-+- 6 permission rules - 3 mode settings
++- 6 permission rules - 5 mode settings
 +- 11 credential locations
 \- 6 config files                    1 unknown setting
 
-33 findings   12 HIGH - 16 MED - 5 INFO   changes: first scan
+35 findings   12 HIGH - 18 MED - 5 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -717,7 +719,7 @@ your user config - applies to every project
 +- MED   A skill runs shell before Claude sees it  CLAUDE-003
 |  \- .claude{S}skills{S}release{S}SKILL.md  release runs 1 shell command when invoked
 |
-+- ... 10 more: 6 MED - 4 INFO  (jarx scan --all)
++- ... 11 more: 7 MED - 4 INFO  (jarx scan --all)
 |
 \- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
                1 MCP server - codex 1 MCP server
@@ -745,7 +747,7 @@ your user config - applies to every project
 |  \- .mcp.json  tool delete_notes of notes-helper is marked readOnlyHint, bu...
 |
 +- MED   Credentials are readable without asking  REACH-001
-|  \- ~{S}projects{S}tools  10 credentials (aws ~{S}.aws{S}credentials, aws ~{S}.aws{S}co...
+|  \- ~{S}projects{S}tools  claude: 10 credentials (aws ~{S}.aws{S}credentials, aws ~...
 |
 +- MED   A secret is in a config file or hook  SECRET-002
 |  \- .mcp.json  named_secret, fingerprint FP, written in the file
@@ -755,7 +757,10 @@ your user config - applies to every project
 |
 \- loads here: claude 1 instruction - 4 MCP servers - codex 1 MCP server
 
-~{S}projects{S}notes  codex untrusted - no findings
+~{S}projects{S}notes  codex untrusted
++- MED   Credentials are readable without asking  REACH-001
+|  \- ~{S}projects{S}notes  codex: 8 credentials (aws ~{S}.aws{S}credentials, aws ~{S}....
+|
 \- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
 
 ~{S}projects{S}old  claude unknown - stale, not scanned

@@ -307,7 +307,9 @@ func TestOnlyProjectsClaudeKnowsGetClaudeVerdicts(t *testing.T) {
 	w := newWorld(t, "linux", "")
 	w.proj.Origins = []model.Origin{{Agent: model.AgentCodex, InEffect: true}}
 
-	if ps := w.settle(); len(ps[0].Reach) != 0 {
-		t.Errorf("reach = %+v, want none for a project only Codex knows", ps[0].Reach)
+	for _, r := range w.settle()[0].Reach {
+		if r.Agent == model.AgentClaude {
+			t.Errorf("reach = %+v, want no Claude verdicts for a project only Codex knows", r)
+		}
 	}
 }
