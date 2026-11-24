@@ -379,3 +379,19 @@ func TestOneToolGetsOneFindingPerRule(t *testing.T) {
 		t.Errorf("evidence = %q, want both matches in it", ev)
 	}
 }
+
+func TestACodexMemoryIsCheckedLikeAnInstructionFile(t *testing.T) {
+	// Codex injects its memories into context, so a poisoned one is as
+	// bad as a poisoned AGENTS.md.
+	s := scrubber(t)
+	o := origin(s, model.AgentCodex, "/home/.codex/memories/memory_summary.md")
+	o.Scope = model.ScopeUser
+	p := model.Project{Instructions: []model.Instruction{{
+		Kind: model.InstructionMemory, Load: model.LoadOnDemand, Path: o.File, Read: model.ReadOK,
+		Text: text(s, poisonedFixture(t, "JARX-POISON-001", "CLAUDE.md")), Origin: o,
+	}}}
+
+	if _, ok := find(Analyze(s, []model.Project{p}, nil), "JARX-POISON-001"); !ok {
+		t.Error("a poisoned Codex memory got no POISON-001")
+	}
+}

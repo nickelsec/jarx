@@ -140,7 +140,7 @@ jobs:
             echo "jarx made the network syscalls above during an offline scan"
             exit 1
           fi
-          for planted in demo-not-a-real-token your-api-key-here demoHist4Kq9Zx2Wp7Lr3Tn8Vb-fake; do
+          for planted in demo-not-a-real-token your-api-key-here demoHist4Kq9Zx2Wp7Lr3Tn8Vb-fake demoCodexMem3Jw8Rt5Ky1Pq6Zn-fake demoCodexFile8Hm2Wq4Ls7Xc-fake; do
             if grep -qF "$planted" <<<"$out"; then
               echo "the scan printed the demo's planted secret $planted"
               exit 1
@@ -162,7 +162,7 @@ jobs:
           # it doesn't fit 80 columns.
           grep -qE '(^|   )changes: first scan$' <<<"$out"
           # The snapshot is masked and keeps texts only as hashes.
-          for planted in demo-not-a-real-token your-api-key-here "Deploy with" demoHist4Kq9Zx2Wp7Lr3Tn8Vb-fake; do
+          for planted in demo-not-a-real-token your-api-key-here "Deploy with" demoHist4Kq9Zx2Wp7Lr3Tn8Vb-fake demoCodexMem3Jw8Rt5Ky1Pq6Zn-fake demoCodexFile8Hm2Wq4Ls7Xc-fake; do
             if grep -rqF "$planted" testdata/demo/.jarx-state/snapshots; then
               echo "the snapshot holds the demo's $planted"
               exit 1
@@ -170,7 +170,7 @@ jobs:
           done
           # The history cursor holds read positions, ids, modes and
           # fingerprints, never what the sessions said.
-          for planted in demoHist4Kq9Zx2Wp7Lr3Tn8Vb-fake "deploy the app" "check the logs"; do
+          for planted in demoHist4Kq9Zx2Wp7Lr3Tn8Vb-fake demoCodexMem3Jw8Rt5Ky1Pq6Zn-fake "deploy the app" "check the logs" "ship the app" "set up the notes sync"; do
             if grep -qF "$planted" testdata/demo/.jarx-state/history-cursor.json; then
               echo "the history cursor holds the demo's $planted"
               exit 1

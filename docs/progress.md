@@ -503,7 +503,22 @@ per-channel verdicts and the egress panel.
   `history.jsonl`, and the offline job checks the cursor holds none of it
   - Not covered yet: subagent transcripts and spilled tool results (leaks
     there aren't found), and using sessions anywhere else (item 3)
-- [ ] Codex rollouts (zstd) and sqlite
+    (111721d)
+- [x] Codex rollouts (zstd) and sqlite. Rollouts in `sessions/`, plain and
+  `.jsonl.zst`, merge by session across replays and sub-agents, with
+  their cwd and modes (`approval_policy`, `approvals_reviewer`,
+  `sandbox`). The state DB's `threads` rows add sessions, the memories
+  DB's raw memories and Codex's `history.jsonl` are checked for leaks.
+  SQLite opens read-only in place through `fsys.DBPath`, and a lock is
+  `JARX-HISTORY-003`. Codex memory files (`memories/`, `memories_v2/`)
+  are instructions now, in effect when `features.memories` is on, so the
+  poison and secret rules and the "sees" state cover them. New deps
+  (approved): klauspost/compress and modernc.org/sqlite. A forbidigo rule
+  keeps databases in `internal/history`. `testdata/gendemo` writes the
+  demo's binary fixtures; the demo has a plain and a compressed rollout,
+  both databases, a memory file with a key and a raw memory with a token
+  - Not covered yet: the other Codex databases (`logs`, `goals`, `queue`,
+    `thread_history`), which hold app state or copies of the rollouts
 - [ ] observed modes into reach, "sees" state, session cwds into discover,
   `--no-history`
 

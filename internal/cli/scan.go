@@ -128,6 +128,11 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 func readHistory(c agent.Context, res *discover.Result) (history.Cursor, history.Result) {
 	cursor := history.Load(c.Env)
 	hist := history.Claude(c, &cursor, claude.Adapter{}.ConfigDir(c.Env))
+	cx := history.Codex(c, &cursor, codex.Adapter{}.ConfigDir(c.Env), codex.Adapter{}.SQLiteHome(c))
+	hist.Sessions = append(hist.Sessions, cx.Sessions...)
+	hist.Findings = append(hist.Findings, cx.Findings...)
+	hist.Files += cx.Files
+	hist.Read += cx.Read
 	res.Findings = append(res.Findings, hist.Findings...)
 	return cursor, hist
 }

@@ -49,6 +49,7 @@ type fileState struct {
 
 	Sessions map[string]*sessionState `json:"sessions,omitempty"`
 	Leaks    []leak                   `json:"leaks,omitempty"`
+	Session  string                   `json:"session,omitempty"` // a Codex rollout's session, from its session_meta
 }
 
 type sessionState struct {
@@ -61,6 +62,7 @@ type leak struct {
 	Kind        string `json:"kind"`
 	Fingerprint string `json:"fingerprint"`
 	Line        int    `json:"line"`
+	Row         bool   `json:"row,omitempty"` // Line is a database row, not a line
 }
 
 // Load reads the cursor, without creating the state dir. A missing, broken

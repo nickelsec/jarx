@@ -695,6 +695,53 @@ Findings:
 The scanned block gets a `sessions` row with the session and history
 file counts, how many are undated, and "observed, not documented".
 
+### Codex history
+
+Documented (developers.openai.com/codex, "Config and state locations",
+"History persistence" and the config reference): state lives under
+`CODEX_HOME`, `history.jsonl` holds session transcripts unless
+`history.persistence = "none"`, and `sqlite_home` is the dir of the SQLite
+state DB. The docs give no default for it, so jarx uses `CODEX_HOME`,
+where the files are observed.
+
+Observed, not documented:
+
+- Rollouts at `sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl`, older ones
+  compressed as `.jsonl.zst`. Each line is `{timestamp, ordinal, type,
+  payload}`. `session_meta` names the session (`session_id`, which a
+  sub-agent shares with its parent, else `id`) and its cwd. `turn_context`
+  has `approval_policy` (a value, or a `granular` object), the
+  `approvals_reviewer` and `sandbox_policy.type`. Each is kept as a mode
+  like `approval_policy=never`. A granular policy is kept as
+  `approval_policy=granular`: its flags say which prompts are
+  auto-rejected (config reference), so it doesn't hand approval to
+  anything else.
+- Codex replays a resumed session into a new rollout, so sessions merge by
+  id across files. A `.zst` can't be read from an offset, but Codex
+  compresses a session once it's done, so jarx reads it whole when it's
+  new or changed. The decoder's window and output are capped.
+- `state_N.sqlite` has a `threads` table with each thread's cwd, approval
+  mode, sandbox and time. Those rows add sessions too.
+  `memories_N.sqlite` has the raw memories Codex wrote, checked for leaks
+  by row.
+
+SQLite files are opened through `fsys.DBPath`, which checks them like a
+read (inside the fake home, not a network path, not a credential, and
+the `-wal`, `-shm` and `-journal` files next to them too). A missing table
+or column is "unknown". A lock is `JARX-HISTORY-003` (info).
+
+### Codex memories are instructions
+
+Codex puts its local memories into context
+(learn.chatgpt.com/docs/customization/memories), so jarx treats them like
+any instruction file: the poison and secret rules run on them, a secret
+in one is `JARX-SECRET-001` and shows as "sees" in the credential view,
+and they're listed with what Codex loads. The files are everything in
+`$CODEX_HOME/memories/` (v1) and `memories_v2/` (v2), since the desktop
+app reads both during the migration and the docs don't say which file a
+session reads. They load on demand, and only while `features.memories`
+is on (off by default) and `memories.use_memories` isn't false.
+
 ### Observed formats
 
 The docs don't cover most of this:

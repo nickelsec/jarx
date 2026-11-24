@@ -11,6 +11,11 @@ aproval_policy = "on-request"
 # On native Windows, pin the MXC sandbox: the unelevated fallback doesn't
 # support denied read paths, so the profile's denies would only be a hope.
 # Pinning it also keeps the demo the same on every OS.
+# Local memories are off by default. On here, so the memory file in
+# memories/ goes into context and the secret rules check it.
+[features]
+memories = true
+
 [windows]
 sandbox = "mxc"
 

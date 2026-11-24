@@ -40,7 +40,7 @@ type Result struct {
 // top-level files count: a session's own dir holds subagent transcripts and
 // tool output, which aren't sessions.
 func Claude(c agent.Context, cur *Cursor, dir string) Result {
-	r := reader{c: c, cur: cur}
+	r := reader{c: c, cur: cur, agent: model.AgentClaude}
 	projects := filepath.Join(dir, "projects")
 	folders, _ := c.Files.ReadDir(projects)
 	for _, folder := range folders {
@@ -57,14 +57,26 @@ func Claude(c agent.Context, cur *Cursor, dir string) Result {
 	if info, err := c.Files.Stat(filepath.Join(dir, "history.jsonl")); err == nil && info.Mode().IsRegular() {
 		r.leaksOnly(filepath.Join(dir, "history.jsonl"))
 	}
-	return r.result(model.AgentClaude)
+	return r.result()
 }
 
 type reader struct {
 	c     agent.Context
 	cur   *Cursor
+	agent model.Agent
 	files []string // in the order read
 	res   Result
+	// dbs are what the SQLite files held this scan. They're queried every
+	// scan, not kept in the cursor.
+	dbs map[string]*fileState
+}
+
+// stateOf is a file's results, from the cursor or a database read.
+func (r *reader) stateOf(path string) *fileState {
+	if st, ok := r.dbs[path]; ok {
+		return st
+	}
+	return r.cur.Files[path]
 }
 
 func (r *reader) transcript(path string) {
@@ -95,10 +107,13 @@ func (r *reader) read(path string, st *fileState, fn func(line []byte, n int)) {
 
 // leaks records each secret on the line by type and fingerprint. A likely
 // placeholder isn't a leak.
-func (r *reader) leaks(st *fileState, line []byte, n int) {
+func (r *reader) leaks(st *fileState, line []byte, n int) { r.leaksAt(st, line, n, false) }
+
+// leaksAt is leaks for a line, or for a database row when row is set.
+func (r *reader) leaksAt(st *fileState, line []byte, n int, row bool) {
 	_, found := r.c.Scrub.Scrub(string(line))
 	for _, f := range found {
-		l := leak{Kind: f.Kind, Fingerprint: f.Fingerprint, Line: n}
+		l := leak{Kind: f.Kind, Fingerprint: f.Fingerprint, Line: n, Row: row}
 		if !f.LikelyPlaceholder && !slices.Contains(st.Leaks, l) {
 			st.Leaks = append(st.Leaks, l)
 		}

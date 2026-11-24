@@ -27,11 +27,20 @@ func TooLarge() finding.Rule {
 	}
 }
 
+// Locked is a history database another process has locked.
+func Locked() finding.Rule {
+	return finding.Rule{
+		ID: "JARX-HISTORY-003", Severity: finding.Info, Title: "A history database is locked",
+		Detail: "another process holds a lock on this database, and jarx never waits long or copies it, so it wasn't read this scan",
+		Fix:    "scan again when Codex isn't running",
+	}
+}
+
 // Rules returns history's rules.
-func Rules() []finding.Rule { return []finding.Rule{TranscriptLeak(), TooLarge()} }
+func Rules() []finding.Rule { return []finding.Rule{TranscriptLeak(), TooLarge(), Locked()} }
 
 func (r *reader) origin(path string, line int) model.Origin {
-	return model.Origin{Agent: model.AgentClaude, File: model.NewPath(r.c.Scrub, path), Scope: model.ScopeUser, Line: line, InEffect: true, Observed: true}
+	return model.Origin{Agent: r.agent, File: model.NewPath(r.c.Scrub, path), Scope: model.ScopeUser, Line: line, InEffect: true, Observed: true}
 }
 
 func (r *reader) text(s string) redact.Text {
@@ -42,12 +51,12 @@ func (r *reader) text(s string) redact.Text {
 // result merges every file's sessions by id and turns leaks into findings.
 // Files are read in name order, so a session's own transcript comes before
 // its set-aside copies.
-func (r *reader) result(a model.Agent) Result {
+func (r *reader) result() Result {
 	slices.Sort(r.files)
-	r.sessions(a)
+	r.sessions(r.agent)
 	holders := map[string]map[string]bool{} // fingerprint -> files
 	for _, path := range r.files {
-		for _, l := range r.cur.Files[path].Leaks {
+		for _, l := range r.stateOf(path).Leaks {
 			if holders[l.Fingerprint] == nil {
 				holders[l.Fingerprint] = map[string]bool{}
 			}
@@ -55,12 +64,20 @@ func (r *reader) result(a model.Agent) Result {
 		}
 	}
 	for _, path := range r.files {
-		for _, l := range r.cur.Files[path].Leaks {
-			ev := fmt.Sprintf("line %d: %s REDACTED:%s:%s", l.Line, l.Kind, l.Kind, l.Fingerprint)
+		for _, l := range r.stateOf(path).Leaks {
+			unit := "line"
+			if l.Row {
+				unit = "row"
+			}
+			ev := fmt.Sprintf("%s %d: %s REDACTED:%s:%s", unit, l.Line, l.Kind, l.Kind, l.Fingerprint)
 			if others := len(holders[l.Fingerprint]) - 1; l.Fingerprint != "" && others > 0 {
 				ev += fmt.Sprintf(", also in %d other history %s", others, plural(others, "file", "files"))
 			}
-			r.res.Findings = append(r.res.Findings, TranscriptLeak().New(r.origin(path, l.Line), r.text(ev)))
+			line := l.Line
+			if l.Row {
+				line = 0 // a row number isn't a line in the file
+			}
+			r.res.Findings = append(r.res.Findings, TranscriptLeak().New(r.origin(path, line), r.text(ev)))
 		}
 	}
 	return r.res
@@ -71,7 +88,7 @@ func (r *reader) sessions(a model.Agent) {
 	byID := map[string]*model.Session{}
 	var order []string
 	for _, path := range r.files {
-		st := r.cur.Files[path]
+		st := r.stateOf(path)
 		ids := make([]string, 0, len(st.Sessions))
 		for id := range st.Sessions {
 			ids = append(ids, id)
