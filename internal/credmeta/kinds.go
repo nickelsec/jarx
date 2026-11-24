@@ -23,7 +23,10 @@ const (
 	// KindInlineSecret one written into an MCP server's definition. Both
 	// are known by kind and fingerprint, never by value.
 	KindSecretInText = "secret_in_text"
-	KindInlineSecret = "inline_secret"
+	// KindSecretInHistory is a secret that ended up in one of the agent's
+	// own sessions: it went through the agent, so the agent saw it.
+	KindSecretInHistory = "secret_in_history"
+	KindInlineSecret    = "inline_secret"
 )
 
 const goosWindows = "windows"

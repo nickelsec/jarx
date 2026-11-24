@@ -77,6 +77,16 @@ linters:
         - pattern: ^fsys\.FS\.CredentialFacts$
           pkg: ^github\.com/nickelsec/jarx/internal/fsys$
           msg: "credential: only internal/discover may read credential metadata"
+        # Only internal/history may open a database, and it opens Codex's
+        # SQLite read-only in place. The driver reads files itself, so it
+        # only gets paths fsys.FS.DBPath checked, which is limited the same
+        # way.
+        - pattern: ^sql\.(Open|OpenDB)$
+          pkg: ^database/sql$
+          msg: "database: only internal/history may open a database"
+        - pattern: ^fsys\.FS\.DBPath$
+          pkg: ^github\.com/nickelsec/jarx/internal/fsys$
+          msg: "database: only internal/history may open a database"
         # Only internal/netguard may build HTTP clients, transports or dialers.
         - pattern: ^http\.(Get|Post|Head|PostForm|DefaultClient|DefaultTransport|Client|Transport)$
           pkg: ^net/http$
@@ -191,11 +201,15 @@ linters:
         linters:
           - forbidigo
         text: "credential:"
+      - path: ^internal/history/
+        linters:
+          - forbidigo
+        text: "database:"
       # Tests build fixtures in t.TempDir() and check what got written.
       - path: _test\.go$
         linters:
           - forbidigo
-        text: "(read|write|exec|launch|credential):"
+        text: "(read|write|exec|launch|credential|database):"
 
 # Show every issue on a line. By default golangci-lint keeps one per line,
 # so another linter on the same line (gosec, unused) can hide a forbidigo

@@ -137,7 +137,7 @@ func (p *Printer) projectGroup(v ScanView, g group) {
 	p.emit(head)
 	nodes := p.findingNodes(v, g.findings, proj.Path)
 	// The project's facts that aren't findings, each a line of its own.
-	for _, fact := range []func(model.Project) node{p.loads, p.credentialLine, p.talksTo} {
+	for _, fact := range []func(model.Project) node{p.loads, p.credentialLine, p.talksTo, p.sessionsLine} {
 		if n := fact(proj); n != nil {
 			nodes = append(nodes, n)
 		}

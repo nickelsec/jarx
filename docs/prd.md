@@ -250,6 +250,11 @@ version is past the built-in tools catalog. `--all` lists every install.
   become dashes) can't be turned back into a path without guessing. Session
   history (phase 6) reads the real `cwd` from the transcripts in those folders
   instead, as an observed format.
+- A session cwd is a project of that agent's, with the `history` scope and
+  marked observed, so a dir you only ever ran an agent in shows up and gets
+  verdicts. A cwd inside the agent's own dir (a Codex rollout in
+  `CODEX_HOME`) is its internal work, not a project. Each project keeps
+  the sessions that ran in it.
 - Extra paths given to `jarx scan [path...]` are scanned for that run only.
 - Plus paths the user adds with `jarx setup repo add` or the dashboard.
 - jarx doesn't crawl the whole disk.
@@ -464,8 +469,11 @@ How jarx tells, for each agent that knows the project:
 - **sees** comes from text the agent loads: an instruction file, rule,
   import or output style in effect whose text holds a masked secret. jarx
   never reads credential files, so it names the secret by its kind and
-  fingerprint, not by which file it came from. Session history adds to this
-  in phase 6.
+  fingerprint, not by which file it came from. A secret that ended up in
+  one of the agent's own sessions there (its transcript or rollout) is
+  seen too, as `secret_in_history` with the session's file. Leaks in
+  `history.jsonl` or the Codex memories database aren't tied to a project,
+  so they stay `JARX-HISTORY-001` findings only.
 - **can read** is any channel whose verdict isn't blocked, so approval, a
   bypassable deny and reads by the process all count.
 - **can use** is an MCP server the agent would start that gets the
@@ -614,14 +622,28 @@ in a mode where something other than you approves, then **needs approval**
 also shows as **effectively readable**. The configured verdict stays next to
 it, and the why trail says something like "14 of 20 sessions in bypass".
 
+- Only the agent's own sessions count, so Codex sessions in a dir don't
+  dilute Claude's.
+- Under `--home`, the 30 days end at the newest session in the fake home,
+  not today: a fake home is a snapshot, and its verdicts shouldn't change
+  from week to week. A real scan uses today.
+- Only verdicts that need approval change. A block stays a block.
+- Each project group gets a `sessions:` line, per agent: how many, how
+  many ran in each hands-off mode, and how many are undated (`sessions:
+  claude 2 - 1 in bypassPermissions - codex 1 - 1 with
+  approval_policy=never`). The `--all` reach rows show the observed
+  verdict in parentheses after the configured one.
+
 Modes that count:
 
 - **Claude:** `auto` and `bypassPermissions` count on every channel.
-  `acceptEdits` counts for the edit channel only. `default`, `plan` and
+  `acceptEdits` counts for the edit channel only, so it never changes a
+  verdict on reading a credential. `default`, `plan` and
   `dontAsk` don't count (`dontAsk` denies anything not pre-approved).
 - **Codex:** `approval_policy = never` and `approvals_reviewer = auto_review`
   count on every channel. Per-tool MCP `approval_mode = approve` or `auto`
-  counts for that server's channel only.
+  counts for that server's channel only. A `granular` policy doesn't count:
+  its flags say which prompts are auto-rejected.
 
 ## Session history
 
@@ -650,6 +672,97 @@ Rules:
   [design.md](design.md)).
 - JSONL and zstd files are streamed line by line. Files over 200 MB are
   skipped with an info finding.
+- A session with no timestamp still counts toward the mode tallies, and
+  the line says how many were undated ("14 of 20 sessions in bypass, 2
+  undated").
+- A session that switched modes counts in every mode it ran a prompt in,
+  so one prompt in `bypassPermissions` puts it in "sessions in bypass".
+  jarx doesn't guess in the agent's favor.
+
+### Claude history
+
+Where the files are comes from the docs (code.claude.com, "Manage
+sessions" and "Explore the .claude directory"):
+
+- Transcripts at `~/.claude/projects/<project>/<session-id>.jsonl`, moved
+  by `CLAUDE_CONFIG_DIR`. `<project>` is the cwd with every
+  non-alphanumeric turned into `-` (truncated with a hash past 200
+  characters), so it can't be turned back into a path. The real cwd comes
+  from the records.
+- A session's set-aside copies sit next to it
+  (`<session>.orphaned-<ts>-<suffix>.jsonl`,
+  `<session>.jsonl.superseded-<ts>`). They're the same session, so they
+  merge by id.
+- `<session>/subagents/` and `<session>/tool-results/` aren't sessions,
+  so only top-level files are read.
+- `~/.claude/history.jsonl` holds the prompts you typed, with their
+  project path. It's read for leaks only.
+
+What's inside is observed: a `permission-mode` record with
+`permissionMode` and `sessionId`, and `permissionMode`, `cwd`,
+`sessionId` and `timestamp` on prompts. A mode is kept only when it's
+letters, and a session id only when it's id characters, so the cursor
+can't pick up content through them. A file with no session id takes the
+id from its name. Under `--home`, a cwd maps into the fake home like
+every other agent record.
+
+Findings:
+
+- `JARX-HISTORY-001` (medium): a secret in session history. The evidence
+  is the line, the type and the fingerprint (`line 4: named_secret
+  REDACTED:named_secret:<fingerprint>`), plus how many other history files
+  hold it. A likely placeholder doesn't count.
+- `JARX-HISTORY-002` (info): a history file over 200 MB, not read.
+
+The scanned block gets a `sessions` row with the session and history
+file counts, how many are undated, and "observed, not documented".
+
+### Codex history
+
+Documented (developers.openai.com/codex, "Config and state locations",
+"History persistence" and the config reference): state lives under
+`CODEX_HOME`, `history.jsonl` holds session transcripts unless
+`history.persistence = "none"`, and `sqlite_home` is the dir of the SQLite
+state DB. The docs give no default for it, so jarx uses `CODEX_HOME`,
+where the files are observed.
+
+Observed, not documented:
+
+- Rollouts at `sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl`, older ones
+  compressed as `.jsonl.zst`. Each line is `{timestamp, ordinal, type,
+  payload}`. `session_meta` names the session (`session_id`, which a
+  sub-agent shares with its parent, else `id`) and its cwd. `turn_context`
+  has `approval_policy` (a value, or a `granular` object), the
+  `approvals_reviewer` and `sandbox_policy.type`. Each is kept as a mode
+  like `approval_policy=never`. A granular policy is kept as
+  `approval_policy=granular`: its flags say which prompts are
+  auto-rejected (config reference), so it doesn't hand approval to
+  anything else.
+- Codex replays a resumed session into a new rollout, so sessions merge by
+  id across files. A `.zst` can't be read from an offset, but Codex
+  compresses a session once it's done, so jarx reads it whole when it's
+  new or changed. The decoder's window and output are capped.
+- `state_N.sqlite` has a `threads` table with each thread's cwd, approval
+  mode, sandbox and time. Those rows add sessions too.
+  `memories_N.sqlite` has the raw memories Codex wrote, checked for leaks
+  by row.
+
+SQLite files are opened through `fsys.DBPath`, which checks them like a
+read (inside the fake home, not a network path, not a credential, and
+the `-wal`, `-shm` and `-journal` files next to them too). A missing table
+or column is "unknown". A lock is `JARX-HISTORY-003` (info).
+
+### Codex memories are instructions
+
+Codex puts its local memories into context
+(learn.chatgpt.com/docs/customization/memories), so jarx treats them like
+any instruction file: the poison and secret rules run on them, a secret
+in one is `JARX-SECRET-001` and shows as "sees" in the credential view,
+and they're listed with what Codex loads. The files are everything in
+`$CODEX_HOME/memories/` (v1) and `memories_v2/` (v2), since the desktop
+app reads both during the migration and the docs don't say which file a
+session reads. They load on demand, and only while `features.memories`
+is on (off by default) and `memories.use_memories` isn't false.
 
 ### Observed formats
 

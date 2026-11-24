@@ -487,11 +487,57 @@ per-channel verdicts and the egress panel.
 
 ## Phase 6: History
 
-- [ ] history cursor and Claude transcripts, including the real `cwd` behind
-  each `~/.claude/projects/` folder
-- [ ] Codex rollouts (zstd) and sqlite
-- [ ] observed modes into reach, "sees" state, session cwds into discover,
-  `--no-history`
+- [x] history cursor and Claude transcripts, including the real `cwd` behind
+  each `~/.claude/projects/` folder. `internal/history` streams Claude's
+  top-level transcripts (set-aside copies too) and `history.jsonl`
+  through fsys, line by line, with a 200 MB file cap and a 16 MiB line
+  cap. The cursor in jarx's state dir keeps each file's position and
+  results (session ids, real cwds, modes, last timestamps, leaks as type,
+  fingerprint and line), no content, so later scans read only new lines.
+  Sessions merge by id across replays and copies, and an undated session
+  is kept. Two rules, `JARX-HISTORY-001` (a secret in history) and `002`
+  (a file too large). The scanned block gets a sessions row. jarxdir
+  gained `ReadState`, which never creates the dir. The demo has three
+  fake sessions (a `bypassPermissions` to `default` switch with replay and
+  a pasted token, a plain `default` one, an undated `auto` one) and a
+  `history.jsonl`, and the offline job checks the cursor holds none of it
+  - Not covered yet: subagent transcripts and spilled tool results (leaks
+    there aren't found), and using sessions anywhere else (item 3)
+    (111721d)
+- [x] Codex rollouts (zstd) and sqlite. Rollouts in `sessions/`, plain and
+  `.jsonl.zst`, merge by session across replays and sub-agents, with
+  their cwd and modes (`approval_policy`, `approvals_reviewer`,
+  `sandbox`). The state DB's `threads` rows add sessions, the memories
+  DB's raw memories and Codex's `history.jsonl` are checked for leaks.
+  SQLite opens read-only in place through `fsys.DBPath`, and a lock is
+  `JARX-HISTORY-003`. Codex memory files (`memories/`, `memories_v2/`)
+  are instructions now, in effect when `features.memories` is on, so the
+  poison and secret rules and the "sees" state cover them. New deps
+  (approved): klauspost/compress and modernc.org/sqlite. A forbidigo rule
+  keeps databases in `internal/history`. `testdata/gendemo` writes the
+  demo's binary fixtures; the demo has a plain and a compressed rollout,
+  both databases, a memory file with a key and a raw memory with a token
+  - Not covered yet: the other Codex databases (`logs`, `goals`, `queue`,
+    `thread_history`), which hold app state or copies of the rollouts
+    (449747d)
+- [x] observed modes into reach, "sees" state, session cwds into discover,
+  `--no-history`. History is read before discover, and each session cwd is
+  a project of that agent's (`history` scope, observed), except one inside
+  the agent's own dir. Projects keep their sessions. A secret in a
+  session's own file is one the agent sees (`secret_in_history`).
+  `reach.Observe` marks an agent's needs approval verdicts effectively
+  readable when more than half of its sessions there in the last 30 days
+  ran hands-off (Claude `auto` or `bypassPermissions`, Codex
+  `approval_policy=never` or `approvals_reviewer=auto_review`), undated
+  ones counted and noted. Under `--home` the window ends at the newest
+  session. A `sessions:` line per project, the observed verdict on `--all`
+  reach rows, and `--no-history` skips every reader. `model.Session` keeps
+  its time as Unix seconds, so the model still holds no foreign types. The
+  demo's notes project ran Codex hands-off in both sessions, so its
+  `~/.ssh` verdicts show as effectively readable
+  - Not covered yet: per-tool MCP `approval_mode` (a config value, not an
+    observed one), and leaks in `history.jsonl` or the memories database
+    tied to a project
 
 **Run it:** `jarx scan --home testdata/demo` shows session mode counts and a
 masked leak.

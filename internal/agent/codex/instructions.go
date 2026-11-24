@@ -159,6 +159,7 @@ func (r *chainReader) build(projectDir string) []model.Instruction {
 	if w := r.dir(codexHome(r.v.s.c.Env), model.ScopeUser, []string{nameOverride, nameAgents}); w >= 0 {
 		winners = append(winners, w)
 	}
+	r.memories() // not part of the AGENTS.md chain, so not under its cap
 	names := append([]string{nameOverride, nameAgents}, r.v.fallbacks()...)
 	dirs := r.v.s.projectDirs(projectDir)
 	slices.Reverse(dirs)

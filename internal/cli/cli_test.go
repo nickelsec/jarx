@@ -526,7 +526,10 @@ func TestScanRegistryHasEveryOwnersRules(t *testing.T) {
 	}
 }
 
-var fingerprintRe = regexp.MustCompile(`fingerprint [0-9a-f]{12}`)
+// fingerprintRe matches a fingerprint, whole or cut short by an 80-column
+// line, alone or inside a mask. Fingerprints are keyed per install, so
+// they're random here.
+var fingerprintRe = regexp.MustCompile(`(fingerprint |REDACTED:[a-z_]+:)[0-9a-f]{1,12}`)
 
 // installLineRe is a demo install's finding line. Its path is per OS, as the
 // docs say (claude.exe on Windows, npm's lib/ on Unix), so the line is
@@ -599,7 +602,7 @@ func TestScanDemoHome(t *testing.T) {
 	}
 	_, view, _ := strings.Cut(got.stdout, "\nagents on this machine\n")
 	// Fingerprints are keyed per install, so they're random here.
-	view = fingerprintRe.ReplaceAllString("agents on this machine\n"+view, "fingerprint FP")
+	view = fingerprintRe.ReplaceAllString("agents on this machine\n"+view, "${1}FP")
 	assertDemoInstalls(t, view)
 	view = installLineRe.ReplaceAllString(view, "${1}{install}")
 	if want := strings.ReplaceAll(demoView, "{S}", string(filepath.Separator)); view != want {
@@ -617,6 +620,7 @@ func TestScanDemoHome(t *testing.T) {
 		}
 	}
 	assertAllShowsEverything(t, all.stdout)
+	assertCursorHoldsNoContent(t, demo, string(data))
 	assertDemoNoLeak(t, string(data), got.stdout+got.stderr)
 	assertDemoNoLeak(t, string(data), all.stdout+all.stderr)
 }
@@ -626,7 +630,7 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 	t.Helper()
 	// The demo's planted secrets are made up to dodge push protection, and
 	// jarx still has to mask every one.
-	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here", "demo-0000-not-a-real-token", "demoKey7Qx2Lm9Pz4Rw8Tb1Nc-fake"} {
+	for _, planted := range []string{"demo-not-a-real-token", "your-api-key-here", "demo-0000-not-a-real-token", "demoKey7Qx2Lm9Pz4Rw8Tb1Nc-fake", "demoHist4Kq9Zx2Wp7Lr3Tn8Vb-fake", "demoCodexMem3Jw8Rt5Ky1Pq6Zn-fake", "demoCodexFile8Hm2Wq4Ls7Xc-fake"} {
 		if strings.Contains(out, planted) {
 			t.Errorf("output contains the planted %q", planted)
 		}
@@ -644,8 +648,8 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 39 {
-		t.Errorf("--all shows %d findings, want all 39", len(titles))
+	if len(titles) != 42 {
+		t.Errorf("--all shows %d findings, want all 42", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
@@ -667,6 +671,12 @@ func assertAllShowsEverything(t *testing.T, out string) {
 		"    claude talks to\n      model endpoint  ANTHROPIC_BASE_URL  https://llm-gateway.example.invalid\n",
 		"    codex talks to\n      model endpoint  default  OpenAI's API\n",
 		"A repo tries to set Codex's endpoint  EGRESS-003\n",
+		// The token pasted into a demo session: its line and type, masked.
+		"line 4: named_secret REDACTED:named_secret:",
+		// A raw memory in Codex's memories database, by row.
+		"row 2: named_secret REDACTED:named_secret:",
+		// Codex's memories go into context, so Codex sees the key in one.
+		"    codex credential view\n      secret_in_text  ~" + string(filepath.Separator) + filepath.Join(".codex", "memories", "memory_summary.md") + "  sees: named_secret,",
 		// Every install, found on disk without running either agent: an
 		// npm Codex in an advisory's range, the PATH winner.
 		"  codex  npm  0.38.0  ",
@@ -698,18 +708,22 @@ const demoView = `agents on this machine
 
 scanned
 +- 4 projects                        1 stale, not scanned
-+- 2 instruction files - 2 imports   1 credential file not read
++- 3 instruction files - 2 imports   1 credential file not read
 +- 1 skill - 1 hook - 1 hook script
 +- 7 MCP servers                     1 not started - 1 approval unknown
 +- 6 permission rules - 7 mode settings
 +- 11 credential locations
-\- 6 config files                    1 unknown setting
++- 6 config files                    1 unknown setting
+\- 6 sessions - 9 history files      1 undated - observed, not documented
 
-39 findings   15 HIGH - 18 MED - 6 INFO   changes: first scan
+42 findings   16 HIGH - 20 MED - 6 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
 |  \- ~{S}.claude{S}settings.json  defaultMode is bypassPermissions in user settings
+|
++- HIGH  A secret is in text the agent loads  SECRET-001
+|  \- ~{S}.codex{S}memories{S}memory_summary.md  named_secret, fingerprint FP...
 |
 +- HIGH  A safety setting is misspelled  UNKNOWN-003
 |  \- ~{S}.codex{S}config.toml  aproval_policy looks like a typo of approval_poli...
@@ -719,6 +733,12 @@ your user config - applies to every project
 |
 +- HIGH  Agent version has a high advisory  VERSION-001
 |  \- {install}
+|
++- MED   A secret is in session history  HISTORY-001
+|  \- ~{S}.claude{S}projects{S}-projects-app{S}demo0001-0000-4000-8000-000000000001.j...
+|
++- MED   A secret is in session history  HISTORY-001
+|  \- ~{S}.codex{S}memories_1.sqlite  row 2: named_secret REDACTED:named_secret:FP...
 |
 \- MED   A secret is in a config file or hook  SECRET-002
    \- ~{S}.claude.json  named_secret, fingerprint FP, written in the ...
@@ -757,12 +777,16 @@ your user config - applies to every project
 +- ... 13 more: 8 MED - 5 INFO  (jarx scan --all)
 |
 +- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
-|              1 MCP server - codex 1 MCP server
+|              1 MCP server - codex 1 instruction - 1 MCP server
 |
-+- credentials: claude 1 sees - 12 can read - 1 can use - codex 11 can read
++- credentials: claude 2 sees - 12 can read - 1 can use - codex 1 sees
+|               11 can read
 |
-\- talks to: claude llm-gateway.example.invalid - 1 MCP host - codex default API
-             1 MCP host - web search cached
++- talks to: claude llm-gateway.example.invalid - 1 MCP host - codex default API
+|            1 MCP host - web search cached
+|
+\- sessions: claude 2 - 1 in bypassPermissions - codex 1
+             1 with approval_policy=never
 
 ~{S}projects{S}tools  claude trusted
 +- HIGH  A tool that changes things runs unasked  CAP-001
@@ -795,21 +819,28 @@ your user config - applies to every project
 +- INFO  Points the agent at a credential file  POISON-009
 |  \- .mcp.json  tool save_note of notes-helper: points at ~/.ssh; points at ...
 |
-+- loads here: claude 1 instruction - 4 MCP servers - codex 1 MCP server
++- loads here: claude 1 instruction - 4 MCP servers - codex 1 instruction
+|              1 MCP server
 |
 +- credentials: claude 10 can read - 2 can use
 |
-\- talks to: claude default API - 2 MCP hosts
++- talks to: claude default API - 2 MCP hosts
+|
+\- sessions: claude 1 - 1 in auto - 1 undated
 
 ~{S}projects{S}notes  codex untrusted
 +- MED   Credentials are readable without asking  REACH-001
 |  \- ~{S}projects{S}notes  codex: 8 credentials (aws ~{S}.aws{S}credentials, aws ~{S}....
 |
-+- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
++- loads here: claude 1 instruction - 1 MCP server - codex 1 instruction
+|              1 MCP server
 |
-+- credentials: codex 10 can read
++- credentials: codex 1 sees - 10 can read
 |
-\- talks to: codex default API - 1 MCP host - web search cached
++- talks to: codex default API - 1 MCP host - web search cached
+|
+\- sessions: codex 2 - 1 with approval_policy=never
+             1 with approvals_reviewer=auto_review
 
 ~{S}projects{S}old  claude unknown - stale, not scanned
 
@@ -867,6 +898,66 @@ func assertDemoInstalls(t *testing.T, view string) {
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view =\n%s\nwant the install finding %q", view, want)
+		}
+	}
+}
+
+// assertCursorHoldsNoContent checks the history cursor a demo scan wrote
+// for the demo's secrets and for text from its sessions.
+func assertCursorHoldsNoContent(t *testing.T, demo, env string) {
+	t.Helper()
+	cursor, err := os.ReadFile(filepath.Join(demo, ".jarx-state", "history-cursor.json")) //nolint:gosec // G304: the test's own demo copy
+	if err != nil {
+		t.Fatalf("the demo scan wrote no history cursor: %v", err)
+	}
+	assertDemoNoLeak(t, env, string(cursor))
+	for _, content := range []string{"deploy the app", "check the logs", "ship the app", "set up the notes sync", "make ship"} {
+		if strings.Contains(string(cursor), content) {
+			t.Errorf("the history cursor holds %q from a session", content)
+		}
+	}
+}
+
+func TestNoHistorySkipsEveryHistoryReader(t *testing.T) {
+	demo := demoCopy(t)
+
+	got := run("scan", "--no-history", "--home", demo)
+
+	if got.code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
+	}
+	for _, unwanted := range []string{"HISTORY-00", "sessions", "history file", "secret_in_history"} {
+		if strings.Contains(got.stdout, unwanted) {
+			t.Errorf("output holds %q, want no history with --no-history:\n%s", unwanted, got.stdout)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(demo, ".jarx-state", "history-cursor.json")); !os.IsNotExist(err) {
+		t.Errorf("cursor stat = %v, want no cursor: history wasn't read", err)
+	}
+}
+
+func TestTheDemoShowsObservedModes(t *testing.T) {
+	demo := demoCopy(t)
+
+	all := run("scan", "--all", "--home", demo)
+
+	// Lines wrap at 80 columns, so this checks what each one holds, with
+	// the wrapped part's indent folded away.
+	flat := regexp.MustCompile(`
+ +`).ReplaceAllString(all.stdout, " ")
+	for what, want := range map[string]string{
+		// The app's Claude sessions: one switched to bypassPermissions, one
+		// stayed in default, so 1 of 2 isn't more than half.
+		"the app's sessions": "sessions: claude 2 - 1 in bypassPermissions - codex 1 1 with approval_policy=never",
+		// The notes project: Codex ran both sessions hands-off, so its
+		// needs approval verdicts on ~/.ssh are effectively readable.
+		"the notes sessions":   "sessions: codex 2 - 1 with approval_policy=never 1 with approvals_reviewer=auto_review",
+		"the observed verdict": "needs approval (effectively readable: 2 of 2 sessions with approval_policy=never or approvals_reviewer=auto_review)",
+		// The token pasted into an app session is one Claude saw.
+		"the session's secret": "secret_in_history",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("--all output doesn't show %s (want %q)", what, want)
 		}
 	}
 }

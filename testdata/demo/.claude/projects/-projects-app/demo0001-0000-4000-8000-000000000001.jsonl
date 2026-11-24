@@ -1,0 +1,8 @@
+{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"demo0001-0000-4000-8000-000000000001"}
+{"type":"user","uuid":"u1","sessionId":"demo0001-0000-4000-8000-000000000001","cwd":"/projects/app","timestamp":"2026-11-20T09:00:00.000Z","permissionMode":"bypassPermissions","message":{"role":"user","content":"deploy the app"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"demo0001-0000-4000-8000-000000000001","cwd":"/projects/app","timestamp":"2026-11-20T09:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Which token should the deploy use?"}]}}
+{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"demo0001-0000-4000-8000-000000000001","cwd":"/projects/app","timestamp":"2026-11-20T09:01:00.000Z","permissionMode":"bypassPermissions","message":{"role":"user","content":"use DEPLOY_TOKEN=demoHist4Kq9Zx2Wp7Lr3Tn8Vb-fake"}}
+{"type":"permission-mode","permissionMode":"default","sessionId":"demo0001-0000-4000-8000-000000000001"}
+{"type":"user","uuid":"u3","parentUuid":"u2","sessionId":"demo0001-0000-4000-8000-000000000001","cwd":"/projects/app","timestamp":"2026-11-20T09:05:00.000Z","permissionMode":"default","message":{"role":"user","content":"now just check the logs"}}
+{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"demo0001-0000-4000-8000-000000000001"}
+{"type":"user","uuid":"u1","sessionId":"demo0001-0000-4000-8000-000000000001","cwd":"/projects/app","timestamp":"2026-11-20T09:00:00.000Z","permissionMode":"bypassPermissions","message":{"role":"user","content":"deploy the app"}}

@@ -29,6 +29,7 @@ import (
 	"github.com/nickelsec/jarx/internal/discover"
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/fsys"
+	"github.com/nickelsec/jarx/internal/history"
 	"github.com/nickelsec/jarx/internal/jarxdir"
 	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/netguard"
@@ -39,7 +40,7 @@ import (
 	"github.com/nickelsec/jarx/internal/snapshot"
 )
 
-const scanUsage = `usage: jarx scan [--home <dir>] [--all] [--no-probe] [path...]
+const scanUsage = `usage: jarx scan [--home <dir>] [--all] [--no-probe] [--no-history] [path...]
 
 Scans what Claude Code and Codex can see and reach on this machine.
 
@@ -50,6 +51,7 @@ flags:
   --home <dir>  use <dir> as the home dir instead of the real one
   --all         show every finding in full, and the whole inventory
   --no-probe    don't start or contact any MCP server
+  --no-history  don't read session history
   -h, --help    show this help
 `
 
@@ -60,6 +62,7 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	home := fs.String("home", "", "")
 	all := fs.Bool("all", false, "")
 	noProbe := fs.Bool("no-probe", false, "")
+	noHistory := fs.Bool("no-history", false, "")
 	if code, ok := parse(p, plain, fs, args, scanHelp); !ok {
 		return code
 	}
@@ -85,13 +88,10 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	}
 
 	adapters := []agent.Adapter{claude.Adapter{}, codex.Adapter{}}
-	res := discover.Run(
-		agent.Context{Env: env, Files: files, Scrub: scrub},
-		append(slices.Clone(adapters), discover.Saved(configPath(env), cfg.Repos)),
-		fs.Args(),
-	)
+	c := agent.Context{Env: env, Files: files, Scrub: scrub}
+	res, cursor, hist := discoverAll(c, append(slices.Clone(adapters), discover.Saved(configPath(env), cfg.Repos)), fs.Args(), *noHistory)
 	self, _ := os.Executable() // runs the demo server under --home; probe never uses it elsewhere
-	probe.Run(context.Background(), agent.Context{Env: env, Files: files, Scrub: scrub}, res.Projects, probe.Options{
+	probe.Run(context.Background(), c, res.Projects, probe.Options{
 		Disabled: *noProbe, Client: netguard.New(), Self: self,
 	})
 	findings, err := analyze(scrub, env, res, lastSnapshot(env, files, scrub))
@@ -110,13 +110,74 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string) int {
 		Agents:   agentInfo(env, files, scrub, adapters, res.Installs),
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown,
 		Findings: findings, Rules: rules, All: *all, Credentials: res.Credentials,
+		Sessions: hist.Sessions, HistoryFiles: hist.Files,
 	}
 	view.Since, view.Note, view.Changes, view.SaveErr = saveSnapshot(env, scrub, snapshot.Input{
 		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
 		Credentials: res.Credentials,
 	})
+	// Saved after --all printed the state dir as it was. A cursor that
+	// can't be saved only means the next scan reads more.
+	_ = cursor.Save(env)
 	p.Scan(view)
 	return exitOK
+}
+
+// readHistory reads session history from where the last scan left off.
+// The cursor is saved later, once --all has shown the state dir as it was.
+// With --no-history nothing is read, and the empty cursor saves nothing.
+func readHistory(c agent.Context, off bool) (history.Cursor, history.Result) {
+	if off {
+		return history.Cursor{}, history.Result{}
+	}
+	cursor := history.Load(c.Env)
+	hist := history.Claude(c, &cursor, claude.Adapter{}.ConfigDir(c.Env))
+	cx := history.Codex(c, &cursor, codex.Adapter{}.ConfigDir(c.Env), codex.Adapter{}.SQLiteHome(c))
+	hist.Sessions = append(hist.Sessions, cx.Sessions...)
+	hist.Findings = append(hist.Findings, cx.Findings...)
+	hist.Files += cx.Files
+	hist.Read += cx.Read
+	return cursor, hist
+}
+
+// discoverAll reads history, then finds the projects: the sources' own and
+// the dirs the agents ran in. Each project gets its sessions.
+func discoverAll(c agent.Context, sources []agent.Adapter, extra []string, noHistory bool) (discover.Result, history.Cursor, history.Result) {
+	cursor, hist := readHistory(c, noHistory)
+	res := discover.Run(c, append(sources, historySource(c.Env, hist.Sessions)), extra)
+	res.Findings = append(res.Findings, hist.Findings...)
+	discover.AttachSessions(c.Env.GOOS, res.Projects, hist.Sessions)
+	return res, cursor, hist
+}
+
+// historySource adds the dirs the agents ran in as projects. A session in
+// an agent's own dir is its internal work.
+func historySource(env platform.Env, sessions []model.Session) agent.Adapter {
+	return discover.History(map[model.Agent]string{
+		model.AgentClaude: claude.Adapter{}.ConfigDir(env),
+		model.AgentCodex:  codex.Adapter{}.ConfigDir(env),
+	}, sessions)
+}
+
+// windowEnd is where the 30 days of observed modes end: now, or under
+// --home the newest session there, since a fake home is a snapshot whose
+// verdicts shouldn't change from week to week.
+func windowEnd(env platform.Env, projects []model.Project) time.Time {
+	if !env.Fake() {
+		return time.Now()
+	}
+	var newest time.Time
+	for _, p := range projects {
+		for _, s := range p.Sessions {
+			if t := s.LastTime(); t.After(newest) {
+				newest = t
+			}
+		}
+	}
+	if newest.IsZero() {
+		return time.Now()
+	}
+	return newest
 }
 
 // analyze settles what's in effect and runs every analyzer.
@@ -124,6 +185,7 @@ func analyze(scrub *redact.Scrubber, env platform.Env, res discover.Result, prev
 	perms.Settle(scrub, res.Projects)
 	capability.Settle(scrub, res.Projects) // reads the settled permissions
 	reach.Settle(scrub, env, res.Projects, res.Credentials)
+	reach.Observe(scrub, res.Projects, windowEnd(env, res.Projects))
 	egress.Settle(scrub, env, res.Projects, res.Credentials)
 	permFindings, err := perms.Analyze(scrub, env, res.Projects)
 	if err != nil {
@@ -312,7 +374,7 @@ func plural(n int, one, many string) string {
 // scanRules is every rule a scan can report: finding's own and each
 // adapter's.
 func scanRules() (*finding.Registry, error) {
-	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules(), mcpconfig.Rules(), capability.Rules(), drift.Rules(), reach.Rules(), egress.Rules(), versions.Rules())
+	all := slices.Concat(finding.Rules(), claude.Rules(), codex.Rules(), secrets.Rules(), poison.Rules(), perms.Rules(), unknown.Rules(), mcpconfig.Rules(), capability.Rules(), drift.Rules(), reach.Rules(), egress.Rules(), versions.Rules(), history.Rules())
 	r, err := finding.NewRegistry(all...)
 	if err != nil {
 		return nil, fmt.Errorf("building the rule registry: %w", err)

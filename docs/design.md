@@ -697,6 +697,7 @@ a spot in the code that makes breaking it hard.
 | Nothing raw reaches the terminal or a log | Only `report` writes output. `forbidigo` bans `fmt.Print*`, `fmt.Fprint*`, `os.Stdout`, `os.Stderr`, `print`, `println`, `log` and `log/slog` everywhere else (`cmd/jarx` may use `os.Stdout` and `os.Stderr` only to hand them to `report`). `report` takes values only as `redact.Text`, and its format string has an unexported type, so a string variable won't compile as the format. `report.Error` scrubs error text, since a parser error can quote the line it failed on. The limit: a package handed an `io.Writer` could still call `Write` on it, but only `cmd/jarx` can reach the real stdout and stderr, so that needs a new parameter that review would catch. |
 | Never calls a tool | The `mcp` package has constants only for `server/discover`, `initialize`, `notifications/initialized`, `tools/list`, `prompts/list` and `resources/list`. A `go/ast` test fails if any other method string shows up in the package. |
 | Only the listed network calls | `netguard` is the only package allowed to make a network connection. golangci `forbidigo` bans `http.Get`, `http.Client`, `http.Transport`, `http.DefaultClient`, `net.Dial*`, `net.Dialer`, `tls.Dial*`, `tls.Client`, DNS lookups (`net.Lookup*`, `net.Resolver`), `net/smtp` and `net/rpc` everywhere else. Inside netguard, every connection is checked in the dialer's `Control` hook, after DNS and right before connect, on the exact IP being connected, so DNS rebinding and reconnects can't get past it. A literal IP host is also checked before dialing, because Go rewrites `0.0.0.0`, `::` and an empty host into a dial to the local machine before `Control` sees it. The tests run with a fake DNS server and a test-only rule that refuses any non-loopback connection, so a broken guard fails its tests instead of reaching a real address. |
+| Only history opens a database | `forbidigo` bans `sql.Open`, `sql.OpenDB` and `fsys.FS.DBPath` outside `history`. The SQLite driver opens files itself, so it only gets paths `DBPath` checked (inside the fake home, not a network path, not a credential, and the `-wal`, `-shm` and `-journal` files too), opened with `mode=ro` and `query_only`. |
 | Only discover runs a process | `forbidigo` bans `exec.Command`, `exec.CommandContext`, `exec.LookPath` (it reads the real PATH), `os.StartProcess` and `syscall.Exec`/`ForkExec` outside `discover`, which only runs hardened git. `proc` joins it in phase 4. git is found through `platform.Env`'s PATH, never under `--home`. |
 | Never reads a credential value | `fsys` refuses content reads of any path `credmeta.Location` calls a credential, checked on the path and on where its symlinks lead, so following an `@import` or a symlinked rule can't open one. Stat still works for existence checks. The one way past the guard is `fsys.FS.CredentialFacts`: it hands the file to credmeta's parser for its kind and returns only the kept facts, so no caller ever gets a credential's bytes. A `forbidigo` rule lets only `discover` call it. |
 | Never writes agent config | `fsys` has no write methods. The only writer is `jarxdir`, which is rooted at jarx's state dir (`os.UserConfigDir()/jarx`, or `<home>/.jarx-state` with `--home`) with `os.Root`. `forbidigo` bans `os.WriteFile`, `os.Create`, `os.Mkdir*`, `os.Remove*`, `os.Rename` and friends everywhere else (tests may write fixtures). |
@@ -776,7 +777,14 @@ it) and boughs' `internal/agent/<name>` split. jarx adds the `redact` and
    status.
 4. **history** loads its cursor and reads only new bytes. It records
    permission modes, cwds and secret fingerprints. Codex sqlite is opened
-   read-only in place.
+   read-only in place. The cursor is read without creating the state dir
+   (`jarxdir.ReadState`) and saved at the end of the scan, after `--all`
+   has shown the state dir as it was. With no history and no old cursor,
+   nothing is written. Each file's entry keeps its read position (size,
+   mtime, offset, line count, a hash of the first 4 KB as of the offset)
+   and what was found before it, so a scan that reads only new lines still
+   gives the whole answer. A file that shrank or whose head changed is
+   read again, and a file that's gone takes its results with it.
 5. Each **analyzer** reads the model and emits findings:
    `finding.Finding{ID, Severity, Origin, Evidence redact.Text}`.
 6. With `--llm`, **llm** shows the preview, sends redacted artifacts,
@@ -821,12 +829,14 @@ Where later phases go:
   up with the project counts, so they're never cut off.
 - New things jarx reads (MCP servers and tools, credential locations,
   history sessions) become rows of counts in the scanned block, with
-  skips as notes.
+  skips as notes. History's row is `N sessions - M history files`, noted
+  with how many are undated and "observed, not documented".
 - Findings from new analyzers join the same groups: the project a file is
   in, or the user config group. They never get a block of their own.
 - Per-project facts that aren't findings (an MCP server's tools, a
   credential's reach) are a line in the project's group, like "loads
-  here", and in full under `--all`.
+  here", and in full under `--all`. The lines come in this order: loads
+  here, credentials, talks to, sessions.
 - Full lists and views go in the `--all` inventory, after the findings.
 
 ### Blocks
@@ -959,6 +969,7 @@ demo scan at 80 columns, so a layout change shows up as a test change.
 | `internal/snapshot` | versioned schema, retention, diff | Snapshots and diff |
 | `internal/analyze/drift` | hash diffs, rerun poison on changed tools | Snapshots, Drift |
 | `internal/history` | cursor, jsonl, zstd and read-only sqlite readers (observed formats) | Session history |
+| `testdata/gendemo` | writes the demo home's binary history fixtures (a `.zst` rollout, Codex's SQLite files) with `go run ./testdata/gendemo`. Go ignores `testdata`, so it's never in the build, and it sits outside the demo home so jarx doesn't scan it | Session history |
 | `internal/analyze/versions` | installs, PATH winner, advisory match, catalog age warning | Agent installs and versions |
 | `internal/analyze/unknown` | the unknown settings report | Unknown settings report |
 | `internal/report` | the only output writer: `Out` and `Err` streams that take a literal format and `redact.Text` values, and an `Error` that scrubs error text. Also the scan report (see "Terminal output"), laid out for the terminal's width, colors and charset, and the banner. | CLI |
