@@ -41,6 +41,9 @@ const (
 	ScopePlugin       Scope = "plugin"
 	ScopeCloud        Scope = "cloud"
 	ScopeJarx         Scope = "jarx"
+	// ScopeHistory is a project known only from where the agent ran: a
+	// session's working dir (observed, not documented).
+	ScopeHistory Scope = "history"
 )
 
 // Origin is where one value came from and whether it's in effect.
@@ -167,6 +170,9 @@ type Project struct {
 	// Exposure is the credential view: each credential's states for each
 	// agent, worst first, built from Reach and what the agent loads.
 	Exposure []Exposure
+	// Sessions are the agents' sessions whose working dir is this
+	// project, from history.
+	Sessions []Session
 	// Egress is where each agent talks to from this project: its model
 	// endpoint, auth, proxies, TLS, MCP hosts, network domains and web
 	// search, each with where it was set.
@@ -241,6 +247,9 @@ const (
 	ReachSilent       ReachVerdict = "readable silently"
 	ReachBypassable   ReachVerdict = "readable, deny is bypassable"
 	ReachByTheProcess ReachVerdict = "readable by the process"
+	// ReachEffective is what needs approval turns into when most recent
+	// sessions ran in a mode where something other than you approves.
+	ReachEffective ReachVerdict = "effectively readable"
 )
 
 // Reach is one credential's verdict on one channel for one agent.
@@ -253,6 +262,11 @@ type Reach struct {
 	Via     redact.Text // what on the channel, like which MCP servers
 	Verdict ReachVerdict
 	Why     []redact.Text // the rules, settings and modes that decided it
+	// Observed is what history says on top of Verdict: ReachEffective when
+	// most sessions ran with something else approving, else empty.
+	// ObservedWhy says how many, like "3 of 4 sessions in bypassPermissions".
+	Observed    ReachVerdict
+	ObservedWhy redact.Text
 }
 
 // Transport is how the agent talks to an MCP server.
@@ -660,6 +674,14 @@ type Install struct {
 	OnPath      bool // its command is the first one on PATH
 }
 
+// LastTime is the session's newest record time, zero when undated.
+func (s Session) LastTime() time.Time {
+	if s.LastUnix == 0 {
+		return time.Time{}
+	}
+	return time.Unix(s.LastUnix, 0).UTC()
+}
+
 // Session is one agent session found in history (observed, not
 // documented). Its records replay, so one session can span several files;
 // it's merged by id.
@@ -671,5 +693,10 @@ type Session struct {
 	// Modes are the permission modes the session ran in, each once, in the
 	// order first seen. Claude writes them on mode records and on prompts.
 	Modes []redact.Text
-	Last  time.Time // the newest record's timestamp; zero when undated
+	// LastUnix is the newest record's time, in Unix seconds; 0 when
+	// undated. (Seconds, so the model holds no foreign types.)
+	LastUnix int64
+	// Secrets are the secrets that ended up in the session's own files,
+	// each as kind and fingerprint: the agent saw them.
+	Secrets []redact.Text
 }

@@ -835,7 +835,8 @@ Where later phases go:
   in, or the user config group. They never get a block of their own.
 - Per-project facts that aren't findings (an MCP server's tools, a
   credential's reach) are a line in the project's group, like "loads
-  here", and in full under `--all`.
+  here", and in full under `--all`. The lines come in this order: loads
+  here, credentials, talks to, sessions.
 - Full lists and views go in the `--all` inventory, after the findings.
 
 ### Blocks

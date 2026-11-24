@@ -70,7 +70,11 @@ func (p *Printer) reach(proj model.Project) {
 		if !r.Via.IsZero() {
 			ch += " (" + r.Via.String() + ")"
 		}
-		p.Out.Printf("        %s\n", p.text(ch+"  "+string(r.Verdict)+": "+strings.Join(why, "; ")))
+		verdict := string(r.Verdict)
+		if r.Observed != "" {
+			verdict += " (" + string(r.Observed) + ": " + r.ObservedWhy.String() + ")"
+		}
+		p.Out.Printf("        %s\n", p.text(ch+"  "+verdict+": "+strings.Join(why, "; ")))
 	}
 }
 

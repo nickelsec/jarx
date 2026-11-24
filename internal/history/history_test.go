@@ -98,8 +98,8 @@ func (w *world) sessionLines(res Result) []string {
 			modes = append(modes, m.String())
 		}
 		date := "undated"
-		if !s.Last.IsZero() {
-			date = s.Last.UTC().Format("2006-01-02")
+		if !s.LastTime().IsZero() {
+			date = s.LastTime().Format("2006-01-02")
 		}
 		cwd := s.CWD.Raw()
 		if rel, err := filepath.Rel(w.context().Env.Home, cwd); err == nil && filepath.IsLocal(rel) {
@@ -487,4 +487,25 @@ func jsonString(s string) string {
 		panic(err) // a string always marshals
 	}
 	return string(b)
+}
+
+func TestALeakGoesOnItsSession(t *testing.T) {
+	w := newWorld(t)
+	w.write(".claude/projects/p/s1.jsonl", rec(`"type":"user"`, sid, `"cwd":"/w/p"`)+rec(`"type":"user"`, sid, `"message":"`+token+`"`))
+	w.write(".claude/projects/p/s2.jsonl", rec(`"type":"user"`, `"sessionId":"s2"`, `"cwd":"/w/p"`))
+
+	res := w.scan()
+
+	got := map[string]int{}
+	for _, s := range res.Sessions {
+		got[s.ID.String()] = len(s.Secrets)
+		for _, sec := range s.Secrets {
+			if !strings.HasPrefix(sec.String(), "test_token, fingerprint ") || strings.Contains(sec.String(), token) {
+				t.Errorf("secret = %q, want its kind and fingerprint, never the value", sec)
+			}
+		}
+	}
+	if got["s1"] != 1 || got["s2"] != 0 {
+		t.Errorf("secrets per session = %v, want s1 1 and s2 none", got)
+	}
 }

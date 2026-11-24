@@ -37,9 +37,11 @@ func run() error {
 	if err := database("state_5.sqlite",
 		`create table threads (id text primary key, rollout_path text, cwd text, approval_mode text, sandbox_policy text, updated_at_ms integer, title text)`,
 		// The app session from the plain rollout: same id, so it merges.
-		`insert into threads values ('demo0004-0000-4000-8000-000000000004', '', '/projects/app', 'never', '{"type":"danger-full-access"}', 1763805600000, 'ship it')`,
-		// One that's only in the database.
-		`insert into threads values ('demo0006-0000-4000-8000-000000000006', '', '/projects/notes', 'on-request', '{"type":"workspace-write"}', 1763719200000, 'tidy notes')`,
+		`insert into threads values ('demo0004-0000-4000-8000-000000000004', '', '/projects/app', 'never', '{"type":"danger-full-access"}', 1795341600000, 'ship it')`,
+		// One that's only in the database. Planted: run with no approvals, like
+		// the auto-reviewed rollout, so the notes project's needs approval
+		// verdicts show as effectively readable.
+		`insert into threads values ('demo0006-0000-4000-8000-000000000006', '', '/projects/notes', 'never', '{"type":"workspace-write"}', 1795251600000, 'tidy notes')`,
 	); err != nil {
 		return err
 	}

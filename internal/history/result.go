@@ -102,10 +102,25 @@ func (r *reader) sessions(a model.Agent) {
 				order = append(order, id)
 			}
 			merge(r, s, st.Sessions[id])
+			for _, l := range st.Leaks {
+				r.addSecret(s, l)
+			}
 		}
 	}
 	for _, id := range order {
 		r.res.Sessions = append(r.res.Sessions, *byID[id])
+	}
+}
+
+// addSecret puts a leak from the session's own file on the session, by kind
+// and fingerprint, once.
+func (r *reader) addSecret(s *model.Session, l leak) {
+	what := l.Kind
+	if l.Fingerprint != "" {
+		what += ", fingerprint " + l.Fingerprint
+	}
+	if !slices.ContainsFunc(s.Secrets, func(t redact.Text) bool { return t.String() == what }) {
+		s.Secrets = append(s.Secrets, r.text(what))
 	}
 }
 
@@ -118,8 +133,8 @@ func merge(r *reader, s *model.Session, st *sessionState) {
 			s.Modes = append(s.Modes, r.text(m))
 		}
 	}
-	if st.Last.After(s.Last) {
-		s.Last = st.Last
+	if !st.Last.IsZero() && st.Last.Unix() > s.LastUnix {
+		s.LastUnix = st.Last.Unix()
 	}
 }
 

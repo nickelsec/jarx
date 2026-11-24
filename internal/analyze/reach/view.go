@@ -156,6 +156,14 @@ func seen(s *redact.Scrubber, p model.Project, a model.Agent) []model.Exposure {
 			})
 		}
 	}
+	for _, ses := range p.Sessions {
+		if ses.Agent == a && len(ses.Secrets) > 0 && !done[ses.File.Raw()] {
+			done[ses.File.Raw()] = true
+			out = append(out, model.Exposure{
+				Agent: a, Kind: credmeta.KindSecretInHistory, Path: ses.File, States: []model.CredentialState{model.StateSees}, Via: ses.Secrets,
+			})
+		}
+	}
 	return out
 }
 

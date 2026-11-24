@@ -519,8 +519,25 @@ per-channel verdicts and the egress panel.
   both databases, a memory file with a key and a raw memory with a token
   - Not covered yet: the other Codex databases (`logs`, `goals`, `queue`,
     `thread_history`), which hold app state or copies of the rollouts
-- [ ] observed modes into reach, "sees" state, session cwds into discover,
-  `--no-history`
+    (449747d)
+- [x] observed modes into reach, "sees" state, session cwds into discover,
+  `--no-history`. History is read before discover, and each session cwd is
+  a project of that agent's (`history` scope, observed), except one inside
+  the agent's own dir. Projects keep their sessions. A secret in a
+  session's own file is one the agent sees (`secret_in_history`).
+  `reach.Observe` marks an agent's needs approval verdicts effectively
+  readable when more than half of its sessions there in the last 30 days
+  ran hands-off (Claude `auto` or `bypassPermissions`, Codex
+  `approval_policy=never` or `approvals_reviewer=auto_review`), undated
+  ones counted and noted. Under `--home` the window ends at the newest
+  session. A `sessions:` line per project, the observed verdict on `--all`
+  reach rows, and `--no-history` skips every reader. `model.Session` keeps
+  its time as Unix seconds, so the model still holds no foreign types. The
+  demo's notes project ran Codex hands-off in both sessions, so its
+  `~/.ssh` verdicts show as effectively readable
+  - Not covered yet: per-tool MCP `approval_mode` (a config value, not an
+    observed one), and leaks in `history.jsonl` or the memories database
+    tied to a project
 
 **Run it:** `jarx scan --home testdata/demo` shows session mode counts and a
 masked leak.

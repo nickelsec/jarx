@@ -51,7 +51,7 @@ func countAll(v ScanView) counts {
 	k.creds(v.Credentials)
 	k.c.sessions, k.c.historyFiles = len(v.Sessions), v.HistoryFiles
 	for _, s := range v.Sessions {
-		if s.Last.IsZero() {
+		if s.LastUnix == 0 {
 			k.c.undated++
 		}
 	}

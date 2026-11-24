@@ -779,11 +779,14 @@ your user config - applies to every project
 +- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
 |              1 MCP server - codex 1 instruction - 1 MCP server
 |
-+- credentials: claude 1 sees - 12 can read - 1 can use - codex 1 sees
++- credentials: claude 2 sees - 12 can read - 1 can use - codex 1 sees
 |               11 can read
 |
-\- talks to: claude llm-gateway.example.invalid - 1 MCP host - codex default API
-             1 MCP host - web search cached
++- talks to: claude llm-gateway.example.invalid - 1 MCP host - codex default API
+|            1 MCP host - web search cached
+|
+\- sessions: claude 2 - 1 in bypassPermissions - codex 1
+             1 with approval_policy=never
 
 ~{S}projects{S}tools  claude trusted
 +- HIGH  A tool that changes things runs unasked  CAP-001
@@ -821,7 +824,9 @@ your user config - applies to every project
 |
 +- credentials: claude 10 can read - 2 can use
 |
-\- talks to: claude default API - 2 MCP hosts
++- talks to: claude default API - 2 MCP hosts
+|
+\- sessions: claude 1 - 1 in auto - 1 undated
 
 ~{S}projects{S}notes  codex untrusted
 +- MED   Credentials are readable without asking  REACH-001
@@ -832,7 +837,10 @@ your user config - applies to every project
 |
 +- credentials: codex 1 sees - 10 can read
 |
-\- talks to: codex default API - 1 MCP host - web search cached
++- talks to: codex default API - 1 MCP host - web search cached
+|
+\- sessions: codex 2 - 1 with approval_policy=never
+             1 with approvals_reviewer=auto_review
 
 ~{S}projects{S}old  claude unknown - stale, not scanned
 
@@ -906,6 +914,50 @@ func assertCursorHoldsNoContent(t *testing.T, demo, env string) {
 	for _, content := range []string{"deploy the app", "check the logs", "ship the app", "set up the notes sync", "make ship"} {
 		if strings.Contains(string(cursor), content) {
 			t.Errorf("the history cursor holds %q from a session", content)
+		}
+	}
+}
+
+func TestNoHistorySkipsEveryHistoryReader(t *testing.T) {
+	demo := demoCopy(t)
+
+	got := run("scan", "--no-history", "--home", demo)
+
+	if got.code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", got.code, got.stderr)
+	}
+	for _, unwanted := range []string{"HISTORY-00", "sessions", "history file", "secret_in_history"} {
+		if strings.Contains(got.stdout, unwanted) {
+			t.Errorf("output holds %q, want no history with --no-history:\n%s", unwanted, got.stdout)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(demo, ".jarx-state", "history-cursor.json")); !os.IsNotExist(err) {
+		t.Errorf("cursor stat = %v, want no cursor: history wasn't read", err)
+	}
+}
+
+func TestTheDemoShowsObservedModes(t *testing.T) {
+	demo := demoCopy(t)
+
+	all := run("scan", "--all", "--home", demo)
+
+	// Lines wrap at 80 columns, so this checks what each one holds, with
+	// the wrapped part's indent folded away.
+	flat := regexp.MustCompile(`
+ +`).ReplaceAllString(all.stdout, " ")
+	for what, want := range map[string]string{
+		// The app's Claude sessions: one switched to bypassPermissions, one
+		// stayed in default, so 1 of 2 isn't more than half.
+		"the app's sessions": "sessions: claude 2 - 1 in bypassPermissions - codex 1 1 with approval_policy=never",
+		// The notes project: Codex ran both sessions hands-off, so its
+		// needs approval verdicts on ~/.ssh are effectively readable.
+		"the notes sessions":   "sessions: codex 2 - 1 with approval_policy=never 1 with approvals_reviewer=auto_review",
+		"the observed verdict": "needs approval (effectively readable: 2 of 2 sessions with approval_policy=never or approvals_reviewer=auto_review)",
+		// The token pasted into an app session is one Claude saw.
+		"the session's secret": "secret_in_history",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("--all output doesn't show %s (want %q)", what, want)
 		}
 	}
 }

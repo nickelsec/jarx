@@ -250,6 +250,11 @@ version is past the built-in tools catalog. `--all` lists every install.
   become dashes) can't be turned back into a path without guessing. Session
   history (phase 6) reads the real `cwd` from the transcripts in those folders
   instead, as an observed format.
+- A session cwd is a project of that agent's, with the `history` scope and
+  marked observed, so a dir you only ever ran an agent in shows up and gets
+  verdicts. A cwd inside the agent's own dir (a Codex rollout in
+  `CODEX_HOME`) is its internal work, not a project. Each project keeps
+  the sessions that ran in it.
 - Extra paths given to `jarx scan [path...]` are scanned for that run only.
 - Plus paths the user adds with `jarx setup repo add` or the dashboard.
 - jarx doesn't crawl the whole disk.
@@ -464,8 +469,11 @@ How jarx tells, for each agent that knows the project:
 - **sees** comes from text the agent loads: an instruction file, rule,
   import or output style in effect whose text holds a masked secret. jarx
   never reads credential files, so it names the secret by its kind and
-  fingerprint, not by which file it came from. Session history adds to this
-  in phase 6.
+  fingerprint, not by which file it came from. A secret that ended up in
+  one of the agent's own sessions there (its transcript or rollout) is
+  seen too, as `secret_in_history` with the session's file. Leaks in
+  `history.jsonl` or the Codex memories database aren't tied to a project,
+  so they stay `JARX-HISTORY-001` findings only.
 - **can read** is any channel whose verdict isn't blocked, so approval, a
   bypassable deny and reads by the process all count.
 - **can use** is an MCP server the agent would start that gets the
@@ -614,14 +622,28 @@ in a mode where something other than you approves, then **needs approval**
 also shows as **effectively readable**. The configured verdict stays next to
 it, and the why trail says something like "14 of 20 sessions in bypass".
 
+- Only the agent's own sessions count, so Codex sessions in a dir don't
+  dilute Claude's.
+- Under `--home`, the 30 days end at the newest session in the fake home,
+  not today: a fake home is a snapshot, and its verdicts shouldn't change
+  from week to week. A real scan uses today.
+- Only verdicts that need approval change. A block stays a block.
+- Each project group gets a `sessions:` line, per agent: how many, how
+  many ran in each hands-off mode, and how many are undated (`sessions:
+  claude 2 - 1 in bypassPermissions - codex 1 - 1 with
+  approval_policy=never`). The `--all` reach rows show the observed
+  verdict in parentheses after the configured one.
+
 Modes that count:
 
 - **Claude:** `auto` and `bypassPermissions` count on every channel.
-  `acceptEdits` counts for the edit channel only. `default`, `plan` and
+  `acceptEdits` counts for the edit channel only, so it never changes a
+  verdict on reading a credential. `default`, `plan` and
   `dontAsk` don't count (`dontAsk` denies anything not pre-approved).
 - **Codex:** `approval_policy = never` and `approvals_reviewer = auto_review`
   count on every channel. Per-tool MCP `approval_mode = approve` or `auto`
-  counts for that server's channel only.
+  counts for that server's channel only. A `granular` policy doesn't count:
+  its flags say which prompts are auto-rejected.
 
 ## Session history
 
