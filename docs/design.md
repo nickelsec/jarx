@@ -715,6 +715,51 @@ else.
 Sources: https://zsh.sourceforge.io/Doc/Release/Shell-Builtin-Commands.html,
 https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/read-host
 
+### How the LLM review works
+
+`internal/llm` does the review. `jarx scan --llm` only asks first and
+prints what comes back.
+
+- **What's sent.** `Collect` takes what the agents load in each project:
+  instruction files, rules, imports and output styles, skills, hook
+  commands with the script they run, and the tools of servers that listed
+  them. Only what's in effect and was read goes, and the same artifact in
+  two projects goes once. Memory and agent memory never go, and neither
+  does anything from history, since both are built from past sessions.
+  Prompts and resources a server offers aren't in the PRD's list, so they
+  don't go either. Every text is already masked, and an artifact over 64
+  KiB is cut.
+- **One request per artifact.** A fixed system prompt, then the artifact
+  as JSON (`kind`, `name`, `text`) in its own message, so nothing in it
+  can end the artifact early. The prompt says the artifact is data, not
+  instructions. No `response_format`, no temperature and no token limit
+  are sent, since OpenAI-compatible servers don't all take them.
+- **The reply shape** is `{"findings":[{"severity","title","quote","why"}]}`
+  and nothing else, apart from whitespace or one code fence. Severity is
+  `high` or `medium`, unknown fields are refused, and there are at most 10
+  findings. A reply that doesn't fit gets one retry, with the first reply
+  and what was wrong with it. A second miss is `JARX-LLM-003` (info), never
+  a guess.
+- **The quote check.** A finding stays only when its quote is in the text
+  that was sent, ignoring how spaces and line breaks were reflowed, and
+  the quote is at least 8 characters, so a quote like `a` can't match
+  anything. The rest are dropped and counted. A kept high finding is
+  `JARX-LLM-001` and a medium one `JARX-LLM-002`. The model's words go
+  through the scrubber before they're kept or shown.
+- **The cache.** `llm-cache.json` in the state dir maps a hash of the
+  prompt version, base URL, model and artifact to the findings that were
+  kept. Changing any of those sends the artifact again. Failures are never
+  cached, and the newest 2000 entries are kept. A broken cache or one from
+  a newer jarx is an empty one.
+- **When it stops.** A rejected key or an endpoint jarx can't reach stops
+  the whole review with that error, since every request after it would
+  fail the same way. Any other trouble with one artifact, like an HTTP 500,
+  is a `JARX-LLM-003` for it, and the review goes on.
+- **Time limits.** A chat completion's headers only come once the model
+  has answered, so netguard's usual 10s for headers and 20s per request
+  would cut most reviews off. `netguard.NewLLM` is the same client with
+  120s for both, and only `llm` uses it.
+
 ## Guarantees enforced by structure
 
 The PRD's promises shouldn't depend on everyone remembering them. Each one has
@@ -1033,7 +1078,7 @@ demo scan at 80 columns, so a layout change shows up as a test change.
 | `internal/analyze/perms` | effective permissions with origin and in-effect reason | Effective permissions view |
 | `internal/analyze/mcpconfig` | rules on one MCP server definition: how it's installed and started and what its config hands it. Its own folder because none of the other analyzers is about server configs, and it isn't named `mcp` so it can't be mixed up with the client | MCP supply chain and config |
 | `internal/analyze/reach` | per-channel verdicts, observed modes, credential view | Reachability verdicts, Credential view |
-| `internal/netguard` | the one HTTP client. Blocks link-local, cloud metadata (including AWS over IPv6 and Alibaba's `100.100.100.200`), unspecified addresses and every IPv6 form that wraps a blocked IPv4 (mapped, compatible, NAT64, 6to4; Teredo and local-use NAT64 outright). Separate dial paths by scheme: https goes through the block then TLS, plain http also has to reach loopback. No proxy, no redirects, a 10 MiB body cap, 64 KiB headers, a 20s ceiling, no compression. | Network calls |
+| `internal/netguard` | the one HTTP client. Blocks link-local, cloud metadata (including AWS over IPv6 and Alibaba's `100.100.100.200`), unspecified addresses and every IPv6 form that wraps a blocked IPv4 (mapped, compatible, NAT64, 6to4; Teredo and local-use NAT64 outright). Separate dial paths by scheme: https goes through the block then TLS, plain http also has to reach loopback. No proxy, no redirects, a 10 MiB body cap, 64 KiB headers, a 20s ceiling, no compression. `NewLLM` is the same client with 120s for headers and the whole request, for the LLM review. | Network calls |
 | `internal/proc` | `proc_windows.go` job objects, `proc_unix.go` process groups, baseline env | How a stdio server is started |
 | `internal/mcp` | list-only client: stdio, streamable HTTP, legacy SSE, paging | The MCP client |
 | `internal/probe` | which servers, env expansion rules, concurrency, status | MCP probing, Server status |

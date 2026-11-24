@@ -45,8 +45,11 @@ const (
 	dialTimeout     = 10 * time.Second
 	headerTimeout   = 10 * time.Second
 	defaultDeadline = 20 * time.Second // hard ceiling; the probe's own limit is 15s
-	maxIdleConns    = 4
-	idleTimeout     = 30 * time.Second
+	// llmDeadline is for the LLM review, whose answer only starts once the
+	// model is done, so headers come late too.
+	llmDeadline  = 120 * time.Second
+	maxIdleConns = 4
+	idleTimeout  = 30 * time.Second
 )
 
 // errTestEscape is only used by tests (see withTestSafety).
@@ -56,6 +59,7 @@ type config struct {
 	resolver   *net.Resolver
 	roots      *x509.CertPool
 	timeout    time.Duration
+	headers    time.Duration // how long to wait for response headers
 	testSafety bool
 }
 
@@ -79,9 +83,16 @@ type Client struct {
 	transport *http.Transport
 }
 
+// NewLLM returns a Client for the LLM review: every guard New has, with
+// llmDeadline for the whole request and for the headers, since a chat
+// completion's headers only come once the model has answered.
+func NewLLM() *Client {
+	return New(func(c *config) { c.timeout, c.headers = llmDeadline, llmDeadline })
+}
+
 // New returns a Client.
 func New(opts ...option) *Client {
-	cfg := config{timeout: defaultDeadline}
+	cfg := config{timeout: defaultDeadline, headers: headerTimeout}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -95,7 +106,7 @@ func New(opts ...option) *Client {
 		DialContext:            guardName(plain.DialContext),
 		DialTLSContext:         guardName(tlsDialer.DialContext),
 		ForceAttemptHTTP2:      false,
-		ResponseHeaderTimeout:  headerTimeout,
+		ResponseHeaderTimeout:  cfg.headers,
 		MaxResponseHeaderBytes: maxHeaderBytes,
 		DisableCompression:     true, // no gzip, so nothing inflates behind the body cap
 		MaxIdleConns:           maxIdleConns,

@@ -570,7 +570,7 @@ func (a *asker) ping(c jarxdir.LLM, key llm.Key) (time.Duration, error) {
 		case <-ctx.Done():
 		}
 	}()
-	took, err := llm.Ping(ctx, netguard.New(), c.BaseURL, c.Model, key)
+	took, err := llm.Ping(ctx, netguard.NewLLM(), c.BaseURL, c.Model, key)
 	cancel()
 	select {
 	case <-stopped:

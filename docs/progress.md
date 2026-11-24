@@ -575,9 +575,28 @@ in an env var you name; jarx never stores it.
   - Not covered yet: the questions are tested with a forced terminal and a
     fake ctrl+c, not a real one; endpoints that want the key in a header other than `Authorization:
     Bearer` (like Azure's `api-key`); a fish command for setting the key;
-    and LLM settings in the dashboard (phase 7)
-- [ ] `llm` client: preview, schema check and retry, quote check, cache,
-  canary test
+    and LLM settings in the dashboard (phase 7) (63ded48)
+- [x] `llm` client: preview, schema check and retry, quote check, cache,
+  canary test. `Collect` takes instruction files, skills, hook commands
+  with their scripts and listed tools, in effect and read, once each, and
+  never memory or history; an artifact over 64 KiB is cut. `Review` sends
+  one artifact per request with a fixed prompt, checks the reply's fixed
+  shape, retries once with what was wrong, keeps a finding only when its
+  quote is in what was sent, and masks the model's words. Three rules:
+  `JARX-LLM-001` (high), `002` (medium) and `003` (info, no valid answer).
+  A rejected key or an unreachable endpoint stops the review. `Plan` gives
+  the preview: what would be sent by kind, what's cached, rough tokens and
+  the host. The cache is `llm-cache.json`, keyed on the prompt version,
+  base URL, model and artifact, and never keeps a failure.
+  `netguard.NewLLM` waits 120s, since headers only come once the model is
+  done, and setup's connection test uses it too. The canary test plants
+  two token formats and a secret known only by its name in every slot of
+  every artifact kind, runs a review with a retry, and checks no request
+  body and no finding holds one
+  - Not covered yet: the review isn't wired into `jarx scan` yet (item 3);
+    one request at a time, with no concurrency or backoff on a 429; prompts
+    and resources servers offer; and the token count is bytes over four,
+    not a real tokenizer
 - [ ] `jarx scan --llm`: the preview and the yes or no question
 
 **Run it:** `jarx setup llm`, then `jarx scan --llm --home testdata/demo`.
