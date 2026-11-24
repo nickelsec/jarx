@@ -480,7 +480,7 @@ and flags it.
   - Not covered yet: Homebrew, WinGet, apt, dnf and apk installs and the
     Codex standalone installer, whose docs don't give a location (they show
     up as "unknown" on PATH), a prefix set in `.npmrc`, Claude Desktop and
-    IDE extension advisories, and installs in the snapshot diff
+    IDE extension advisories, and installs in the snapshot diff (bebd378)
 
 **Run it:** `jarx scan --home testdata/demo` shows credential states,
 per-channel verdicts and the egress panel.

@@ -528,6 +528,11 @@ func TestScanRegistryHasEveryOwnersRules(t *testing.T) {
 
 var fingerprintRe = regexp.MustCompile(`fingerprint [0-9a-f]{12}`)
 
+// installLineRe is a demo install's finding line. Its path is per OS, as the
+// docs say (claude.exe on Windows, npm's lib/ on Unix), so the line is
+// checked on its own and stands as {install} in the pinned view.
+var installLineRe = regexp.MustCompile(`(?m)^(\|  \\- )~[/\\](?:\.local[/\\]bin[/\\]claude|npm[/\\]).*$`)
+
 // demoCopy is the demo home copied to a temp dir, so scans can write their
 // state and the test can change files.
 func demoCopy(t *testing.T) string {
@@ -595,6 +600,8 @@ func TestScanDemoHome(t *testing.T) {
 	_, view, _ := strings.Cut(got.stdout, "\nagents on this machine\n")
 	// Fingerprints are keyed per install, so they're random here.
 	view = fingerprintRe.ReplaceAllString("agents on this machine\n"+view, "fingerprint FP")
+	assertDemoInstalls(t, view)
+	view = installLineRe.ReplaceAllString(view, "${1}{install}")
 	if want := strings.ReplaceAll(demoView, "{S}", string(filepath.Separator)); view != want {
 		t.Errorf("view =\n%s\nwant\n%s", view, want)
 	}
@@ -708,10 +715,10 @@ your user config - applies to every project
 |  \- ~{S}.codex{S}config.toml  aproval_policy looks like a typo of approval_poli...
 |
 +- HIGH  Agent version has a high advisory  VERSION-001
-|  \- ~{S}.local{S}bin{S}claude.exe  native 2.1.120 is in 7 advisories: GHSA-5xjx-9...
+|  \- {install}
 |
 +- HIGH  Agent version has a high advisory  VERSION-001
-|  \- ~{S}npm{S}node_modules{S}@openai{S}codex  npm 0.38.0 is in 1 advisory: GHSA-w5f...
+|  \- {install}
 |
 \- MED   A secret is in a config file or hook  SECRET-002
    \- ~{S}.claude.json  named_secret, fingerprint FP, written in the ...
@@ -843,5 +850,23 @@ func TestScanShowsWhatChangedSinceTheLastScan(t *testing.T) {
 	}
 	if strings.Contains(third.stdout, "Also run the linter") {
 		t.Error("the diff shows the file's text, want only that it changed")
+	}
+}
+
+// assertDemoInstalls checks the demo's install findings at this OS's paths.
+func assertDemoInstalls(t *testing.T, view string) {
+	t.Helper()
+	sep := string(filepath.Separator)
+	claude, modules := "claude", filepath.Join("lib", "node_modules")
+	if runtime.GOOS == "windows" {
+		claude, modules = "claude.exe", "node_modules"
+	}
+	for _, want := range []string{
+		"|  \\- ~" + sep + filepath.Join(".local", "bin", claude) + "  native 2.1.120 is in 7 advisories",
+		"|  \\- ~" + sep + filepath.Join("npm", modules, "@openai", "codex") + "  npm 0.38.0 is in 1 advisory",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view =\n%s\nwant the install finding %q", view, want)
+		}
 	}
 }
