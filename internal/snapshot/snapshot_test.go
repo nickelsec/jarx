@@ -368,3 +368,22 @@ func TestCredentialsAreItemsAndTheirFactsAHash(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvVarCredentialsAreKeptByName(t *testing.T) {
+	f := newFixture(t)
+	in := f.input(instructionBody)
+	in.Credentials = []model.Credential{
+		{Kind: "env_var", Name: f.text("GITHUB_TOKEN"), Read: model.ReadExistsOnly},
+		{Kind: "env_var", Name: f.text("NPM_TOKEN"), Read: model.ReadExistsOnly},
+	}
+
+	n := 0
+	for _, it := range Build(f.s, time.Unix(100, 0), in).Items {
+		if it.Kind == KindCredential {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("credential items = %d, want one per env var", n)
+	}
+}

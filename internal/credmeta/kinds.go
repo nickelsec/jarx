@@ -18,6 +18,7 @@ const (
 	KindCodexLogin  = "codex_login"
 	KindEnvFile     = "env_file"
 	KindPrivateKey  = "private_key"
+	KindEnvVar      = "env_var" // a secret-looking env var, by name only
 )
 
 const goosWindows = "windows"

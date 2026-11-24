@@ -52,3 +52,25 @@ func TestKnownToolsAndRulesNotInEffectAreQuiet(t *testing.T) {
 		t.Errorf("findings = %q, want none for a known tool or a file that isn't loaded", ids(got))
 	}
 }
+
+func TestAPathRuleOnAToolThatNeverMatchesIsFlagged(t *testing.T) {
+	f := newFixture(t)
+	for rule, want := range map[string]bool{
+		"Grep(~/.ssh/**)":  true,
+		"Glob(./secrets)":  true,
+		"Write(~/.aws/**)": true,
+		"Grep(*)":          false, // the docs keep * as the whole tool
+		"Grep":             false,
+		"Read(~/.ssh/**)":  false,
+	} {
+		for _, action := range []model.RuleAction{model.RuleDeny, model.RuleAsk} {
+			got := f.analyze(f.project(f.claude(f.claudeRule(action, rule))))
+			if slices.Contains(ids(got), deadPathRule().ID) != want {
+				t.Errorf("%s %s: findings = %q, want PERMS-013 %v", action, rule, ids(got), want)
+			}
+		}
+	}
+	if got := f.analyze(f.project(f.claude(f.claudeRule(model.RuleAllow, "Grep(~/.ssh/**)")))); slices.Contains(ids(got), deadPathRule().ID) {
+		t.Error("an allow that matches nothing grants nothing, so it isn't flagged")
+	}
+}

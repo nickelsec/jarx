@@ -460,6 +460,19 @@ it.
      `allowUnsandboxedCommands` is `false`. So that's **needs approval**, not
      blocked.
    - Commands matching `excludedCommands` always run unsandboxed.
+   - Who approves the unsandboxed retry depends on the mode and the rules
+     (sandboxing docs, "The unsandboxed retry escape hatch"): an allow rule
+     matching the command approves it with no prompt, so `Bash(cat *)`
+     makes a `denyRead` credential **readable silently**; `bypassPermissions`
+     runs it without asking; `dontAsk` denies it; an ask rule for
+     `Bash(dangerouslyDisableSandbox:true)` prompts on every retry, in every
+     mode.
+   - `sandbox.credentials.files` and `envVars` entries can `mask` instead of
+     `deny`: sandboxed commands get a stand-in. jarx counts a masked file as
+     blocked for reading, with a note that the docs say a mask matching
+     nothing leaves the real file readable.
+   - `sandbox.filesystem.disabled` (user or managed settings only) turns off
+     filesystem isolation, so the sandbox doesn't limit reads.
    - Native Windows has no sandbox. There, jarx treats the sandbox as off and
      adds an info finding.
 3. **Env vars:** Bash inherits the env secrets Claude Code has, whatever the
@@ -482,6 +495,23 @@ it.
    legacy sandbox settings and ignores `default_permissions`. jarx resolves
    verdicts the same way and flags it (rule `JARX-CODEX-*`).
 3. **MCP servers and hooks:** **readable by the process**.
+
+### The mode a session starts in
+
+With no `permissions.defaultMode` in effect, an interactive Claude session
+starts in `auto` from 2.1.283 on, unless a settings file sets
+`disableAutoMode` to `"disable"`, which makes it `default` (permission-modes
+docs, "Which mode a session starts in"; `claude -p` and the Agent SDK start
+in `default`). The Claude adapter works out this start mode for every
+project, even one with no settings files, and the verdicts and the
+capability view use it.
+
+In `auto`, a classifier approves instead of you, so jarx counts what would
+need your approval as **readable silently**, and says so in the why trail.
+Two things prompt in every mode, `auto` and `bypassPermissions` included:
+an explicit ask rule, and reads outside the working directories while
+`blockReadsOutsideWorkingDirectories` is on (unsandboxed retries too).
+`dontAsk` turns what would ask into **blocked**.
 
 ### Observed modes change the verdict
 
@@ -730,6 +760,10 @@ Rules that depend on an agent's precedence live in its adapter:
   catalog doesn't know: an allow typo, or a tool newer than the catalog.
   MCP tools (`mcp__...`), old names the docs still accept (`Task` for
   `Agent`) and removed tools aren't flagged.
+- `JARX-PERMS-013` (high): a deny or ask rule that gives `Grep`, `Glob` or
+  `Write` a path. The permissions docs say Claude accepts these but never
+  matches them (it checks against `Read` and `Edit` rules), so the rule
+  protects nothing.
 - Codex `sandbox_mode` silently overriding permission profiles: high when a
   project file does it (a repository turning off your deny rules), medium
   when it's your own layers.
@@ -789,7 +823,12 @@ Rules that depend on an agent's precedence live in its adapter:
 
 ### Exposure, drift and versions
 
-- A credential readable silently on any channel (from the verdicts).
+- `JARX-REACH-001` (medium): credentials the agent can read with its file
+  tools or the shell without asking you, readable silently or past a
+  bypassable deny. One finding per project, naming the credentials.
+- `JARX-REACH-002` (high): a `Read` deny or ask rule for a credential that
+  the shell can get around (`grep -r`, a script) because no sandbox backs
+  it up. On the rule's own file.
 - **Drift:** when a tool description's hash changes, that tool goes through
   the poison rules again. It isn't just flagged as "changed". The poison
   rules run on every tool's current text each scan, so the changed one is

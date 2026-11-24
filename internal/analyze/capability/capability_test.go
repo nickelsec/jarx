@@ -28,6 +28,7 @@ type setup struct {
 	Server         string      `json:"server"`
 	Plugin         string      `json:"plugin"`
 	Mode           string      `json:"mode"`
+	Start          string      `json:"start"` // the start mode with no defaultMode
 	ApprovalPolicy string      `json:"approvalPolicy"`
 	Rules          [][2]string `json:"rules"`     // action and rule
 	Approvals      [][2]string `json:"approvals"` // tool ("" for the server default) and mode
@@ -84,6 +85,10 @@ func build(s *redact.Scrubber, u setup) []model.Project {
 	}
 	if u.Mode != "" {
 		perm.DefaultMode.Layers = []model.Layer[redact.Text]{{Value: text(s, u.Mode), Origin: ro}}
+		perm.StartMode, perm.StartWhy = text(s, u.Mode), text(s, "defaultMode is "+u.Mode)
+	}
+	if u.Start != "" {
+		perm.StartMode, perm.StartWhy = text(s, u.Start), text(s, "the built-in start mode")
 	}
 	if u.ApprovalPolicy != "" {
 		perm.Options = []model.Option{{Key: text(s, "approval_policy"), Setting: model.Setting[redact.Text]{Layers: []model.Layer[redact.Text]{{Value: text(s, u.ApprovalPolicy), Origin: ro}}}}}
@@ -125,6 +130,11 @@ func TestClaudeAccess(t *testing.T) {
 		"double underscore, bare allow doesn't match": {setup{Server: "reports__v2", Tool: "t", Rules: [][2]string{{"allow", "mcp__reports__v2"}}}, model.AccessAsks},
 		"double underscore, wildcard allow matches":   {setup{Server: "reports__v2", Tool: "t", Rules: [][2]string{{"allow", "mcp__reports__v2__*"}}}, model.AccessNoAsk},
 		"double underscore, short deny covers":        {setup{Server: "reports__v2", Tool: "t", Rules: [][2]string{{"deny", "mcp__reports"}}}, model.AccessDenied},
+		// With no defaultMode, a session starts in the agent's built-in mode,
+		// which the adapter works out.
+		"starts in auto with no rule":     {setup{Tool: "search", Start: "auto"}, model.AccessMayNotAsk},
+		"starts in default with no rule":  {setup{Tool: "search", Start: "default"}, model.AccessAsks},
+		"an ask still asks in auto start": {setup{Tool: "search", Start: "auto", Rules: [][2]string{{"ask", "mcp__github__search"}}}, model.AccessAsks},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got, why := access(t, tc.u); got != tc.want || why == "" {

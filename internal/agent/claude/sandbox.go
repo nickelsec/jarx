@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -78,6 +79,97 @@ func (r *layerReader) sandbox(raw json.RawMessage) {
 	if v, ok := sb["filesystem"]; ok {
 		r.sandboxFilesystem(v)
 	}
+	if v, ok := sb["excludedCommands"]; ok && r.readable("sandbox.excludedCommands") {
+		for _, cmd := range r.strings("sandbox.excludedCommands", v) {
+			r.l.rules = append(r.l.rules, model.PermissionRule{
+				Action: model.RuleExclude, Rule: r.scrub("sandbox.excludedCommands " + cmd.String()), Target: cmd, Origin: r.l.origin,
+			})
+		}
+	}
+	if v, ok := sb["credentials"]; ok {
+		r.sandboxCredentials(v)
+	}
+}
+
+// credentialEntry is one sandbox.credentials entry: a file path or an env
+// var name, and its mode.
+type credentialEntry struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+	Mode string `json:"mode"`
+}
+
+// sandboxCredentials reads sandbox.credentials.files and envVars as rules.
+func (r *layerReader) sandboxCredentials(raw json.RawMessage) {
+	var cr map[string]json.RawMessage
+	if json.Unmarshal(raw, &cr) != nil {
+		r.problem("sandbox.credentials isn't a JSON object")
+		return
+	}
+	for _, list := range []string{credFiles, credEnvVars} {
+		key := "sandbox.credentials." + list
+		v, ok := cr[list]
+		if !ok || !r.readable(key) {
+			continue
+		}
+		var entries []credentialEntry
+		if json.Unmarshal(v, &entries) != nil {
+			r.problem(key + " isn't a list of entries, skipped")
+			continue
+		}
+		for _, e := range entries {
+			r.credentialRule(key, list, e)
+		}
+	}
+}
+
+// The two lists in sandbox.credentials.
+const (
+	credFiles   = "files"
+	credEnvVars = "envVars"
+)
+
+// credentialRule adds one sandbox.credentials entry as a rule: deny blocks
+// sandboxed commands, mask hands them a stand-in.
+func (r *layerReader) credentialRule(key, list string, e credentialEntry) {
+	target, what := e.Path, "path"
+	if list == credEnvVars {
+		target, what = e.Name, "name"
+	}
+	action := model.RuleDeny
+	if e.Mode == "mask" {
+		action = model.RuleMask
+	}
+	if target == "" || (e.Mode != "deny" && e.Mode != "mask") {
+		r.problem(key + " has an entry with no " + what + " or an unknown mode, skipped")
+		return
+	}
+	r.l.rules = append(r.l.rules, model.PermissionRule{
+		Action: action, Rule: r.scrub(key + " " + target), Target: r.scrub(target), Origin: r.l.origin,
+	})
+}
+
+// envNames keeps the names in a settings file's env block, in file order.
+// The values never leave this function.
+func (r *layerReader) envNames(raw json.RawMessage) {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if t, err := d.Token(); err != nil || t != json.Delim('{') {
+		r.problem("env isn't a JSON object")
+		return
+	}
+	for d.More() {
+		t, err := d.Token()
+		if err != nil {
+			return
+		}
+		name, _ := t.(string)
+		var skip json.RawMessage
+		if d.Decode(&skip) != nil {
+			return
+		}
+		clear(skip)
+		r.l.env = append(r.l.env, r.scrub(name))
+	}
 }
 
 // sandboxFilesystem reads the sandbox's path lists as rules.
@@ -85,6 +177,9 @@ func (r *layerReader) sandboxFilesystem(raw json.RawMessage) {
 	var fsys map[string]json.RawMessage
 	if json.Unmarshal(raw, &fsys) != nil {
 		return
+	}
+	if v, ok := fsys["disabled"]; ok && r.readable(sandboxPathsPrefix+"disabled") {
+		r.optionValue(sandboxPathsPrefix+"disabled", v)
 	}
 	for _, p := range sandboxPaths {
 		full := sandboxPathsPrefix + p.key
@@ -143,8 +238,8 @@ func (m *merger) settleSandbox() {
 		}
 	}
 	for i := range m.perm.Rules {
-		if strings.HasPrefix(m.perm.Rules[i].Rule.String(), sandboxPathsPrefix) {
-			off(&m.perm.Rules[i].Origin)
+		if strings.HasPrefix(m.perm.Rules[i].Rule.String(), "sandbox.") {
+			off(&m.perm.Rules[i].Origin) // paths, credential entries and excluded commands
 		}
 	}
 	m.sandboxOptionsOff(off)

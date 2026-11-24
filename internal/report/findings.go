@@ -81,7 +81,9 @@ func projectOf(projects []model.Project, file string) int {
 	best, bestLen := -1, 0
 	for i, proj := range projects {
 		dir := proj.Path.Raw()
-		if _, ok := cutPathPrefix(file, dir); ok && len(dir) > bestLen {
+		_, inside := cutPathPrefix(file, dir)
+		// A finding about the project as a whole names its dir.
+		if (inside || strings.EqualFold(file, dir)) && len(dir) > bestLen {
 			best, bestLen = i, len(dir)
 		}
 	}

@@ -10,6 +10,7 @@ package platform
 import (
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -71,6 +72,17 @@ func newEnv(goos, home, stateDir string, environ []string, system, fake bool) En
 func (e Env) Lookup(name string) (string, bool) {
 	value, ok := e.vars[e.normalize(name)]
 	return value, ok
+}
+
+// Names is the names of the env vars that are set, sorted. Callers that
+// only need to know a var exists use this and never see its value.
+func (e Env) Names() []string {
+	out := make([]string, 0, len(e.vars))
+	for k := range e.vars {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // VarCount is how many env vars are set.

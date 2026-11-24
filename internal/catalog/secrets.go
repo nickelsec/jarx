@@ -92,7 +92,22 @@ var bearerRe = regexp.MustCompile(`(?i)\bbearer[ \t]+(?P<secret>[A-Za-z0-9\-._~+
 // namedRe is a value assigned to a name that says it's a secret, like
 // GITHUB_TOKEN=..., "api_key": "..." or password: .... It catches values
 // that have no documented format, like the demo's fakes.
-var namedRe = regexp.MustCompile(`(?i)(?P<name>[A-Za-z0-9_.\-]*(?:api[_-]?key|token|secret|passw(?:or)?d|pwd|private[_-]?key|access[_-]?key|credential)[A-Za-z0-9_\-]*)["']?[ \t]*[:=][ \t]*["']?(?P<secret>[^\s"'` + "`" + `,;{}]+)`)
+var namedRe = regexp.MustCompile(`(?i)(?P<name>` + secretNamePart + `)["']?[ \t]*[:=][ \t]*["']?(?P<secret>[^\s"'` + "`" + `,;{}]+)`)
+
+// secretNamePart is a name that says it holds a secret. It's a pattern,
+// not a credential.
+//
+//nolint:gosec // G101: a regexp for names, not a credential
+const secretNamePart = `[A-Za-z0-9_.\-]*(?:api[_-]?key|token|secret|passw(?:or)?d|pwd|private[_-]?key|access[_-]?key|credential)[A-Za-z0-9_\-]*`
+
+var secretNameRe = regexp.MustCompile(`(?i)^` + secretNamePart + `$`)
+
+// SecretName says whether a name, like an env var's, says it holds a
+// secret: the same rule that masks NAME=value, without the names that are
+// about a secret rather than one (TOKEN_PATH, apiKeyHelper, PWD).
+func SecretName(name string) bool {
+	return secretNameRe.MatchString(name) && !aboutASecret(strings.ToLower(name))
+}
 
 // aboutASecret reports whether a name holds something about a secret
 // rather than the secret itself, like apiKeyHelper, token_path or

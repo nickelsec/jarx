@@ -123,7 +123,7 @@ func (b *builder) credential(dir redact.Text, cr model.Credential) {
 		facts = append(facts, f.Key.String()+"="+f.Value.String())
 	}
 	b.add(Item{
-		Project: dir, Kind: KindCredential, Key: b.join(string(cr.Kind), cr.Path.Text().String()),
+		Project: dir, Kind: KindCredential, Key: b.join(string(cr.Kind), cr.Path.Text().String(), cr.Name.String()),
 		InEffect: true, Value: b.join(string(cr.Read), cr.Via.String()), Hash: hash(b.join(strings.Join(facts, "\x00"))),
 	})
 }

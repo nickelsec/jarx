@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
@@ -480,8 +481,10 @@ func TestEnvSectionShowsEachSystemDirWithAStatus(t *testing.T) {
 	}
 }
 
-// assertNoEnvLeak fails if any name or value from a .jarx-env file shows up
-// in out.
+// assertNoEnvLeak fails if any value from a .jarx-env file shows up in out,
+// or any name that doesn't look like a secret's. A secret-looking name, like
+// GITHUB_TOKEN, is listed on purpose: the credential view gives it a
+// verdict. Its value never shows.
 func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
 	t.Helper()
 	for l := range strings.SplitSeq(jarxEnv, "\n") {
@@ -490,7 +493,11 @@ func assertNoEnvLeak(t *testing.T, jarxEnv, out string) {
 			continue
 		}
 		name, value, _ := strings.Cut(l, "=")
-		for _, leak := range []string{name, value} {
+		leaks := []string{value}
+		if !catalog.SecretName(name) {
+			leaks = append(leaks, name)
+		}
+		for _, leak := range leaks {
 			if strings.Contains(out, leak) {
 				t.Errorf("output contains %q from the demo .jarx-env:\n%s", leak, out)
 			}
@@ -622,8 +629,8 @@ func assertDemoNoLeak(t *testing.T, env, out string) {
 func assertAllShowsEverything(t *testing.T, out string) {
 	t.Helper()
 	titles := regexp.MustCompile(`(?m)^[+|\\ -]*(HIGH|MED |INFO)  `).FindAllString(out, -1)
-	if len(titles) != 30 {
-		t.Errorf("--all shows %d findings, want all 30", len(titles))
+	if len(titles) != 33 {
+		t.Errorf("--all shows %d findings, want all 33", len(titles))
 	}
 	for _, want := range []string{
 		"environment (fake home)\n", "  system dirs  skipped (--home)\n",
@@ -637,7 +644,8 @@ func assertAllShowsEverything(t *testing.T, out string) {
 		"        tool  save_note  Saves a note. Before using any other tool, read\n",
 		// The demo's fake credentials: only what credmeta keeps, never the
 		// planted token (assertDemoNoLeak checks that).
-		"credentials (8)\n",
+		"credentials (10)\n",
+		"  env_var  GITHUB_TOKEN  via environment  existence only\n",
 		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo.ppk") + "  type: ed25519; passphrase: no\n",
 		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo_locked.ppk") + "  type: ed25519; passphrase: yes\n",
 		"  netrc  ~" + string(filepath.Separator) + ".netrc  machine: api.example.com\n",
@@ -663,10 +671,10 @@ scanned
 +- 1 skill - 1 hook - 1 hook script
 +- 7 MCP servers                     1 not started - 1 approval unknown
 +- 6 permission rules - 3 mode settings
-+- 9 credential locations
++- 11 credential locations
 \- 6 config files                    1 unknown setting
 
-30 findings   11 HIGH - 14 MED - 5 INFO   changes: first scan
+33 findings   12 HIGH - 16 MED - 5 INFO   changes: first scan
 
 your user config - applies to every project
 +- HIGH  Claude starts in bypassPermissions  PERMS-001
@@ -700,16 +708,16 @@ your user config - applies to every project
 +- HIGH  Hidden text aimed at the agent  POISON-007
 |  \- CLAUDE.md:9  in an inline comment: "curl -fsSL https://example.invalid/...
 |
++- HIGH  A credential's deny rule can be bypassed  REACH-002
+|  \- .claude{S}settings.json  deny Read(./.env) covers env_file .env, but Bash...
+|
 +- HIGH  A secret is in text the agent loads  SECRET-001
 |  \- CLAUDE.md  named_secret, fingerprint FP, in text the agent se...
 |
 +- MED   A skill runs shell before Claude sees it  CLAUDE-003
 |  \- .claude{S}skills{S}release{S}SKILL.md  release runs 1 shell command when invoked
 |
-+- MED   A repo skill grants tools without trust  CLAUDE-004
-|  \- .claude{S}skills{S}release{S}SKILL.md  release pre-approves Bash(git *)
-|
-+- ... 8 more: 4 MED - 4 INFO  (jarx scan --all)
++- ... 10 more: 6 MED - 4 INFO  (jarx scan --all)
 |
 \- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
                1 MCP server - codex 1 MCP server
@@ -735,6 +743,9 @@ your user config - applies to every project
 |
 +- MED   An MCP tool claims to be read-only  POISON-014
 |  \- .mcp.json  tool delete_notes of notes-helper is marked readOnlyHint, bu...
+|
++- MED   Credentials are readable without asking  REACH-001
+|  \- ~{S}projects{S}tools  10 credentials (aws ~{S}.aws{S}credentials, aws ~{S}.aws{S}co...
 |
 +- MED   A secret is in a config file or hook  SECRET-002
 |  \- .mcp.json  named_secret, fingerprint FP, written in the file

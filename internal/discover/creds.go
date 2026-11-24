@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/nickelsec/jarx/internal/agent"
+	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/credmeta"
 	"github.com/nickelsec/jarx/internal/model"
 	"github.com/nickelsec/jarx/internal/redact"
@@ -33,6 +34,20 @@ func credentials(c agent.Context) []model.Credential {
 		seen[pl.Path] = true
 		out = append(out, atPlace(c, pl)...)
 	}
+	return append(out, envVars(c)...)
+}
+
+// envVars are the env vars whose names say they hold a secret. Only the
+// names are looked at: jarx never reads an env var's value.
+func envVars(c agent.Context) []model.Credential {
+	var out []model.Credential
+	for _, name := range c.Env.Names() {
+		if catalog.SecretName(name) {
+			out = append(out, model.Credential{
+				Kind: credmeta.KindEnvVar, Name: text(c, name), Via: text(c, "environment"), Read: model.ReadExistsOnly,
+			})
+		}
+	}
 	return out
 }
 
@@ -55,7 +70,7 @@ func atPlace(c agent.Context, pl credmeta.Place) []model.Credential {
 // files in, like gcloud's.
 func dirCredential(c agent.Context, pl credmeta.Place) model.Credential {
 	return model.Credential{
-		Kind: model.CredentialKind(pl.Kind), Path: model.NewPath(c.Scrub, pl.Path), Via: text(c, pl.Via), Read: model.ReadExistsOnly,
+		Kind: model.CredentialKind(pl.Kind), Path: model.NewPath(c.Scrub, pl.Path), Dir: true, Via: text(c, pl.Via), Read: model.ReadExistsOnly,
 		Facts: []model.Pair{{Key: text(c, "files"), Value: text(c, strconv.Itoa(len(filesIn(c, pl.Path))))}},
 	}
 }

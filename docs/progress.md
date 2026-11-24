@@ -378,8 +378,31 @@ and flags it.
     jarx knows" in the verdicts (items 3 to 5), tool names in skill
     `allowed-tools` and hook matchers (they only grant, so a typo is the
     safe direction), and whether Codex's `view_image`, `update_plan` and web
-    search ask first, which the docs don't say
-- [ ] `analyze/reach`: Claude channels and verdicts
+    search ask first, which the docs don't say (dcc5253)
+- [x] `analyze/reach`: Claude channels and verdicts. Per project, every
+  credential gets a verdict on Claude's file tools, shell, local MCP servers
+  and hooks, with a why trail naming the rule, setting or mode. The doc
+  check found that with no `defaultMode` a session starts in `auto` (2.1.283
+  and later), so the Claude adapter now works out a start mode for every
+  project and capability uses it too; auto counts as something other than
+  you approving. Ask rules and `blockReadsOutsideWorkingDirectories` prompt
+  in every mode, an allow approves the unsandboxed retry, and the sandbox
+  path prefixes (`./` is `~/.claude` in user settings) are a shared
+  `perms.SandboxPath`. The adapter now reads
+  `blockReadsOutsideWorkingDirectories`, `sandbox.filesystem.disabled`,
+  `sandbox.excludedCommands`, `sandbox.credentials` deny and mask entries,
+  and the names (never values) in a settings `env` block. Secret-looking env
+  vars are credentials by name (`catalog.SecretName`, the masker's own name
+  rule). Three rules: `JARX-REACH-001`, `JARX-REACH-002` and
+  `JARX-PERMS-013`. The verdicts are listed per project under `--all`, and a
+  finding about a whole project now sits in that project's group
+  - Not covered yet: observed modes from history (phase 6), the per-project
+    reach line and the credential view's states (item 5), "not reachable by
+    the tools jarx knows" once installs are known (item 7), PowerShell's
+    own read-only set (it's treated like Bash), what an excluded command
+    reads, a settings env block's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` (jarx
+    doesn't read env values there, so only the real env counts), the
+    sandbox's Linux wildcard limits, and Codex (item 4)
 - [ ] `analyze/reach`: Codex channels and the legacy `sandbox_mode` switch
 - [ ] credential view
 - [ ] `analyze/egress`: where your agent talks to

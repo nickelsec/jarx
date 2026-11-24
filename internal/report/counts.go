@@ -56,7 +56,7 @@ func countAll(v ScanView) counts {
 // creds counts credential locations, once per path.
 func (k *counter) creds(cs []model.Credential) {
 	for _, cr := range cs {
-		if k.once("credential", cr.Path.Raw()) {
+		if k.once("credential", string(cr.Kind), cr.Path.Raw(), cr.Name.String()) {
 			k.c.creds++
 			if cr.Read == model.ReadFailed {
 				k.c.credsFailed++

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nickelsec/jarx/internal/model"
+	"github.com/nickelsec/jarx/internal/redact"
 )
 
 func (f scanFixture) cred(kind, rel string, read model.ReadStatus, via string, facts ...[2]string) model.Credential {
@@ -54,6 +55,57 @@ func TestTheInventoryListsEachCredentialWithItsFacts(t *testing.T) {
 		"  gh  " + filepath.FromSlash("~/cfg/gh/hosts.yml") + "  via GH_CONFIG_DIR  host github.com: user octocat, no token in the file\n",
 		"  claude_login  " + filepath.FromSlash("~/.claude/.credentials.json") + "  existence only\n",
 		"    credentials\n      env_file  " + filepath.FromSlash("~/app/.env") + "  key: API_KEY; key: DB_URL\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output =\n%s\nwant it to contain %q", out, want)
+		}
+	}
+}
+
+func TestAnEnvVarCredentialShowsItsName(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.All = true
+	v.Credentials = []model.Credential{{Kind: "env_var", Name: f.text("GITHUB_TOKEN"), Via: f.text("environment"), Read: model.ReadExistsOnly}}
+
+	if out := render(Style{Width: 200}, v); !strings.Contains(out, "  env_var  GITHUB_TOKEN  via environment  existence only\n") {
+		t.Errorf("output =\n%s\nwant the env var by name", out)
+	}
+}
+
+func TestEachEnvVarCountsAsALocation(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.Credentials = []model.Credential{
+		{Kind: "env_var", Name: f.text("GITHUB_TOKEN"), Read: model.ReadExistsOnly},
+		{Kind: "env_var", Name: f.text("NPM_TOKEN"), Read: model.ReadExistsOnly},
+	}
+
+	if out := render(Style{Width: 80}, v); !strings.Contains(out, "+- 2 credential locations\n") {
+		t.Errorf("output =\n%s\nwant both env vars counted", out)
+	}
+}
+
+func TestTheInventoryListsEachProjectsReach(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.All = true
+	v.Projects[0].Reach = []model.Reach{
+		{Agent: model.AgentClaude, Kind: "aws", Path: f.path(".aws/credentials"), Channel: model.ChannelFileTools, Verdict: model.ReachApproval,
+			Why: []redact.Text{f.text("it's outside the working dirs, where Read asks")}},
+		{Agent: model.AgentClaude, Kind: "aws", Path: f.path(".aws/credentials"), Channel: model.ChannelShell, Verdict: model.ReachSilent,
+			Why: []redact.Text{f.text("cat and grep are in the read-only set"), f.text("the sandbox is off")}},
+		{Agent: model.AgentClaude, Kind: "env_var", Name: f.text("GITHUB_TOKEN"), Channel: model.ChannelShell, Verdict: model.ReachSilent,
+			Why: []redact.Text{f.text("Bash inherits Claude's env")}},
+	}
+
+	out := render(Style{Width: 200}, v)
+
+	for _, want := range []string{
+		"    claude reach\n      aws  " + filepath.FromSlash("~/.aws/credentials") + "\n" +
+			"        file tools  needs approval: it's outside the working dirs, where Read asks\n" +
+			"        shell  readable silently: cat and grep are in the read-only set; the sandbox is off\n",
+		"      env_var  GITHUB_TOKEN\n        shell  readable silently: Bash inherits Claude's env\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output =\n%s\nwant it to contain %q", out, want)

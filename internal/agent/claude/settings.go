@@ -31,11 +31,12 @@ var _ agent.SettingsReader = Adapter{}
 // The mode locks. The settings reference says both work from any scope and
 // take "disable"; across sources the strictest value wins.
 const (
-	lockBypass = "disableBypassPermissionsMode"
-	lockAuto   = "disableAutoMode"
-	lockOn     = "disable"
-	modeBypass = "bypassPermissions"
-	modeAuto   = "auto"
+	lockBypass  = "disableBypassPermissionsMode"
+	lockAuto    = "disableAutoMode"
+	lockOn      = "disable"
+	modeBypass  = "bypassPermissions"
+	modeAuto    = "auto"
+	modeDefault = "default"
 )
 
 // lock is one mode lock as a file sets it.
@@ -54,8 +55,9 @@ type layer struct {
 	modeOff     redact.Text // set when only this layer's defaultMode is ignored
 	rules       []model.PermissionRule
 	dirs        []redact.Text
-	locks       []lock   // disableBypassPermissionsMode and disableAutoMode
-	options     []option // sandbox switches and enableAllProjectMcpServers
+	env         []redact.Text // names in the env block, in file order
+	locks       []lock        // disableBypassPermissionsMode and disableAutoMode
+	options     []option      // sandbox switches and enableAllProjectMcpServers
 
 	// broken means the file exists but couldn't be read or parsed. A broken
 	// managed document still counts as present.
@@ -235,10 +237,11 @@ func permissions(c agent.Context, p model.Project, layers []*layer, managedOnly 
 		}
 	}
 	m.settleModes()
+	m.settleStart()
 	m.settleSandbox()
-	ok := len(m.perm.DefaultMode.Layers) > 0 || len(m.perm.Rules) > 0 || len(m.perm.AdditionalDirectories) > 0 ||
-		len(m.perm.Options) > 0
-	return m.perm, ok
+	// Every project has a start mode, even with no settings at all, so the
+	// permissions are always there.
+	return m.perm, true
 }
 
 // merger builds one project's Permissions from its layers.
@@ -261,6 +264,9 @@ func (m *merger) add(l *layer) {
 	for _, d := range l.dirs {
 		m.perm.AdditionalDirectories = append(m.perm.AdditionalDirectories,
 			model.Layer[redact.Text]{Value: d, Origin: m.gate(l.origin)})
+	}
+	for _, name := range l.env {
+		m.perm.Env = append(m.perm.Env, model.Layer[redact.Text]{Value: name, Origin: m.gate(l.origin)})
 	}
 	for _, lk := range l.locks {
 		m.addLock(l, lk)
@@ -347,6 +353,25 @@ func (m *merger) settleModes() {
 		}
 		won = won || o.InEffect || stopped
 	}
+}
+
+// settleStart works out the mode a new interactive session starts in
+// (permission-modes, "Which mode a session starts in"): the defaultMode in
+// effect, else the built-in default, which is auto from 2.1.283 unless a
+// file sets disableAutoMode to disable. claude -p starts in default.
+func (m *merger) settleStart() {
+	if eff, ok := m.perm.DefaultMode.Effective(); ok {
+		m.perm.StartMode = eff.Value
+		m.perm.StartWhy = m.why("defaultMode is " + eff.Value.String() + " in " + eff.Origin.File.Text().String())
+		return
+	}
+	if f := m.locked[lockAuto]; f != "" {
+		m.perm.StartMode = m.why(modeDefault)
+		m.perm.StartWhy = m.why("no defaultMode in effect, and disableAutoMode is set to disable in " + f)
+		return
+	}
+	m.perm.StartMode = m.why(modeAuto)
+	m.perm.StartWhy = m.why("no defaultMode in effect, and Claude 2.1.283 and later start interactive sessions in auto (claude -p starts in default)")
 }
 
 // lockedOut says why a lock stops mode, or "".
@@ -469,16 +494,30 @@ func (r *layerReader) permission(sub string, raw json.RawMessage) {
 		}
 	case "additionalDirectories":
 		r.l.dirs = append(r.l.dirs, r.strings(full, raw)...)
+	case "blockReadsOutsideWorkingDirectories":
+		r.permissionOption(full, raw, allowed)
 	case lockBypass, lockAuto:
 		r.lock(sub, raw)
 	case "defaultMode":
-		var mode string
-		if err := json.Unmarshal(raw, &mode); err != nil {
-			r.problem(full + " isn't a string, skipped")
-			return
-		}
-		t := r.scrub(mode)
-		r.l.defaultMode = &t
+		r.defaultModeValue(full, raw)
+	}
+}
+
+// defaultModeValue keeps permissions.defaultMode, when it's a string.
+func (r *layerReader) defaultModeValue(full string, raw json.RawMessage) {
+	var mode string
+	if err := json.Unmarshal(raw, &mode); err != nil {
+		r.problem(full + " isn't a string, skipped")
+		return
+	}
+	t := r.scrub(mode)
+	r.l.defaultMode = &t
+}
+
+// permissionOption keeps a permissions switch, when this file may set it.
+func (r *layerReader) permissionOption(full string, raw json.RawMessage, allowed bool) {
+	if allowed {
+		r.optionValue(full, raw)
 	}
 }
 
@@ -493,6 +532,8 @@ func (r *layerReader) allowedKey(key string, raw json.RawMessage) {
 		r.lock(key, raw) // also accepted at the top level
 	case "sandbox":
 		r.sandbox(raw)
+	case "env":
+		r.envNames(raw)
 	case keyAllProjectMCP:
 		r.optionValue(key, raw)
 	}

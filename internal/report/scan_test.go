@@ -352,3 +352,16 @@ func TestTheInventoryShowsWhetherTheAgentCanCallEachTool(t *testing.T) {
 		t.Error("a prompt has no tool access to show")
 	}
 }
+
+func TestAFindingAboutTheProjectItselfIsInItsGroup(t *testing.T) {
+	f := newScanFixture(t)
+	fs := []finding.Finding{{RuleID: "JARX-TEST-001", Severity: finding.Info, Origin: model.Origin{File: f.path("app")}, Evidence: f.text("about the whole project")}}
+	v := f.view(fs...)
+
+	out := render(Style{Width: 80}, v)
+
+	user, proj, _ := strings.Cut(out, "app  claude trusted")
+	if strings.Contains(user, "about the whole project") || !strings.Contains(proj, "about the whole project") {
+		t.Errorf("output =\n%s\nwant the finding in the project's group", out)
+	}
+}

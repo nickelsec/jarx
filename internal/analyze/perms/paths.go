@@ -113,3 +113,31 @@ func covered(samples []credmeta.Sample, m matcher) []credmeta.Sample {
 	}
 	return out
 }
+
+// ClaudePath resolves a Claude Read or Edit rule's pattern, for the
+// analyzers that check what a rule covers.
+func ClaudePath(env platform.Env, project string, o model.Origin, pattern string) func(string) bool {
+	return claudeMatcher(env, project, o, pattern)
+}
+
+// SandboxPath resolves a Claude sandbox path (sandbox.filesystem lists and
+// credentials.files) by its prefix, from the settings reference: / and //
+// are absolute, ~/ is the home, and ./ or no prefix is the project root for
+// project settings and ~/.claude for user settings.
+func SandboxPath(env platform.Env, project string, o model.Origin, p string) func(string) bool {
+	switch {
+	case p == "":
+		return func(string) bool { return false }
+	case strings.HasPrefix(p, "//"):
+		return globMatcher(p[1:])
+	case strings.HasPrefix(p, "/"), filepath.IsAbs(p):
+		return globMatcher(p)
+	case p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`):
+		return globMatcher(env.Home + p[1:])
+	}
+	base := project
+	if o.Scope == model.ScopeUser {
+		base = filepath.Join(env.Home, ".claude")
+	}
+	return globMatcher(filepath.Join(base, strings.TrimPrefix(p, "./")))
+}

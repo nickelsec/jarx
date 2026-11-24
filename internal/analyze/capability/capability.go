@@ -145,17 +145,21 @@ func firstRule(perm model.Permissions, action model.RuleAction, applies func(*mo
 
 // claudeMode is the access the default mode gives a tool no rule covers.
 func claudeMode(perm model.Permissions) (model.ToolAccess, string) {
-	mode := ""
-	if l, ok := perm.DefaultMode.Effective(); ok {
-		mode = l.Value.String()
+	// The start mode is the defaultMode in effect, else Claude's built-in
+	// one, which the adapter worked out. Without one, the defaultMode.
+	mode, why := perm.StartMode.String(), perm.StartWhy.String()
+	if mode == "" {
+		if l, ok := perm.DefaultMode.Effective(); ok {
+			mode, why = l.Value.String(), "defaultMode is "+l.Value.String()
+		}
 	}
 	switch mode {
 	case "bypassPermissions":
-		return model.AccessNoAsk, "the default mode is bypassPermissions"
+		return model.AccessNoAsk, "the session starts in bypassPermissions: " + why
 	case "dontAsk":
-		return model.AccessDenied, "dontAsk mode denies tools no rule allows"
+		return model.AccessDenied, "dontAsk mode denies tools no rule allows: " + why
 	case modeAuto:
-		return model.AccessMayNotAsk, "auto mode: a classifier decides instead of asking you"
+		return model.AccessMayNotAsk, "auto mode, where a classifier decides instead of asking you: " + why
 	}
 	return model.AccessAsks, "no rule allows it, so Claude asks"
 }

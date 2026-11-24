@@ -1,6 +1,8 @@
 package perms
 
 import (
+	"slices"
+
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/model"
 )
@@ -12,6 +14,38 @@ func misspelledTool() finding.Rule {
 	return rule("JARX-PERMS-011", finding.High, "a deny or ask rule's tool is misspelled",
 		"a deny or ask rule names a tool that doesn't exist but is close to one that does, so the protection it was meant to add isn't on",
 		"fix the tool name, then check the rule applies")
+}
+
+func deadPathRule() finding.Rule {
+	return rule("JARX-PERMS-013", finding.High, "a deny or ask path rule never matches",
+		"a deny or ask rule gives Grep, Glob or Write a path, but Claude checks reads and edits against Read and Edit rules only, so this rule protects nothing",
+		"write it as a Read rule for reads, or an Edit rule for writes")
+}
+
+// deadPathTools take a path in a rule that Claude accepts but never matches
+// (permissions docs: Write(path), Glob(path) and Grep(path) rules don't
+// match).
+//
+//nolint:gochecknoglobals // fixed list, read only
+var deadPathTools = []string{"Grep", "Glob", toolWrite}
+
+// toolWrite is Claude's Write tool, whose path rules never match.
+const toolWrite = "Write"
+
+// deadPath flags a deny or ask that names a path for one of those tools.
+func (a *analysis) deadPath(r model.PermissionRule) {
+	if r.Action != model.RuleDeny && r.Action != model.RuleAsk {
+		return
+	}
+	tool, pattern := ruleTool(r.Rule.String())
+	if !slices.Contains(deadPathTools, tool) || pattern == "" || pattern == "*" {
+		return
+	}
+	want := "Read"
+	if tool == toolWrite {
+		want = "Edit"
+	}
+	a.add(deadPathRule(), r.Origin, string(r.Action)+" "+r.Rule.String()+" never matches; write "+want+"("+pattern+") instead")
 }
 
 func unknownTool() finding.Rule {

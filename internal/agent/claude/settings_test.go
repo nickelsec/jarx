@@ -314,14 +314,18 @@ func TestBadValuesAreSkippedWithAFinding(t *testing.T) {
 	}
 }
 
-func TestNoSettingsFilesMeansNoPermissions(t *testing.T) {
+func TestNoSettingsFilesMeansOnlyTheStartMode(t *testing.T) {
 	c := fakeHome(t, nil)
 	ps := []model.Project{project(c, model.TrustTrusted)}
 
 	unknown, fs := Adapter{}.Settings(c, ps)
 
-	if len(ps[0].Permissions) != 0 || len(unknown) != 0 || len(fs) != 0 {
-		t.Errorf("Settings() = %+v, %+v, %+v; want nothing", ps[0].Permissions, unknown, fs)
+	if len(ps[0].Permissions) != 1 || len(unknown) != 0 || len(fs) != 0 {
+		t.Fatalf("Settings() = %+v, %+v, %+v; want one Claude permissions entry and nothing else", ps[0].Permissions, unknown, fs)
+	}
+	perm := ps[0].Permissions[0]
+	if len(perm.Rules) != 0 || len(perm.DefaultMode.Layers) != 0 || len(perm.Options) != 0 || len(perm.Env) != 0 || perm.StartMode.String() != "auto" {
+		t.Errorf("permissions = %+v, want no rules or layers, and a session that starts in auto", perm)
 	}
 }
 

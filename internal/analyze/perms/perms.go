@@ -104,7 +104,7 @@ func Rules() []finding.Rule {
 	return []finding.Rule{
 		bypassMode(), noSandbox(), neverAsk(), everyCommand(), credentialGrant(),
 		allProjectServers(), retiredPolicy(), runsAnything(), runsRepoCode(), hasEscape(),
-		misspelledTool(), unknownTool(),
+		misspelledTool(), unknownTool(), deadPathRule(),
 	}
 }
 
@@ -114,7 +114,7 @@ func commandTool(t string) bool { return t == "Bash" || t == "PowerShell" }
 // fileTool is a Claude tool whose rules name paths it reads or writes.
 func fileTool(t string) bool {
 	switch t {
-	case "Read", "Edit", "Write", "MultiEdit", "NotebookEdit":
+	case "Read", "Edit", toolWrite, "MultiEdit", "NotebookEdit":
 		return true
 	}
 	return false
@@ -259,9 +259,10 @@ func (a *analysis) claudeRules(p model.Project, perm model.Permissions, samples 
 			continue
 		}
 		a.toolName(r)
+		a.deadPath(r)
 		switch {
 		case isSandboxRule(r) && (r.Action == model.RuleRead || r.Action == model.RuleWrite):
-			a.grant(pathMatcher(a.env, p.Path.Raw(), r.Target.String()), r.Origin, r.Rule.String(), samples)
+			a.grant(SandboxPath(a.env, p.Path.Raw(), r.Origin, r.Target.String()), r.Origin, r.Rule.String(), samples)
 		case r.Action == model.RuleAllow && !isSandboxRule(r):
 			a.allow(p, r.Rule.String(), r.Origin, "", samples)
 		}

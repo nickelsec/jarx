@@ -57,6 +57,9 @@ func credLines(c agent.Context, cs []model.Credential) []string {
 	out := make([]string, 0, len(cs))
 	for _, cr := range cs {
 		rel, _ := filepath.Rel(c.Env.Home, cr.Path.Raw())
+		if cr.Path.IsZero() {
+			rel = cr.Name.String() // an env var has a name, not a path
+		}
 		facts := make([]string, 0, len(cr.Facts))
 		for _, f := range cr.Facts {
 			facts = append(facts, f.Key.String()+"="+f.Value.String())
@@ -141,5 +144,22 @@ func TestAProjectsOwnCredentialFilesAreOnTheProject(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprintf("%+v", r), "CANARY") {
 		t.Error("the scan result holds a secret from a credential file")
+	}
+}
+
+func TestSecretLookingEnvVarsAreCredentialsByNameOnly(t *testing.T) {
+	c := credContext(t, "GITHUB_TOKEN=JARX-CANARY-1\nEDITOR=vim\nOPENAI_API_KEY=JARX-CANARY-2\nTOKEN_PATH=/tmp/x\n")
+
+	r := Run(c, nil, nil)
+
+	want := []string{
+		"env_var GITHUB_TOKEN [existence only] via environment: ",
+		"env_var OPENAI_API_KEY [existence only] via environment: ",
+	}
+	if got := credLines(c, r.Credentials); !slices.Equal(got, want) {
+		t.Errorf("credentials = %q, want %q", got, want)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", r), "CANARY") {
+		t.Error("an env var's value reached the scan result")
 	}
 }

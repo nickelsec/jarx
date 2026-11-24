@@ -159,6 +159,44 @@ type Project struct {
 	// Credentials are the credential files in the project itself, like .env
 	// files and private keys. The machine-wide ones are on the scan.
 	Credentials []Credential
+	// Reach is, for each agent that knows the project, whether each
+	// credential is reachable on each channel, with why.
+	Reach []Reach
+}
+
+// ReachChannel is a way an agent can get at a credential.
+type ReachChannel string
+
+// Reach channels.
+const (
+	ChannelFileTools ReachChannel = "file tools" // Read, Grep, Glob, LSP
+	ChannelShell     ReachChannel = "shell"      // Bash, PowerShell
+	ChannelMCP       ReachChannel = "mcp servers"
+	ChannelHooks     ReachChannel = "hooks"
+)
+
+// ReachVerdict is how reachable a credential is on one channel.
+type ReachVerdict string
+
+// Reach verdicts, from the PRD.
+const (
+	ReachBlocked      ReachVerdict = "blocked"
+	ReachApproval     ReachVerdict = "needs approval"
+	ReachSilent       ReachVerdict = "readable silently"
+	ReachBypassable   ReachVerdict = "readable, deny is bypassable"
+	ReachByTheProcess ReachVerdict = "readable by the process"
+)
+
+// Reach is one credential's verdict on one channel for one agent.
+type Reach struct {
+	Agent   Agent
+	Kind    CredentialKind
+	Path    Path
+	Name    redact.Text // an env var's name
+	Channel ReachChannel
+	Via     redact.Text // what on the channel, like which MCP servers
+	Verdict ReachVerdict
+	Why     []redact.Text // the rules, settings and modes that decided it
 }
 
 // Transport is how the agent talks to an MCP server.
@@ -426,6 +464,10 @@ type CredentialKind string
 type Credential struct {
 	Kind CredentialKind
 	Path Path
+	// Name is an env var's name. An env var has no path, and jarx never
+	// reads its value.
+	Name redact.Text
+	Dir  bool // a credential dir, like gcloud's, counted as one
 	// Via is the env var that put it there, or "default". Empty for one
 	// found in a project.
 	Via   redact.Text
@@ -465,6 +507,11 @@ const (
 	RuleDeny  RuleAction = "deny"
 	RuleRead  RuleAction = "read"  // a filesystem grant to read, like Codex's permission profiles
 	RuleWrite RuleAction = "write" // a filesystem grant to read and write
+	// RuleMask is a Claude sandbox credential entry that hands sandboxed
+	// commands a stand-in instead of the real value.
+	RuleMask RuleAction = "mask"
+	// RuleExclude is a command pattern Claude runs outside the sandbox.
+	RuleExclude RuleAction = "unsandboxed"
 )
 
 // PermissionRule is one rule from one file, like Bash(git *) or
@@ -495,6 +542,15 @@ type Permissions struct {
 	// Options are named settings that shape permissions, each with every
 	// layer that sets it, like Codex's approval_policy or sandbox_mode.
 	Options []Option
+	// Env is the names of the env vars the agent's settings set, like
+	// Claude's env block, each with the file that sets it. Never values.
+	Env []Layer[redact.Text]
+	// StartMode is the mode a new interactive session starts in: the
+	// defaultMode in effect, else the agent's built-in default. StartWhy
+	// says which. Empty when the agent has no such thing or the docs don't
+	// say.
+	StartMode redact.Text
+	StartWhy  redact.Text
 }
 
 // Option is one named setting and its layers.

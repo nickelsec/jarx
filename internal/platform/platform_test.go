@@ -308,3 +308,11 @@ func TestMapPathLeavesRealPathsAlone(t *testing.T) {
 		t.Errorf("MapPath(%q) = %q, want it unchanged", abs, got)
 	}
 }
+
+func TestNamesListsEnvVarNamesSorted(t *testing.T) {
+	env := newEnv("linux", "/home/dev", "/home/dev/.jarx-state", []string{"ZED=1", "API_TOKEN=secret-value", "EDITOR=vim", "EMPTY="}, false, true)
+
+	if got := env.Names(); !slices.Equal(got, []string{"API_TOKEN", "EDITOR", "EMPTY", "ZED"}) {
+		t.Errorf("Names() = %q, want the names sorted", got)
+	}
+}
