@@ -40,6 +40,7 @@ func Settle(s *redact.Scrubber, env platform.Env, projects []model.Project, mach
 				p.Reach = append(p.Reach, x.verdicts(cr)...)
 			}
 		}
+		view(s, p)
 	}
 }
 

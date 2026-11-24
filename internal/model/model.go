@@ -162,6 +162,32 @@ type Project struct {
 	// Reach is, for each agent that knows the project, whether each
 	// credential is reachable on each channel, with why.
 	Reach []Reach
+	// Exposure is the credential view: each credential's states for each
+	// agent, worst first, built from Reach and what the agent loads.
+	Exposure []Exposure
+}
+
+// CredentialState is a credential's top-level state in a project.
+type CredentialState string
+
+// Credential states, worst first (the PRD's credential view).
+const (
+	StateSees        CredentialState = "sees"          // already in text the agent loads
+	StateCanRead     CredentialState = "can read"      // a channel can read it
+	StateCanUse      CredentialState = "can use"       // an MCP server holds it
+	StateUnreachable CredentialState = "not reachable" // every channel is blocked and nothing holds it
+)
+
+// Exposure is one credential's states for one agent in one project.
+type Exposure struct {
+	Agent  Agent
+	Kind   CredentialKind
+	Path   Path
+	Name   redact.Text
+	States []CredentialState
+	// Via names what holds or shows it: the MCP servers that hold it, or
+	// the secret's kind and fingerprint for one seen in text.
+	Via []redact.Text
 }
 
 // ReachChannel is a way an agent can get at a credential.

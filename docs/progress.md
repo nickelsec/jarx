@@ -428,8 +428,19 @@ and flags it.
     `shell_environment_policy.set` and `experimental_use_profile`, what
     `inherit = core` keeps exactly (the docs don't list it, so it counts as
     keeping no secrets), Codex's managed network rules, and observed modes
-    (phase 6)
-- [ ] credential view
+    (phase 6) (fb96776)
+- [x] credential view. Each project gets each credential's states per
+  agent, worst first: sees (a masked secret in text the agent loads, named
+  by kind and fingerprint), can read (any channel that isn't blocked), can
+  use (an MCP server that would start and references the env var, or a
+  secret written into a server's own definition, as its own row), and not
+  reachable. The scan shows a `credentials:` line per project after "loads
+  here", counting each state per agent, and `--all` lists each agent's view
+  next to its verdicts
+  - Not covered yet: a file credential a server uses by path (like
+    `--kubeconfig ~/.kube/config`), secrets seen in session history
+    (phase 6), and which credential file a seen secret came from (jarx
+    never reads credential values to compare)
 - [ ] `analyze/egress`: where your agent talks to
 - [ ] `analyze/versions`: installs, PATH winner, advisories
 

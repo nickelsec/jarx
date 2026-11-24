@@ -647,6 +647,10 @@ func assertAllShowsEverything(t *testing.T, out string) {
 		"credentials (10)\n",
 		// Both agents' verdicts, each under its own heading.
 		"    claude reach\n", "    codex reach\n",
+		// The credential view: the secret the demo planted in CLAUDE.md is
+		// seen, and the user's search server holds an inline key.
+		"    claude credential view\n", "  sees: named_secret, fingerprint\n",
+		"      inline_secret  MCP server search in ~" + string(filepath.Separator) + ".claude.json  can use:\n",
 		"  env_var  GITHUB_TOKEN  via environment  existence only\n",
 		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo.ppk") + "  type: ed25519; passphrase: no\n",
 		"  ssh  ~" + string(filepath.Separator) + filepath.Join(".ssh", "id_demo_locked.ppk") + "  type: ed25519; passphrase: yes\n",
@@ -721,8 +725,10 @@ your user config - applies to every project
 |
 +- ... 11 more: 7 MED - 4 INFO  (jarx scan --all)
 |
-\- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
-               1 MCP server - codex 1 MCP server
++- loads here: claude 2 instructions - 2 imports - 1 hook - 1 skill
+|              1 MCP server - codex 1 MCP server
+|
+\- credentials: claude 1 sees - 12 can read - 1 can use - codex 11 can read
 
 ~{S}projects{S}tools  claude trusted
 +- HIGH  A tool that changes things runs unasked  CAP-001
@@ -755,13 +761,17 @@ your user config - applies to every project
 +- INFO  Points the agent at a credential file  POISON-009
 |  \- .mcp.json  tool save_note of notes-helper: points at ~/.ssh; points at ...
 |
-\- loads here: claude 1 instruction - 4 MCP servers - codex 1 MCP server
++- loads here: claude 1 instruction - 4 MCP servers - codex 1 MCP server
+|
+\- credentials: claude 10 can read - 2 can use
 
 ~{S}projects{S}notes  codex untrusted
 +- MED   Credentials are readable without asking  REACH-001
 |  \- ~{S}projects{S}notes  codex: 8 credentials (aws ~{S}.aws{S}credentials, aws ~{S}....
 |
-\- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
++- loads here: claude 1 instruction - 1 MCP server - codex 1 MCP server
+|
+\- credentials: codex 10 can read
 
 ~{S}projects{S}old  claude unknown - stale, not scanned
 

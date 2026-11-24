@@ -19,6 +19,11 @@ const (
 	KindEnvFile     = "env_file"
 	KindPrivateKey  = "private_key"
 	KindEnvVar      = "env_var" // a secret-looking env var, by name only
+	// KindSecretInText is a secret pasted into text the agent loads, and
+	// KindInlineSecret one written into an MCP server's definition. Both
+	// are known by kind and fingerprint, never by value.
+	KindSecretInText = "secret_in_text"
+	KindInlineSecret = "inline_secret"
 )
 
 const goosWindows = "windows"

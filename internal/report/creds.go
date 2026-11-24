@@ -73,3 +73,70 @@ func (p *Printer) reach(proj model.Project) {
 		p.Out.Printf("        %s\n", p.text(ch+"  "+string(r.Verdict)+": "+strings.Join(why, "; ")))
 	}
 }
+
+// credentialStates are the credential view's states, worst first.
+//
+//nolint:gochecknoglobals // fixed list, read only
+var credentialStates = []model.CredentialState{model.StateSees, model.StateCanRead, model.StateCanUse, model.StateUnreachable}
+
+// credentialLine is a project's credential view in one line: how many
+// credentials are in each state, for each agent, worst first.
+func (p *Printer) credentialLine(proj model.Project) node {
+	var items []string
+	for _, a := range []model.Agent{model.AgentClaude, model.AgentCodex} {
+		counts := map[model.CredentialState]int{}
+		for _, e := range proj.Exposure {
+			if e.Agent == a {
+				for _, st := range e.States {
+					counts[st]++
+				}
+			}
+		}
+		var parts []string
+		for _, st := range credentialStates {
+			if n := counts[st]; n > 0 {
+				parts = append(parts, strconv.Itoa(n)+" "+string(st))
+			}
+		}
+		if len(parts) > 0 {
+			parts[0] = string(a) + " " + parts[0]
+			items = append(items, parts...)
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return p.wrapList("credentials: ", items)
+}
+
+// credentialView lists a project's credential view by agent: each
+// credential, its states worst first, and what holds or shows it.
+func (p *Printer) credentialView(proj model.Project) {
+	var agent model.Agent
+	for _, e := range proj.Exposure {
+		if e.Agent != agent {
+			agent = e.Agent
+			p.Out.Printf("    %s credential view\n", p.text(string(e.Agent)))
+		}
+		where := e.Path.Text().String()
+		switch {
+		case e.Path.IsZero():
+			where = e.Name.String()
+		case !e.Name.IsZero():
+			where = e.Name.String() + " in " + where
+		}
+		states := make([]string, 0, len(e.States))
+		for _, st := range e.States {
+			states = append(states, string(st))
+		}
+		line := string(e.Kind) + "  " + where + "  " + strings.Join(states, ", ")
+		if len(e.Via) > 0 {
+			via := make([]string, 0, len(e.Via))
+			for _, v := range e.Via {
+				via = append(via, v.String())
+			}
+			line += ": " + strings.Join(via, "; ")
+		}
+		p.Out.Printf("      %s\n", p.text(line))
+	}
+}

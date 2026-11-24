@@ -421,6 +421,27 @@ per-channel verdicts below:
 A credential can be in more than one state (for example, both can read and
 can use). The view shows the worst one first.
 
+How jarx tells, for each agent that knows the project:
+
+- **sees** comes from text the agent loads: an instruction file, rule,
+  import or output style in effect whose text holds a masked secret. jarx
+  never reads credential files, so it names the secret by its kind and
+  fingerprint, not by which file it came from. Session history adds to this
+  in phase 6.
+- **can read** is any channel whose verdict isn't blocked, so approval, a
+  bypassable deny and reads by the process all count.
+- **can use** is an MCP server the agent would start that gets the
+  credential: an env var it references (Claude's `${VAR}` and
+  `${VAR:-default}` in env, headers, args or the URL; Codex's `env_vars`,
+  `bearer_token_env_var` and `env_http_headers`), or a secret written into
+  its own definition, which is its own row.
+- **not reachable** is everything else.
+
+The scan shows one line per project, after what the agents load, counting
+each state per agent (`credentials: claude 1 sees - 12 can read - 1 can use
+- codex 11 can read`). `--all` lists each agent's view in full next to the
+per-channel verdicts.
+
 ### Reachability verdicts
 
 For every credential location, jarx gives a verdict **per project, per

@@ -139,6 +139,9 @@ func (p *Printer) projectGroup(v ScanView, g group) {
 	if loads := p.loads(proj); loads != nil {
 		nodes = append(nodes, loads)
 	}
+	if creds := p.credentialLine(proj); creds != nil {
+		nodes = append(nodes, creds)
+	}
 	p.spacedTree(nodes)
 }
 

@@ -112,3 +112,47 @@ func TestTheInventoryListsEachProjectsReach(t *testing.T) {
 		}
 	}
 }
+
+func (f scanFixture) exposure(a model.Agent, kind, rel string, via string, ss ...model.CredentialState) model.Exposure {
+	e := model.Exposure{Agent: a, Kind: model.CredentialKind(kind), Path: f.path(rel), States: ss}
+	if via != "" {
+		e.Via = []redact.Text{f.text(via)}
+	}
+	return e
+}
+
+func TestEachProjectSaysWhatItsCredentialsAre(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.Projects[0].Exposure = []model.Exposure{
+		f.exposure(model.AgentClaude, "aws", ".aws/credentials", "", model.StateCanRead),
+		f.exposure(model.AgentClaude, "env_var", "", "MCP server notes holds it", model.StateCanRead, model.StateCanUse),
+		f.exposure(model.AgentClaude, "secret_in_text", "app/CLAUDE.md", "github_pat", model.StateSees),
+		f.exposure(model.AgentCodex, "aws", ".aws/credentials", "", model.StateUnreachable),
+	}
+
+	out := render(Style{Width: 120}, v)
+
+	if want := `\- credentials: claude 1 sees - 2 can read - 1 can use - codex 1 not reachable` + "\n"; !strings.Contains(out, want) {
+		t.Errorf("output =\n%s\nwant the project's credential line %q", out, want)
+	}
+}
+
+func TestTheInventoryHasTheCredentialView(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.All = true
+	v.Projects[0].Exposure = []model.Exposure{
+		f.exposure(model.AgentClaude, "secret_in_text", "app/CLAUDE.md", "github_pat, fingerprint FP", model.StateSees),
+		f.exposure(model.AgentClaude, "aws", ".aws/credentials", "", model.StateCanRead, model.StateCanUse),
+	}
+
+	out := render(Style{Width: 200}, v)
+
+	want := "    claude credential view\n" +
+		"      secret_in_text  " + filepath.FromSlash("~/app/CLAUDE.md") + "  sees: github_pat, fingerprint FP\n" +
+		"      aws  " + filepath.FromSlash("~/.aws/credentials") + "  can read, can use\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("output =\n%s\nwant it to contain %q", out, want)
+	}
+}
