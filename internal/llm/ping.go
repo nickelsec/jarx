@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,7 +64,7 @@ type chatReply struct {
 // endpoint and reports how long it took. It checks base with
 // netguard.CheckURL first, so nothing is sent to a URL setup would refuse.
 func Ping(ctx context.Context, c *netguard.Client, ep Endpoint) (time.Duration, error) {
-	_, took, err := complete(ctx, c, ep, newSession(), []chatMessage{{Role: roleUser, Content: PingText}})
+	_, took, err := complete(ctx, c, ep, newSession(), []chatMessage{{Role: roleUser, Content: PingText}}, nil)
 	return took, err
 }
 
@@ -93,19 +94,52 @@ func newSession() string {
 // choice's text. It checks base with netguard.CheckURL first. The key only
 // goes in the Authorization header, and errors never quote the reply, the
 // key or the URL.
-func complete(ctx context.Context, c *netguard.Client, ep Endpoint, session string, msgs []chatMessage) (string, time.Duration, error) {
-	base := ep.BaseURL
-	if err := netguard.CheckURL(base); err != nil {
+//
+// A 429 waits and sends the same request again: for as long as
+// Retry-After asks, or with a backoff that doubles from 2s, at most
+// maxRateWait each time and maxRateRetries times. onWait hears +1 when a
+// wait starts and -1 when it ends; it may be nil.
+func complete(ctx context.Context, c *netguard.Client, ep Endpoint, session string, msgs []chatMessage, onWait func(int)) (string, time.Duration, error) {
+	if err := netguard.CheckURL(ep.BaseURL); err != nil {
 		return "", 0, fmt.Errorf("base url: %w", err)
 	}
 	body, err := json.Marshal(chatRequest{Model: ep.Model, Messages: msgs})
 	if err != nil {
 		return "", 0, fmt.Errorf("encoding the request: %w", err)
 	}
-	endpoint := strings.TrimRight(base, "/") + "/chat/completions"
+	sleep := ep.sleep
+	if sleep == nil {
+		sleep = sleepCtx
+	}
+	if onWait == nil {
+		onWait = func(int) {}
+	}
+	start := time.Now()
+	for attempt := 0; ; attempt++ {
+		status, after, data, err := post(ctx, c, ep, session, body)
+		if err != nil {
+			return "", 0, err
+		}
+		if status == http.StatusTooManyRequests && attempt < maxRateRetries {
+			onWait(1)
+			err := sleep(ctx, rateWait(after, attempt))
+			onWait(-1)
+			if err != nil {
+				return "", 0, fmt.Errorf("waiting out a rate limit: %w", err)
+			}
+			continue
+		}
+		text, err := replyText(status, data, nil)
+		return text, time.Since(start), err
+	}
+}
+
+// post sends one request and reads the reply, capped at maxReply.
+func post(ctx context.Context, c *netguard.Client, ep Endpoint, session string, body []byte) (int, string, []byte, error) {
+	endpoint := strings.TrimRight(ep.BaseURL, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", 0, fmt.Errorf("%w: can't build the request", ErrUnreachable)
+		return 0, "", nil, fmt.Errorf("%w: can't build the request", ErrUnreachable)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+ep.Key.value)
@@ -115,22 +149,61 @@ func complete(ctx context.Context, c *netguard.Client, ep Endpoint, session stri
 	}
 	req.Header.Set("User-Agent", agent)
 	req.Header.Set(SessionHeader, session)
-
-	start := time.Now()
 	resp, err := c.Do(req)
 	if err != nil {
-		return "", 0, fmt.Errorf("%w: %s", ErrUnreachable, failureKind(err))
+		if ctx.Err() != nil {
+			return 0, "", nil, fmt.Errorf("%w: %w", ErrUnreachable, ctx.Err())
+		}
+		return 0, "", nil, fmt.Errorf("%w: %s", ErrUnreachable, failureKind(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxReply))
-	text, err := replyText(resp.StatusCode, data, readErr)
-	return text, time.Since(start), err
+	if readErr != nil && resp.StatusCode == http.StatusOK {
+		return 0, "", nil, fmt.Errorf("%w: couldn't read it", ErrBadReply)
+	}
+	return resp.StatusCode, resp.Header.Get("Retry-After"), data, nil
+}
+
+// Rate limits.
+const (
+	maxRateRetries = 5                // waits before an artifact counts as failed
+	maxRateWait    = 60 * time.Second // the longest one wait
+	firstRateWait  = 2 * time.Second  // the backoff's first wait, doubling after
+)
+
+// waiter waits for d or until ctx is done.
+type waiter func(ctx context.Context, d time.Duration) error
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err() //nolint:wrapcheck // the caller wraps it
+	case <-t.C:
+		return nil
+	}
+}
+
+// rateWait is how long to wait before the next try: what Retry-After asks,
+// in seconds or as a date, else the backoff for this attempt, capped at
+// maxRateWait.
+func rateWait(after string, attempt int) time.Duration {
+	d := firstRateWait << attempt
+	if secs, err := strconv.Atoi(strings.TrimSpace(after)); err == nil && secs >= 0 {
+		d = time.Duration(secs) * time.Second
+	} else if at, err := http.ParseTime(after); err == nil {
+		d = time.Until(at)
+	}
+	return min(max(d, 0), maxRateWait)
 }
 
 // replyText is the first choice's text, or what's wrong with the reply,
 // without quoting it.
 func replyText(status int, data []byte, readErr error) (string, error) {
 	switch {
+	case status == http.StatusTooManyRequests:
+		return "", fmt.Errorf("%w: still rate limited after %d waits (HTTP %d)", ErrStatus, maxRateRetries, status)
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return "", fmt.Errorf("%w (HTTP %d)", ErrKeyRejected, status)
 	case status != http.StatusOK:

@@ -1180,8 +1180,9 @@ without it landing in shell history:
 - bash and zsh: `read -rs JARX_LLM_KEY && export JARX_LLM_KEY`
 
 `jarx setup llm` asks one question at a time: the base URL, then the model,
-then the env var name (`JARX_LLM_KEY` by default). Enter keeps the default,
-and a bad answer gets the same question again with the reason:
+then the env var name (`JARX_LLM_KEY` by default), then how many artifacts
+to send at once (4 by default, 1 to 16). Enter keeps the default, and a bad
+answer gets the same question again with the reason:
 
 - The base URL has to be `https://`, or `http://` to a loopback address. It
   can't hold a user, a password or a query string, and it can't be a cloud
@@ -1225,6 +1226,13 @@ retry fails too, that artifact gets an "LLM review failed" info finding
 instead of guessed results.
 
 Results are cached by content hash, so an unchanged artifact isn't sent twice.
+A failure isn't cached: it's sent again next time, and the preview says how
+many are cached, how many failed last time and are sent again, and how many
+are new.
+
+Artifacts go several at once, as many as setup says. When the endpoint
+answers 429, jarx waits as long as `Retry-After` asks, or backs off, and
+tries again, up to 5 times, before that artifact counts as failed.
 
 ## Snapshots and diff
 
@@ -1257,7 +1265,7 @@ The CLI stays small: three commands and a version flag.
 | `jarx setup` | show jarx's own settings: extra repo paths, and whether the LLM is set up |
 | `jarx setup repo add\|rm <path>` | add or remove an extra project path |
 | `jarx setup llm` | set the base URL, model and key env var name, one question at a time |
-| `jarx setup llm --url <url> --model <model> --key-env <name>` | the same in one line, for scripts |
+| `jarx setup llm --url <url> --model <model> --key-env <name> [--parallel <n>]` | the same in one line, for scripts |
 | `jarx setup llm off` | clear the LLM settings |
 | `jarx --version` | print the banner, version and advisory data date |
 
@@ -1342,8 +1350,13 @@ a real machine.
   settings report, and what changed.
 - **Write actions** (POST only, token plus `Origin` check):
   - add or remove a repo path
-  - set the LLM base URL, model and key env var name. The page never takes
-    the key itself, and only shows whether the var is set.
+  - set the LLM base URL, model, key env var name and how many to send at
+    once. The page never takes the key itself, and only shows whether the
+    var is set.
+  - choose which artifacts the LLM review sends, and rerun only the ones
+    that failed. An artifact you skip shows as "not reviewed, you skipped
+    it". A skip is remembered by the artifact's content hash, so when the
+    file changes it's offered again.
   - rescan
 - A pasted repo still only probes servers the agent would start.
 - Never writes agent config.

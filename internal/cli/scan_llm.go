@@ -24,11 +24,12 @@ var errNoLLM = errors.New("llm review can't run")
 
 // llmRun is jarx scan --llm's review, checked before the scan starts.
 type llmRun struct {
-	p      *report.Printer
-	s      *redact.Scrubber
-	st     streams
-	ep     llm.Endpoint
-	keyEnv string
+	p        *report.Printer
+	s        *redact.Scrubber
+	st       streams
+	ep       llm.Endpoint
+	keyEnv   string
+	parallel int
 }
 
 // prepareLLM checks, before anything is scanned, that the review is set up
@@ -46,7 +47,7 @@ func prepareLLM(p *report.Printer, s *redact.Scrubber, cfg jarxdir.Config, st st
 		p.Err.Printf("  powershell  %s\n  bash, zsh   %s\n", scrubbed(s, ps), scrubbed(s, sh))
 		return nil, errNoLLM
 	}
-	return &llmRun{p: p, s: s, st: st, ep: llm.Endpoint{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, Key: key, UserAgent: st.userAgent}, keyEnv: name}, nil
+	return &llmRun{p: p, s: s, st: st, ep: llm.Endpoint{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, Key: key, UserAgent: st.userAgent}, keyEnv: name, parallel: parallelOf(*cfg.LLM)}, nil
 }
 
 // kindWords are each artifact kind's words, in the order the preview lists
@@ -115,9 +116,15 @@ func (r *llmRun) send(a *asker, arts []llm.Artifact, cache *llm.Cache) (llm.Resu
 	var res llm.Result
 	var err error
 	g := r.p.StartProgress(stepReview)
-	g.Bar(stepReview, len(arts), "artifacts")
+	g.Bar(stepReview, len(arts))
 	a.whileCatching(0, func(ctx context.Context) {
-		res, err = llm.ReviewWith(ctx, netguard.NewLLM(), r.ep, r.s, arts, cache, func(done, _ int) { g.Set(done, 0) })
+		res, err = llm.ReviewWith(ctx, netguard.NewLLM(), r.ep, r.s, arts, cache, llm.Options{
+			Parallel: r.parallel,
+			OnStatus: func(st llm.Status) {
+				g.Set(st.Done, st.Running)
+				g.Waiting(st.Waiting)
+			},
+		})
 	})
 	g.Stop()
 	return res, err //nolint:wrapcheck // llm errors already say what failed
@@ -127,7 +134,7 @@ func (r *llmRun) text(v string) redact.Text { return scrubbed(r.s, v) }
 
 func (r *llmRun) preview(plan llm.Preview) {
 	v := report.LLMPreviewView{
-		Send: plan.Send, Tokens: plan.Tokens, Cached: plan.Cached,
+		Send: plan.Send, Tokens: plan.Tokens, Cached: plan.Cached, Failed: plan.Failed, New: plan.New, Parallel: r.parallel,
 		Host: r.text(plan.Host), Model: r.text(r.ep.Model), KeyEnv: r.text(r.keyEnv),
 	}
 	for _, k := range kindWords {

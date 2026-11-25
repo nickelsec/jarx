@@ -21,14 +21,13 @@ type Progress struct {
 	start time.Time
 	width int // the longest step name, so counts start in one column
 
-	step             string
-	total, done, run int
-	bar              bool
-	unit             string
-	frame            int
-	drawn            int // the widest line drawn so far, for Stop to blank
-	stopped          bool
-	quit, idle       chan struct{}
+	step                   string
+	total, done, run, wait int
+	bar                    bool
+	frame                  int
+	drawn                  int // the widest line drawn so far, for Stop to blank
+	stopped                bool
+	quit, idle             chan struct{}
 }
 
 // Progress layout, in columns, and how often the spinner turns.
@@ -68,13 +67,13 @@ func newProgress(w io.Writer, st Style, steps []string, now func() time.Time) *P
 }
 
 // Step moves to a step with no count.
-func (g *Progress) Step(name string) { g.set(name, 0, false, "") }
+func (g *Progress) Step(name string) { g.set(name, 0, false) }
 
 // Count moves to a step with a count of total.
-func (g *Progress) Count(name string, total int) { g.set(name, total, false, "") }
+func (g *Progress) Count(name string, total int) { g.set(name, total, false) }
 
-// Bar moves to a step shown as a bar, with unit after the count.
-func (g *Progress) Bar(name string, total int, unit string) { g.set(name, total, true, unit) }
+// Bar moves to a step shown as a bar.
+func (g *Progress) Bar(name string, total int) { g.set(name, total, true) }
 
 // Set says how many are done and how many are running now.
 func (g *Progress) Set(done, running int) {
@@ -84,6 +83,17 @@ func (g *Progress) Set(done, running int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.done, g.run = done, running
+}
+
+// Waiting says how many of the running ones are waiting, like out a rate
+// limit.
+func (g *Progress) Waiting(n int) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.wait = n
 }
 
 // Stop blanks the line and stops drawing. It's safe to call twice.
@@ -125,13 +135,13 @@ func (g *Progress) spin() {
 	}
 }
 
-func (g *Progress) set(name string, total int, bar bool, unit string) {
+func (g *Progress) set(name string, total int, bar bool) {
 	if g == nil {
 		return
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.step, g.total, g.bar, g.unit, g.done, g.run = name, total, bar, unit, 0, 0
+	g.step, g.total, g.bar, g.done, g.run, g.wait = name, total, bar, 0, 0, 0
 	g.drawLocked()
 }
 
@@ -187,12 +197,11 @@ func (g *Progress) line() line {
 	case g.bar:
 		l = append(l, seg{text: own(pad(g.step, g.width))}, seg{text: "  "})
 		l = append(l, g.barSegs()...)
-		l = append(l, seg{text: "  " + g.count() + " " + own(g.unit)})
+		l = append(l, seg{text: "  " + g.count()})
+		l = append(l, g.busy()...)
 	case g.total > 0:
 		l = append(l, seg{text: own(pad(g.step, g.width))}, seg{text: "  " + g.count()})
-		if g.run > 0 {
-			l = append(l, seg{text: own(g.sep() + strconv.Itoa(g.run) + " running")})
-		}
+		l = append(l, g.busy()...)
 	default:
 		l = append(l, seg{text: own(g.step)})
 	}
@@ -200,6 +209,18 @@ func (g *Progress) line() line {
 		l = append(l, seg{text: wideGap}, seg{text: elapsed(took), tone: dim})
 	}
 	return trimLine(g.st.fit(l, g.st.width()-1))
+}
+
+// busy is how many are running and waiting, when any are.
+func (g *Progress) busy() line {
+	var l line
+	if g.run > 0 {
+		l = append(l, seg{text: own(g.sep() + strconv.Itoa(g.run) + " running")})
+	}
+	if g.wait > 0 {
+		l = append(l, seg{text: own(g.sep() + strconv.Itoa(g.wait) + " waiting"), tone: yellow})
+	}
+	return l
 }
 
 func (g *Progress) sep() string { return " " + g.st.glyphs().dot + " " }

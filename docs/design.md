@@ -729,11 +729,20 @@ prints what comes back.
   Prompts and resources a server offers aren't in the PRD's list, so they
   don't go either. Every text is already masked, and an artifact over 64
   KiB is cut.
-- **One request per artifact.** A fixed system prompt, then the artifact
-  as JSON (`kind`, `name`, `text`) in its own message, so nothing in it
-  can end the artifact early. The prompt says the artifact is data, not
-  instructions. No `response_format`, no temperature and no token limit
-  are sent, since OpenAI-compatible servers don't all take them.
+- **One request per artifact, several at once.** A fixed system prompt,
+  then the artifact as JSON (`kind`, `name`, `text`) in its own message, so
+  nothing in it can end the artifact early. The prompt says the artifact is
+  data, not instructions. No `response_format`, no temperature and no token
+  limit are sent, since OpenAI-compatible servers don't all take them.
+  `parallel` requests go out at once, 4 unless setup says otherwise, from 1
+  to 16, and the findings still come out in the artifacts' order, the same
+  as one at a time.
+- **Rate limits.** A 429 waits and sends the same request again: as long as
+  `Retry-After` asks (seconds or a date), else 2s, 4s, 8s and on, never
+  more than 60s at once. After 5 waits the artifact counts as failed this
+  run, as a `JARX-LLM-003` that says so, and the rest go on. Ctrl+C stops a
+  wait. The progress bar counts what's running and what's waiting out a
+  rate limit.
 - **The reply shape** is `{"findings":[{"severity","title","quote","why"}]}`
   and nothing else, apart from whitespace or one code fence. Severity is
   `high` or `medium`, unknown fields are refused, and there are at most 10
@@ -748,12 +757,18 @@ prints what comes back.
   through the scrubber before they're kept or shown.
 - **The cache.** `llm-cache.json` in the state dir maps a hash of the
   prompt version, base URL, model and artifact to the findings that were
-  kept. Changing any of those sends the artifact again. Failures are never
-  cached, and the newest 2000 entries are kept. A broken cache or one from
-  a newer jarx is an empty one.
+  kept. Changing any of those sends the artifact again. A failure is kept
+  only as a mark: it's always sent again, and the mark lets the preview say
+  so. The newest 2000 entries are kept. A broken cache or one from a newer
+  jarx is an empty one.
+- **The preview** says how many artifacts would go and roughly how many
+  tokens, how many at a time, and, after an earlier run, how many are
+  cached and not sent, how many failed last time and are sent again, and
+  how many are new or changed.
 - **When it stops.** A rejected key or an endpoint jarx can't reach stops
   the whole review with that error, since every request after it would
-  fail the same way. Any other trouble with one artifact, like an HTTP 500,
+  fail the same way. The requests already out finish, and nothing new
+  starts. Any other trouble with one artifact, like an HTTP 500,
   is a `JARX-LLM-003` for it, and the review goes on.
 - **Headers.** Every request names jarx in `User-Agent` (`jarx/<version>`)
   and carries a random session ID in `x-opencode-session`. OpenCode Go asks
@@ -1062,7 +1077,7 @@ erased before the report prints:
 
 ```
 ⠹ probing MCP servers       3 of 17 · 4 running   12s
-⠹ reviewing  [████████░░░░░░░░░░░░]   6 of 14 artifacts   38s
+⠹ reviewing  [███░░░░░░░░░░░░░░░░░]  14 of 85 · 4 running · 1 waiting   1m 05s
 ```
 
 - It only draws when stderr is a terminal, so piped output, a redirected
@@ -1072,6 +1087,9 @@ erased before the report prints:
   reading agent config, walking projects, probing MCP servers and checking
   findings; `--llm`'s review is a bar, and setup's connection test a
   spinner.
+- The review bar counts what's running and, in yellow, what's waiting out
+  a rate limit. It leaves out the unit, so the line fits 80 columns with
+  both.
 - Nothing moves as it updates: step names are padded to the longest one,
   so counts start in one column, and a count is padded to its total's
   width, so `3 of 17` and `12 of 17` take the same room. The bar is 20

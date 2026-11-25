@@ -47,7 +47,7 @@ func TestScanLLMShowsTheReviewBar(t *testing.T) {
 
 	got := o.ask("y\n", "scan", "--llm", "--home", demo)
 
-	if got.code != 0 || !strings.Contains(got.stderr, "| reviewing  [") || !strings.Contains(got.stderr, " artifacts") {
+	if got.code != 0 || !strings.Contains(got.stderr, "| reviewing  [") || !strings.Contains(got.stderr, " of ") {
 		t.Errorf("exit %d, stderr %q; want the review bar", got.code, got.stderr)
 	}
 }

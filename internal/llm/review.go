@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sync"
 
 	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/netguard"
@@ -18,6 +19,8 @@ type Endpoint struct {
 	Model     string
 	Key       Key
 	UserAgent string // like jarx/v1.2.3; "" sends plain jarx
+
+	sleep waiter // how a rate limit waits; nil is the real clock (tests set it)
 }
 
 // promptVersion goes into the cache key, so a changed prompt reviews
@@ -60,88 +63,166 @@ func content(a Artifact) string {
 	return string(b)
 }
 
-// Review sends each artifact on its own, in order, and turns the findings
-// whose quote is in the artifact into findings. An artifact the cache
-// knows isn't sent. A rejected key or an endpoint jarx can't reach stops
-// the review with that error; any other trouble with one artifact is an
-// info finding for it, and the review goes on.
-func Review(ctx context.Context, c *netguard.Client, ep Endpoint, s *redact.Scrubber, arts []Artifact, cache *Cache) (Result, error) {
-	return ReviewWith(ctx, c, ep, s, arts, cache, nil)
+// DefaultParallel is how many artifacts are sent at once when the settings
+// don't say, and MaxParallel the most jarx sends at once.
+const (
+	DefaultParallel = 4
+	MaxParallel     = 16
+)
+
+// Options are how a review runs.
+type Options struct {
+	Parallel int          // artifacts sent at once; 0 means DefaultParallel
+	OnStatus func(Status) // hears every change; may be nil
 }
 
-// ReviewWith is Review, and tells onDone how many artifacts are done out of
-// the total, cached ones too, from 0 to all. onDone may be nil.
-func ReviewWith(ctx context.Context, c *netguard.Client, ep Endpoint, s *redact.Scrubber, arts []Artifact, cache *Cache, onDone func(done, total int)) (Result, error) {
-	if onDone == nil {
-		onDone = func(int, int) {}
+// Status is how far a review has got.
+type Status struct {
+	Done    int // artifacts finished, cached ones too
+	Running int // requests out now
+	Waiting int // of those, how many are waiting out a rate limit
+	Total   int
+}
+
+// Review sends each artifact on its own, several at once, and turns the
+// findings whose quote is in the artifact into findings, in the
+// artifacts' order. An artifact the cache knows isn't sent. A rejected
+// key, an endpoint jarx can't reach or a cancel stops the review with that
+// error; any other trouble with one artifact is an info finding for it,
+// and the review goes on.
+func Review(ctx context.Context, c *netguard.Client, ep Endpoint, s *redact.Scrubber, arts []Artifact, cache *Cache) (Result, error) {
+	return ReviewWith(ctx, c, ep, s, arts, cache, Options{})
+}
+
+// ReviewWith is Review with options.
+func ReviewWith(ctx context.Context, c *netguard.Client, ep Endpoint, s *redact.Scrubber, arts []Artifact, cache *Cache, opts Options) (Result, error) {
+	n := opts.Parallel
+	if n <= 0 {
+		n = DefaultParallel
 	}
-	onDone(0, len(arts))
-	r := reviewer{ctx: ctx, c: c, ep: ep, s: s, cache: cache, session: newSession()}
+	n = min(n, MaxParallel)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	t := &tracker{on: opts.OnStatus, st: Status{Total: len(arts)}}
+	t.change(func(*Status) {})
+	r := reviewer{c: c, ep: ep, s: s, cache: cache, session: newSession(), t: t}
+
+	outs := make([]outcome, len(arts))
+	var stop error
+	var once sync.Once
+	sem := make(chan struct{}, n)
+	var wg sync.WaitGroup
 	for i, a := range arts {
-		if err := r.one(a); err != nil {
-			return r.res, err
+		sem <- struct{}{}
+		if ctx.Err() != nil { // a worker stopped the review before this one started
+			<-sem
+			break
 		}
-		onDone(i+1, len(arts))
+		wg.Go(func() {
+			defer func() { <-sem }()
+			o, err := r.one(ctx, a)
+			if err != nil {
+				once.Do(func() { stop = err; cancel() })
+				return
+			}
+			outs[i] = o
+			t.change(func(s *Status) { s.Done++ })
+		})
 	}
-	return r.res, nil
+	wg.Wait()
+	var res Result
+	for _, o := range outs {
+		res.add(o)
+	}
+	return res, stop
+}
+
+// outcome is what one artifact's review gave.
+type outcome struct {
+	findings                      []finding.Finding
+	sent, cached, failed, dropped int
+}
+
+func (res *Result) add(o outcome) {
+	res.Findings = append(res.Findings, o.findings...)
+	res.Sent += o.sent
+	res.Cached += o.cached
+	res.Failed += o.failed
+	res.Dropped += o.dropped
+}
+
+// tracker keeps a review's status and passes each change on, one at a time.
+type tracker struct {
+	mu sync.Mutex
+	on func(Status)
+	st Status
+}
+
+func (t *tracker) change(f func(*Status)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	f(&t.st)
+	if t.on != nil {
+		t.on(t.st)
+	}
 }
 
 // reviewer is one review run. Its session ID is the run's, so the endpoint
 // can reuse its cache across the run's requests.
 type reviewer struct {
-	ctx     context.Context //nolint:containedctx // one run's context, for its requests
 	c       *netguard.Client
 	ep      Endpoint
 	s       *redact.Scrubber
 	cache   *Cache
 	session string
-	res     Result
+	t       *tracker
 }
 
 // one reviews one artifact, from the cache when it's there. An error means
 // the whole review stops.
-func (r *reviewer) one(a Artifact) error {
+func (r *reviewer) one(ctx context.Context, a Artifact) (outcome, error) {
 	msg := content(a)
 	key := cacheKey(r.ep, msg)
 	if items, ok := r.cache.get(key); ok {
-		r.res.Cached++
-		r.res.Findings = append(r.res.Findings, findings(r.s, a, items)...)
-		return nil
+		return outcome{cached: 1, findings: findings(r.s, a, items)}, nil
 	}
-	items, err := ask(r.ctx, r.c, r.ep, r.session, msg)
+	r.t.change(func(s *Status) { s.Running++ })
+	items, err := ask(ctx, r.c, r.ep, r.session, msg, func(d int) { r.t.change(func(s *Status) { s.Waiting += d }) })
+	r.t.change(func(s *Status) { s.Running-- })
 	if stopsReview(err) {
-		return err
+		return outcome{}, err
 	}
-	r.res.Sent++
 	if err != nil {
-		r.res.Failed++
-		r.res.Findings = append(r.res.Findings, failed(r.s, a, err))
-		return nil
+		r.cache.markFailed(key)
+		return outcome{sent: 1, failed: 1, findings: []finding.Finding{failed(r.s, a, err)}}, nil
 	}
+	o := outcome{sent: 1}
 	kept := make([]Item, 0, len(items))
 	for _, it := range items {
 		if !quoted(a.Text.String(), it.Quote) {
-			r.res.Dropped++
+			o.dropped++
 			continue
 		}
 		kept = append(kept, scrubItem(r.s, it))
 	}
 	r.cache.put(key, kept)
-	r.res.Findings = append(r.res.Findings, findings(r.s, a, kept)...)
-	return nil
+	o.findings = findings(r.s, a, kept)
+	return o, nil
 }
 
-// stopsReview is an error every request after it would hit too.
+// stopsReview is an error every request after it would hit too, or a
+// cancel.
 func stopsReview(err error) bool {
-	return errors.Is(err, ErrKeyRejected) || errors.Is(err, ErrUnreachable) || errors.Is(err, netguard.ErrInsecure) || errors.Is(err, netguard.ErrBlocked)
+	return errors.Is(err, ErrKeyRejected) || errors.Is(err, ErrUnreachable) || errors.Is(err, netguard.ErrInsecure) ||
+		errors.Is(err, netguard.ErrBlocked) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // ask sends one artifact and checks the reply, retrying once with what was
 // wrong with it.
-func ask(ctx context.Context, c *netguard.Client, ep Endpoint, session, msg string) ([]Item, error) {
+func ask(ctx context.Context, c *netguard.Client, ep Endpoint, session, msg string, onWait func(int)) ([]Item, error) {
 	msgs := make([]chatMessage, 0, 4) //nolint:mnd // the prompt, the artifact, then a retry's two
 	msgs = append(msgs, chatMessage{Role: roleSystem, Content: systemPrompt}, chatMessage{Role: roleUser, Content: msg})
-	reply, _, err := complete(ctx, c, ep, session, msgs)
+	reply, _, err := complete(ctx, c, ep, session, msgs, onWait)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +231,7 @@ func ask(ctx context.Context, c *netguard.Client, ep Endpoint, session, msg stri
 		return items, nil
 	}
 	msgs = append(msgs, chatMessage{Role: roleAssistant, Content: reply}, chatMessage{Role: roleUser, Content: fmt.Sprintf(retryNote, perr.Error())})
-	reply, _, err = complete(ctx, c, ep, session, msgs)
+	reply, _, err = complete(ctx, c, ep, session, msgs, onWait)
 	if err != nil {
 		return nil, err
 	}
@@ -188,9 +269,11 @@ func failed(s *redact.Scrubber, a Artifact, err error) finding.Finding {
 
 // Preview is what a review would send, for the question before it does.
 type Preview struct {
-	Send   int
+	Send   int // Failed plus New
 	ByKind map[Kind]int
-	Cached int
+	Cached int // answered last time, not sent again
+	Failed int // failed last time, sent again
+	New    int // never sent to this model, or changed since
 	Tokens int // a rough count of what's sent, at about 4 bytes a token
 	Host   string
 }
@@ -206,9 +289,15 @@ func Plan(ep Endpoint, arts []Artifact, cache *Cache) Preview {
 	}
 	for _, a := range arts {
 		msg := content(a)
-		if _, ok := cache.get(cacheKey(ep, msg)); ok {
+		key := cacheKey(ep, msg)
+		if _, ok := cache.get(key); ok {
 			p.Cached++
 			continue
+		}
+		if cache.failedBefore(key) {
+			p.Failed++
+		} else {
+			p.New++
 		}
 		p.Send++
 		p.ByKind[a.Kind]++

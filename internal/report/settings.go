@@ -24,10 +24,11 @@ type RepoRow struct {
 // LLMView is the LLM review's settings. It has the key's env var name and
 // whether that var is set, never the key.
 type LLMView struct {
-	BaseURL redact.Text
-	Model   redact.Text
-	KeyEnv  redact.Text
-	KeySet  bool
+	BaseURL  redact.Text
+	Model    redact.Text
+	KeyEnv   redact.Text
+	KeySet   bool
+	Parallel int // artifacts sent at once
 }
 
 // settingsLabel pads a row label so the values line up.
@@ -84,6 +85,7 @@ func (p *Printer) LLMSummary(v LLMView) {
 		{line{{text: "endpoint  "}, {text: escape(v.BaseURL.String())}}},
 		{line{{text: "model     "}, {text: escape(v.Model.String())}}},
 		{line{{text: "key       from "}, {text: escape(v.KeyEnv.String())}, keyState(v.KeySet)}},
+		{line{{text: own("parallel  " + strconv.Itoa(v.Parallel) + " at a time")}}},
 	})
 }
 

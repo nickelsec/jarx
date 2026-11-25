@@ -230,8 +230,10 @@ func TestScanLLMStopsWhenTheKeyIsRejected(t *testing.T) {
 
 	got := withKey().ask("y\n", "scan", "--llm", "--home", demo)
 
-	if got.code != 1 || f.count() != 1 || !strings.Contains(got.stdout, "llm review stopped: the endpoint rejected the key (HTTP 401)\n") {
-		t.Errorf("exit %d with %d requests, stdout\n%s\nwant 1 after one request, with why", got.code, f.count(), got.stdout)
+	// The ones already out when the 401 comes back finish; nothing after
+	// them starts.
+	if got.code != 1 || f.count() > llm.DefaultParallel || !strings.Contains(got.stdout, "llm review stopped: the endpoint rejected the key (HTTP 401)\n") {
+		t.Errorf("exit %d with %d requests, stdout\n%s\nwant 1 after no more than the %d in flight, with why", got.code, f.count(), got.stdout, llm.DefaultParallel)
 	}
 	if summaryRe.FindStringIndex(got.stdout) == nil {
 		t.Error("the rest of the scan didn't print")
@@ -269,5 +271,32 @@ func TestScanLLMNamesJarxAndSendsOneSession(t *testing.T) {
 		if got := h.Get(llm.SessionHeader); got == "" || got != session {
 			t.Errorf("request %d session = %q, want one session %q for the run", i, got, session)
 		}
+	}
+}
+
+func TestScanLLMSendsAsManyAtOnceAsSetUp(t *testing.T) {
+	f := &reviewer{}
+	demo := demoCopy(t)
+	runIn("", "setup", "llm", "--home", demo, "--url", f.serve(t), "--model", "m-1", "--key-env", "JARX_LLM_KEY", "--parallel", "2")
+
+	got := withKey().ask("\n", "scan", "--llm", "--home", demo)
+
+	if !strings.Contains(got.stdout, "  sent 2 at a time\n") {
+		t.Errorf("stdout doesn't say 2 at a time:\n%s", got.stdout)
+	}
+}
+
+func TestScanLLMSaysWhatFailedLastTime(t *testing.T) {
+	f := &reviewer{status: http.StatusInternalServerError}
+	demo := llmDemo(t, f.serve(t))
+	withKey().ask("y\n", "scan", "--llm", "--home", demo)
+	f.mu.Lock()
+	f.status = 0
+	f.mu.Unlock()
+
+	got := withKey().ask("\n", "scan", "--llm", "--home", demo)
+
+	if !regexp.MustCompile(`\+- last run +\d+ failed, sent again\n`).MatchString(got.stdout) {
+		t.Errorf("stdout doesn't say what failed last time:\n%s", got.stdout)
 	}
 }

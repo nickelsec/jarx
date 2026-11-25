@@ -548,7 +548,12 @@ masked leak.
 - [ ] `ui` server and security middleware with tests
 - [ ] pages
 - [ ] snapshot picker and write actions (repo add and remove, rescan)
-- [ ] the LLM review button and LLM settings (phase 8 came first)
+- [ ] the LLM review button and LLM settings, with how many to send at
+  once (phase 8 came first)
+- [ ] choose which artifacts the LLM review sends, rerun only the ones that
+  failed, and show a skipped one as "not reviewed, you skipped it". A skip
+  is remembered by the artifact's content hash in jarx's state dir, so a
+  changed file comes back
 
 **Run it:** `jarx ui --home testdata/demo`.
 
@@ -621,7 +626,7 @@ in an env var you name; jarx never stores it.
   per connection test. The ID says nothing about the user or the scan, so
   it goes to every endpoint, which also covers a proxy in front of Go
   - Not covered yet: checked against a fake endpoint only, not OpenCode Go
-    itself, and MCP probes still send Go's default user agent
+    itself, and MCP probes still send Go's default user agent (cb0884b)
 - [x] progress line: while a scan works, one line on stderr names the step
   (session history, agent config, walking projects, probing MCP servers,
   checking findings) with a count and the time so far, and it's erased
@@ -633,5 +638,16 @@ in an env var you name; jarx never stores it.
   reporting counts. A new Progress part in the Terminal output section
   - Not covered yet: a count while history is read and while the adapters
     read settings, and checking it by eye in every terminal the PRD lists
+    (cb0884b)
+- [x] parallel review and rate limits. The review sends artifacts several
+  at once, 4 unless setup says otherwise (1 to 16, the 4th question and
+  `--parallel`), with findings in the artifacts' order. A 429 waits for
+  `Retry-After`, or backs off from 2s, at most 60s a wait and 5 times,
+  then that artifact fails and the rest go on. The cache marks failures,
+  so the preview says what's cached, what failed last time and is sent
+  again, and what's new, plus how many go at once. The bar counts what's
+  running and waiting
+  - Not covered yet: no slowing down for the whole run after a 429 (each
+    request waits on its own), and `x-ratelimit-*` headers aren't read
 
 **Run it:** `jarx setup llm`, then `jarx scan --llm --home testdata/demo`.

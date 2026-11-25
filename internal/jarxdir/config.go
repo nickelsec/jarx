@@ -29,9 +29,10 @@ type Config struct {
 // LLM is where the optional LLM review sends artifacts. It names the env var
 // that holds the key and never holds the key itself.
 type LLM struct {
-	BaseURL string `json:"baseUrl"`
-	Model   string `json:"model"`
-	KeyEnv  string `json:"keyEnv"`
+	BaseURL  string `json:"baseUrl"`
+	Model    string `json:"model"`
+	KeyEnv   string `json:"keyEnv"`
+	Parallel int    `json:"parallel,omitempty"` // artifacts sent at once; 0 means the default
 }
 
 // LoadConfig reads jarx's config. With nothing saved it returns an empty

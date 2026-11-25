@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -43,9 +44,9 @@ var varName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // llmFlags are the one-line version's flags.
 type llmFlags struct {
-	home, url, model, keyEnv string
-	set                      int // how many of url, model and key-env were given
-	off                      bool
+	home, url, model, keyEnv, parallel string
+	set                                int // how many of url, model and key-env were given
+	off                                bool
 }
 
 // runSetupLLM runs jarx setup llm: off, the one-line version with all three
@@ -143,6 +144,7 @@ func parseSetupLLM(p *report.Printer, plain *redact.Scrubber, args []string) (ll
 	fs.StringVar(&f.url, "url", "", "")
 	fs.StringVar(&f.model, "model", "", "")
 	fs.StringVar(&f.keyEnv, "key-env", "", "")
+	fs.StringVar(&f.parallel, "parallel", "", "")
 	if code, ok := parse(p, plain, fs, args, setupHelp); !ok {
 		return f, code, false
 	}
@@ -153,15 +155,23 @@ func parseSetupLLM(p *report.Printer, plain *redact.Scrubber, args []string) (ll
 	if !f.off && len(rest) == 1 && rest[0] == "off" {
 		f.off, rest = true, nil
 	}
-	fs.Visit(func(fl *flag.Flag) {
-		if fl.Name != "home" {
-			f.set++
-		}
-	})
+	f.set = requiredSet(fs)
 	if problem := llmUsageProblem(f, rest); problem != "" {
 		return f, usageError(p, setupHelp, scrubbed(plain, problem)), false
 	}
 	return f, exitOK, true
+}
+
+// requiredSet counts the one-line version's flags that were given: --url,
+// --model and --key-env. --home and --parallel are optional.
+func requiredSet(fs *flag.FlagSet) int {
+	n := 0
+	fs.Visit(func(fl *flag.Flag) {
+		if fl.Name != "home" && fl.Name != "parallel" {
+			n++
+		}
+	})
+	return n
 }
 
 // llmUsageProblem says what's wrong with how setup llm was called, or "".
@@ -193,7 +203,12 @@ func llmFromFlags(p *report.Printer, s *redact.Scrubber, env platform.Env, cfg j
 		p.Error(fmt.Errorf("--key-env: %w", err))
 		return exitError
 	}
-	cfg.LLM = &jarxdir.LLM{BaseURL: base, Model: model, KeyEnv: keyEnv}
+	parallel, err := checkParallel(f.parallel)
+	if err != nil {
+		p.Error(fmt.Errorf("--parallel: %w", err))
+		return exitError
+	}
+	cfg.LLM = &jarxdir.LLM{BaseURL: base, Model: model, KeyEnv: keyEnv, Parallel: parallel}
 	if err := save(env, cfg); err != nil {
 		p.Error(err)
 		return exitError
@@ -225,11 +240,33 @@ func llmOff(p *report.Printer, s *redact.Scrubber, env platform.Env, cfg jarxdir
 func llmView(s *redact.Scrubber, lookup keyLookup, c jarxdir.LLM) report.LLMView {
 	_, set := llm.KeyFrom(lookup, c.KeyEnv)
 	return report.LLMView{
-		BaseURL: scrubbed(s, c.BaseURL),
-		Model:   scrubbed(s, c.Model),
-		KeyEnv:  scrubbed(s, c.KeyEnv),
-		KeySet:  set,
+		BaseURL:  scrubbed(s, c.BaseURL),
+		Model:    scrubbed(s, c.Model),
+		KeyEnv:   scrubbed(s, c.KeyEnv),
+		KeySet:   set,
+		Parallel: parallelOf(c),
 	}
+}
+
+// parallelOf is how many artifacts c sends at once.
+func parallelOf(c jarxdir.LLM) int {
+	if c.Parallel <= 0 {
+		return llm.DefaultParallel
+	}
+	return c.Parallel
+}
+
+// checkParallel reads how many to send at once; "" is the default.
+func checkParallel(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return llm.DefaultParallel, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > llm.MaxParallel {
+		return 0, fmt.Errorf("parallel requests are a number from 1 to %d", llm.MaxParallel)
+	}
+	return n, nil
 }
 
 // errLooksLikeKey is for an answer that looks like a key, which jarx won't
@@ -438,7 +475,8 @@ const (
 	stepURL = iota + 1
 	stepModel
 	stepKeyEnv
-	llmSteps = stepKeyEnv
+	stepParallel
+	llmSteps = stepParallel
 )
 
 // setup asks for the base URL, the model and the key's var name, shows a
@@ -452,7 +490,7 @@ func (a *asker) setup(env platform.Env, cfg jarxdir.Config) int {
 		cur.KeyEnv = defaultKeyEnv
 	}
 	a.p.Intro(a.text("llm review setup"), a.texts(
-		"jarx sends one masked artifact at a time to an OpenAI-compatible endpoint",
+		"jarx sends masked artifacts, one per request, to an OpenAI-compatible API",
 		"the key stays in an env var you set. jarx never stores it",
 		"enter keeps the default"+a.p.Sep()+"ctrl+c quits without saving",
 	))
@@ -511,7 +549,20 @@ func (a *asker) ask(cur jarxdir.LLM) (jarxdir.LLM, bool) {
 		a.p.Commands(setKeyCommands(a, keyEnv))
 	}
 	a.p.Blank()
-	return jarxdir.LLM{BaseURL: base, Model: model, KeyEnv: keyEnv}, true
+
+	a.p.Question(stepParallel, llmSteps, a.text("parallel requests"), a.text(strconv.Itoa(parallelOf(cur))), a.texts(
+		"how many artifacts are sent at once, 1 to "+strconv.Itoa(llm.MaxParallel)+". lower it if the endpoint rate-limits you",
+	))
+	n, ok := a.until(strconv.Itoa(parallelOf(cur)), func(v string) (string, error) {
+		n, err := checkParallel(v)
+		return strconv.Itoa(n), err
+	})
+	if !ok {
+		return jarxdir.LLM{}, false
+	}
+	parallel, _ := strconv.Atoi(n) // checkParallel took it
+	a.p.Blank()
+	return jarxdir.LLM{BaseURL: base, Model: model, KeyEnv: keyEnv, Parallel: parallel}, true
 }
 
 // confirmSave shows the summary and saves on a yes. When saved is false,

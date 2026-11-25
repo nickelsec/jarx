@@ -116,13 +116,19 @@ func TestReviewSendsEachArtifactOnItsOwn(t *testing.T) {
 	if err != nil || res.Sent != len(arts) || len(f.bodies) != len(arts) {
 		t.Fatalf("Review() = %+v, %v with %d requests; want one per artifact (%d)", res, err, len(f.bodies), len(arts))
 	}
+	// Several go at once, so each request is matched to its artifact by
+	// what it holds, and each artifact goes exactly once.
+	sent := map[string]int{}
 	for i, body := range f.bodies {
 		system, a := sentContent(t, body)
 		if system != systemPrompt {
 			t.Errorf("request %d system prompt isn't the fixed one", i)
 		}
-		if a.Kind != string(arts[i].Kind) || a.Text != arts[i].Text.String() {
-			t.Errorf("request %d sent %+v, want artifact %d", i, a, i)
+		sent[a.Kind+"\x00"+a.Text]++
+	}
+	for i, a := range arts {
+		if n := sent[string(a.Kind)+"\x00"+a.Text.String()]; n != 1 {
+			t.Errorf("artifact %d (%s) went %d times, want once", i, a.Kind, n)
 		}
 	}
 }
@@ -223,8 +229,10 @@ func TestReviewStopsWhenTheKeyIsRejected(t *testing.T) {
 
 	_, err := review(t, f, arts, NewCache())
 
-	if !errors.Is(err, ErrKeyRejected) || len(f.bodies) != 1 {
-		t.Errorf("Review() error = %v with %d requests, want ErrKeyRejected after one", err, len(f.bodies))
+	// The ones already out when the first 401 comes back still finish;
+	// nothing after them starts.
+	if !errors.Is(err, ErrKeyRejected) || len(f.bodies) > DefaultParallel {
+		t.Errorf("Review() error = %v with %d requests, want ErrKeyRejected and no more than the %d in flight", err, len(f.bodies), DefaultParallel)
 	}
 }
 
@@ -467,12 +475,14 @@ func TestReviewWithSaysHowManyAreDone(t *testing.T) {
 	arts := Collect(scrubber(t), []model.Project{project(scrubber(t))})
 	var got []int
 
-	_, err := ReviewWith(context.Background(), netguard.NewLLM(), endpoint(t, f.serve(t)), scrubber(t), arts, NewCache(), func(done, total int) {
-		if total != len(arts) {
-			t.Errorf("total = %d, want %d", total, len(arts))
+	_, err := ReviewWith(context.Background(), netguard.NewLLM(), endpoint(t, f.serve(t)), scrubber(t), arts, NewCache(), Options{Parallel: 1, OnStatus: func(st Status) {
+		if st.Total != len(arts) {
+			t.Errorf("total = %d, want %d", st.Total, len(arts))
 		}
-		got = append(got, done)
-	})
+		if len(got) == 0 || got[len(got)-1] != st.Done {
+			got = append(got, st.Done)
+		}
+	}})
 
 	if err != nil {
 		t.Fatal(err)

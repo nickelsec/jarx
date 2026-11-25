@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/nickelsec/jarx/internal/jarxdir"
@@ -24,13 +25,18 @@ const (
 // Cache is the LLM cache. A nil-safe zero value isn't needed: use NewCache
 // or LoadCache.
 type Cache struct {
+	mu      sync.Mutex
 	entries map[string]cacheEntry
 	changed bool
 }
 
+// cacheEntry is the findings kept for an artifact, or a mark that it failed
+// last time. A failed one is sent again; the mark is only so the preview
+// can say so.
 type cacheEntry struct {
 	At       int64  `json:"at"` // Unix seconds, for keeping the newest
 	Findings []Item `json:"findings"`
+	Failed   bool   `json:"failed,omitempty"`
 }
 
 type cacheJSON struct {
@@ -57,11 +63,17 @@ func LoadCache(env platform.Env) *Cache {
 }
 
 // Len is how many artifacts the cache knows.
-func (c *Cache) Len() int { return len(c.entries) }
+func (c *Cache) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.entries)
+}
 
 // Save writes the cache when the review added to it, keeping the newest
 // maxCached entries.
 func (c *Cache) Save(env platform.Env) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if !c.changed {
 		return nil
 	}
@@ -92,16 +104,35 @@ func (c *Cache) Save(env platform.Env) error {
 }
 
 func (c *Cache) get(key string) ([]Item, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	e, ok := c.entries[key]
-	return e.Findings, ok
+	return e.Findings, ok && !e.Failed
 }
 
 func (c *Cache) put(key string, items []Item) {
 	if items == nil {
 		items = []Item{}
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.entries[key] = cacheEntry{At: time.Now().Unix(), Findings: items}
 	c.changed = true
+}
+
+// markFailed notes that key had no valid answer this time.
+func (c *Cache) markFailed(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[key] = cacheEntry{At: time.Now().Unix(), Failed: true}
+	c.changed = true
+}
+
+// failedBefore reports whether key failed last time it was sent.
+func (c *Cache) failedBefore(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.entries[key].Failed
 }
 
 // cacheKey is a hash of what decides the answer: the prompt version, the

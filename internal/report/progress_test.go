@@ -65,17 +65,17 @@ func TestProgressShowsMinutes(t *testing.T) {
 func TestProgressBarFillsAndLinesUp(t *testing.T) {
 	g, _, c := testProgress(Style{Width: 80, Unicode: true}, "reviewing")
 
-	g.Bar("reviewing", 14, "artifacts")
+	g.Bar("reviewing", 14)
 	g.Set(6, 0)
 	c.t = c.t.Add(38 * time.Second)
 	got := g.render()
 	g.Set(14, 0)
 	full := g.render()
 
-	if want := "⠋ reviewing  [████████░░░░░░░░░░░░]   6 of 14 artifacts   38s"; got != want {
+	if want := "⠋ reviewing  [████████░░░░░░░░░░░░]   6 of 14   38s"; got != want {
 		t.Errorf("render = %q, want %q", got, want)
 	}
-	if want := "⠋ reviewing  [████████████████████]  14 of 14 artifacts   38s"; full != want {
+	if want := "⠋ reviewing  [████████████████████]  14 of 14   38s"; full != want {
 		t.Errorf("full = %q, want %q", full, want)
 	}
 }
@@ -83,14 +83,14 @@ func TestProgressBarFillsAndLinesUp(t *testing.T) {
 func TestProgressIsASCIIWhereTheTerminalIs(t *testing.T) {
 	g, _, _ := testProgress(Style{Width: 80}, "reviewing", "probing MCP servers")
 
-	g.Bar("reviewing", 4, "artifacts")
+	g.Bar("reviewing", 4)
 	g.Set(1, 0)
 	bar := g.render()
 	g.Count("probing MCP servers", 2)
 	g.Set(1, 1)
 	count := g.render()
 
-	if want := "| reviewing            [#####---------------]  1 of 4 artifacts"; bar != want {
+	if want := "| reviewing            [#####---------------]  1 of 4"; bar != want {
 		t.Errorf("bar = %q, want %q", bar, want)
 	}
 	if want := "| probing MCP servers  1 of 2 - 1 running"; count != want {
@@ -168,7 +168,29 @@ func TestANilProgressDoesNothing(_ *testing.T) {
 	var g *Progress
 	g.Step("x")
 	g.Count("x", 1)
-	g.Bar("x", 1, "things")
+	g.Bar("x", 1)
 	g.Set(1, 0)
 	g.Stop()
+}
+
+func TestProgressSaysWhatIsRunningAndWaiting(t *testing.T) {
+	g, _, c := testProgress(Style{Width: 80, Unicode: true}, "reviewing")
+
+	g.Bar("reviewing", 85)
+	g.Set(14, 4)
+	g.Waiting(1)
+	c.t = c.t.Add(65 * time.Second)
+	got := g.render()
+	g.Waiting(0)
+	none := g.render()
+
+	if want := "⠋ reviewing  [███░░░░░░░░░░░░░░░░░]  14 of 85 · 4 running · 1 waiting   1m 05s"; got != want {
+		t.Errorf("render = %q, want %q", got, want)
+	}
+	if cells(got) > 79 { // one short of 80
+		t.Errorf("render is %d cells, want it to fit 80 columns", cells(got))
+	}
+	if strings.Contains(none, "waiting") {
+		t.Errorf("render = %q, want no waiting once nothing waits", none)
+	}
 }

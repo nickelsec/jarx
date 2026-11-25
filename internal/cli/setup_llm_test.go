@@ -98,9 +98,10 @@ func (r *ctrlCReader) Read(b []byte) (int, error) {
 }
 
 type savedLLM struct {
-	BaseURL string `json:"baseUrl"`
-	Model   string `json:"model"`
-	KeyEnv  string `json:"keyEnv"`
+	BaseURL  string `json:"baseUrl"`
+	Model    string `json:"model"`
+	KeyEnv   string `json:"keyEnv"`
+	Parallel int    `json:"parallel"`
 }
 
 // savedConfig reads the fake home's config file as it is on disk.
@@ -168,7 +169,7 @@ func TestSetupLLMWithoutATerminalSaysHowToScriptIt(t *testing.T) {
 			t.Errorf("stderr = %q, want it to contain %q", got.stderr, want)
 		}
 	}
-	if strings.Contains(got.stdout, "1/3") {
+	if strings.Contains(got.stdout, "1/4") {
 		t.Errorf("stdout = %q, want no questions without a terminal", got.stdout)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".jarx-state")); !errors.Is(err, fs.ErrNotExist) {
@@ -187,12 +188,13 @@ func TestSetupLLMFlagsSaveWithoutATerminal(t *testing.T) {
 	want := "llm review\n" +
 		"+- endpoint  https://llm.example.com/v1\n" +
 		"+- model     m-1\n" +
-		`\- key       from MY_KEY  not set in this terminal` + "\n" +
+		"+- key       from MY_KEY  not set in this terminal\n" +
+		`\- parallel  4 at a time` + "\n" +
 		"\nsaved to " + tilde(".jarx-state", "config.json") + "\n"
 	if got.stdout != want {
 		t.Errorf("stdout\n%s\nwant\n%s", got.stdout, want)
 	}
-	if _, llm := savedConfig(t, home); llm == nil || *llm != (savedLLM{"https://llm.example.com/v1", "m-1", "MY_KEY"}) {
+	if _, llm := savedConfig(t, home); llm == nil || *llm != (savedLLM{"https://llm.example.com/v1", "m-1", "MY_KEY", 4}) {
 		t.Errorf("saved llm = %+v", llm)
 	}
 }
@@ -310,6 +312,8 @@ func TestSetupLLMAsksOneQuestionAtATime(t *testing.T) {
 		"\n" + // refused: no model yet
 		"m-1\n" +
 		"\n" + // the default var name
+		"0\n" + // refused: not 1 to 16
+		"\n" + // the default, 4 at a time
 		"\n" // save, the default
 
 	got := ask(input, "setup", "--home", home, "llm")
@@ -317,48 +321,11 @@ func TestSetupLLMAsksOneQuestionAtATime(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("exit = %d, stderr %q\n%s", got.code, got.stderr, got.stdout)
 	}
-	want := "llm review setup\n" +
-		"+- jarx sends one masked artifact at a time to an OpenAI-compatible endpoint\n" +
-		"+- the key stays in an env var you set. jarx never stores it\n" +
-		`\- enter keeps the default - ctrl+c quits without saving` + "\n" +
-		"\n" +
-		"1/3  base url\n" +
-		"     an OpenAI-compatible endpoint: https, or http on loopback only\n" +
-		"     like https://api.openai.com/v1 or http://127.0.0.1:11434/v1\n" +
-		"  >  " +
-		`     \- plain http only goes to loopback (127.0.0.1, ::1, localhost)` + "\n" +
-		"  >  " +
-		`     \- ok  https - llm.example.com` + "\n" +
-		"\n" +
-		"2/3  model\n" +
-		"     the model name your endpoint expects\n" +
-		"  >  " +
-		`     \- a model is needed` + "\n" +
-		"  >  " +
-		"\n" +
-		"3/3  key env var  [JARX_LLM_KEY]\n" +
-		"     the name of the env var that holds the key, read only when jarx sends\n" +
-		"     set it only in the terminal you run jarx from. a key in your shell profile\n" +
-		"     is in every agent's env too, so the agents can read it\n" +
-		"  >  " +
-		`     \- JARX_LLM_KEY isn't set in this terminal. to set it without it landing in` + "\n" +
-		"        shell history:\n" +
-		"        powershell  $env:JARX_LLM_KEY = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'key')).Password\n" +
-		"        bash, zsh   read -rs JARX_LLM_KEY && export JARX_LLM_KEY\n" +
-		"\n" +
-		"llm review\n" +
-		"+- endpoint  https://llm.example.com/v1\n" +
-		"+- model     m-1\n" +
-		`\- key       from JARX_LLM_KEY  not set in this terminal` + "\n" +
-		"\n" +
-		"save to " + tilde(".jarx-state", "config.json") + "?  [Y/n]\n" +
-		"  >  " +
-		"saved\n" +
-		"set JARX_LLM_KEY, then run jarx setup llm again to test the connection\n"
+	want := setupFlow()
 	if got.stdout != want {
 		t.Errorf("stdout\n%s\nwant\n%s", got.stdout, want)
 	}
-	if _, llm := savedConfig(t, home); llm == nil || *llm != (savedLLM{"https://llm.example.com/v1", "m-1", "JARX_LLM_KEY"}) {
+	if _, llm := savedConfig(t, home); llm == nil || *llm != (savedLLM{"https://llm.example.com/v1", "m-1", "JARX_LLM_KEY", 4}) {
 		t.Errorf("saved llm = %+v", llm)
 	}
 }
@@ -367,18 +334,19 @@ func TestSetupLLMDefaultsAreTheSavedValues(t *testing.T) {
 	home := fakeHome(t, "")
 	runIn("", "setup", "llm", "--home", home, "--url", "https://llm.example.com/v1", "--model", "m-1", "--key-env", "MY_KEY")
 
-	got := ask("\n\n\n\n", "setup", "--home", home, "llm")
+	got := ask("\n\n\n\n\n", "setup", "--home", home, "llm")
 
 	for _, want := range []string{
-		"1/3  base url  [https://llm.example.com/v1]\n",
-		"2/3  model  [m-1]\n",
-		"3/3  key env var  [MY_KEY]\n",
+		"1/4  base url  [https://llm.example.com/v1]\n",
+		"2/4  model  [m-1]\n",
+		"3/4  key env var  [MY_KEY]\n",
+		"4/4  parallel requests  [4]\n",
 	} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("stdout = %q, want it to contain %q", got.stdout, want)
 		}
 	}
-	if _, llm := savedConfig(t, home); llm == nil || *llm != (savedLLM{"https://llm.example.com/v1", "m-1", "MY_KEY"}) {
+	if _, llm := savedConfig(t, home); llm == nil || *llm != (savedLLM{"https://llm.example.com/v1", "m-1", "MY_KEY", 4}) {
 		t.Errorf("saved llm = %+v, want the old values kept", llm)
 	}
 }
@@ -399,7 +367,7 @@ func TestSetupLLMEndOfInputSavesNothing(t *testing.T) {
 func TestSetupLLMAnsweringNoSavesNothing(t *testing.T) {
 	home := fakeHome(t, "")
 
-	got := ask("https://llm.example.com/v1\nm-1\n\nmaybe\nn\n", "setup", "--home", home, "llm")
+	got := ask("https://llm.example.com/v1\nm-1\n\n\nmaybe\nn\n", "setup", "--home", home, "llm")
 
 	if got.code != 0 || !strings.Contains(got.stdout, "answer y or n") || !strings.HasSuffix(got.stdout, "not saved\n") {
 		t.Errorf("exit %d, stdout %q; want a re-ask, then not saved", got.code, got.stdout)
@@ -412,7 +380,7 @@ func TestSetupLLMAnsweringNoSavesNothing(t *testing.T) {
 func TestSetupLLMSaysWhenTheVarIsSet(t *testing.T) {
 	home := fakeHome(t, "")
 
-	got := terminal(map[string]string{"MY_KEY": canaryLLMKey}).ask("https://llm.example.com/v1\nm-1\nMY_KEY\ny\nn\n", "setup", "--home", home, "llm")
+	got := terminal(map[string]string{"MY_KEY": canaryLLMKey}).ask("https://llm.example.com/v1\nm-1\nMY_KEY\n\ny\nn\n", "setup", "--home", home, "llm")
 
 	for _, want := range []string{`\- ok  MY_KEY is set in this terminal`, "key       from MY_KEY  set in this terminal", "test the connection?  [y/N]\n"} {
 		if !strings.Contains(got.stdout, want) {
@@ -452,7 +420,7 @@ func TestSetupLLMTestsTheConnectionOnlyWhenAsked(t *testing.T) {
 	f := &fakeLLM{}
 	base := f.serve(t, http.StatusOK)
 
-	got := term.ask(base+"\nm-1\n\ny\n\n", "setup", "--home", home, "llm")
+	got := term.ask(base+"\nm-1\n\n\ny\n\n", "setup", "--home", home, "llm")
 
 	if got.code != 0 || f.requests != 0 {
 		t.Errorf("exit %d with %d requests, want 0 and none: the test defaults to no", got.code, f.requests)
@@ -461,7 +429,7 @@ func TestSetupLLMTestsTheConnectionOnlyWhenAsked(t *testing.T) {
 		t.Errorf("stdout = %q, want the test question to say what it sends and where", got.stdout)
 	}
 
-	got = term.ask(answers(base, "m-1", "", "y", "y"), "setup", "--home", home, "llm")
+	got = term.ask(answers(base, "m-1", "", "", "y", "y"), "setup", "--home", home, "llm")
 
 	if got.code != 0 || f.requests != 1 {
 		t.Fatalf("exit %d with %d requests, want 0 and one (stderr %q)", got.code, f.requests, got.stderr)
@@ -483,7 +451,7 @@ func TestSetupLLMConnectionTestFailureSaysWhy(t *testing.T) {
 	f := &fakeLLM{}
 	base := f.serve(t, http.StatusUnauthorized)
 
-	got := terminal(map[string]string{"JARX_LLM_KEY": canaryLLMKey}).ask(answers(base, "m-1", "", "y", "y"), "setup", "--home", home, "llm")
+	got := terminal(map[string]string{"JARX_LLM_KEY": canaryLLMKey}).ask(answers(base, "m-1", "", "", "y", "y"), "setup", "--home", home, "llm")
 
 	if got.code != 1 || !strings.Contains(got.stdout, "the endpoint rejected the key (HTTP 401)") {
 		t.Errorf("exit %d, stdout %q; want 1 with the reason", got.code, got.stdout)
@@ -514,7 +482,7 @@ func TestSetupLLMCtrlCAfterSavingSaysTheSettingsAreSaved(t *testing.T) {
 	f := &fakeLLM{}
 	base := f.serve(t, http.StatusOK)
 
-	got := terminal(map[string]string{"JARX_LLM_KEY": canaryLLMKey}).askThenCtrlC(t, answers(base, "m-1", "", "y"), "setup", "--home", home, "llm")
+	got := terminal(map[string]string{"JARX_LLM_KEY": canaryLLMKey}).askThenCtrlC(t, answers(base, "m-1", "", "", "y"), "setup", "--home", home, "llm")
 
 	if got.code != 130 || !strings.HasSuffix(got.stdout, "\ncancelled. the settings are saved\n") {
 		t.Errorf("exit %d, stdout %q; want 130 ending in cancelled, settings saved", got.code, got.stdout)
@@ -535,4 +503,83 @@ func TestTheKeyComesFromTheTerminalNotTheFakeHome(t *testing.T) {
 	if !strings.HasSuffix(got.stdout, "key from JARX_LLM_KEY  not set\n") {
 		t.Errorf("setup stdout = %q, want the key not set: .jarx-env doesn't count", got.stdout)
 	}
+}
+
+func TestSetupLLMAsksHowManyToSendAtOnce(t *testing.T) {
+	home := fakeHome(t, "")
+
+	got := ask(answers("https://llm.example.com/v1", "m-1", "", "abc", "17", "2", "y"), "setup", "--home", home, "llm")
+
+	if strings.Count(got.stdout, "parallel requests are a number from 1 to 16") != 2 {
+		t.Errorf("stdout = %q, want abc and 17 refused", got.stdout)
+	}
+	if _, llm := savedConfig(t, home); llm == nil || llm.Parallel != 2 {
+		t.Errorf("saved llm = %+v, want parallel 2", llm)
+	}
+}
+
+func TestSetupLLMFlagsTakeParallel(t *testing.T) {
+	home := fakeHome(t, "")
+	flags := []string{"setup", "llm", "--home", home, "--url", "https://llm.example.com/v1", "--model", "m-1", "--key-env", "K"}
+
+	got := runIn("", append(flags, "--parallel", "8")...)
+
+	if _, llm := savedConfig(t, home); got.code != 0 || llm == nil || llm.Parallel != 8 {
+		t.Errorf("exit %d, saved %+v; want parallel 8 (stderr %q)", got.code, llm, got.stderr)
+	}
+	for _, bad := range []string{"0", "17", "x"} {
+		if got := runIn("", append(flags, "--parallel", bad)...); got.code != 1 || !strings.Contains(got.stderr, "parallel requests are a number from 1 to 16") {
+			t.Errorf("--parallel %s: exit %d, stderr %q; want 1 and why", bad, got.code, got.stderr)
+		}
+	}
+}
+
+// setupFlow is TestSetupLLMAsksOneQuestionAtATime's whole expected output.
+func setupFlow() string {
+	return "llm review setup\n" +
+		"+- jarx sends masked artifacts, one per request, to an OpenAI-compatible API\n" +
+		"+- the key stays in an env var you set. jarx never stores it\n" +
+		`\- enter keeps the default - ctrl+c quits without saving` + "\n" +
+		"\n" +
+		"1/4  base url\n" +
+		"     an OpenAI-compatible endpoint: https, or http on loopback only\n" +
+		"     like https://api.openai.com/v1 or http://127.0.0.1:11434/v1\n" +
+		"  >  " +
+		`     \- plain http only goes to loopback (127.0.0.1, ::1, localhost)` + "\n" +
+		"  >  " +
+		`     \- ok  https - llm.example.com` + "\n" +
+		"\n" +
+		"2/4  model\n" +
+		"     the model name your endpoint expects\n" +
+		"  >  " +
+		`     \- a model is needed` + "\n" +
+		"  >  " +
+		"\n" +
+		"3/4  key env var  [JARX_LLM_KEY]\n" +
+		"     the name of the env var that holds the key, read only when jarx sends\n" +
+		"     set it only in the terminal you run jarx from. a key in your shell profile\n" +
+		"     is in every agent's env too, so the agents can read it\n" +
+		"  >  " +
+		`     \- JARX_LLM_KEY isn't set in this terminal. to set it without it landing in` + "\n" +
+		"        shell history:\n" +
+		"        powershell  $env:JARX_LLM_KEY = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'key')).Password\n" +
+		"        bash, zsh   read -rs JARX_LLM_KEY && export JARX_LLM_KEY\n" +
+		"\n" +
+		"4/4  parallel requests  [4]\n" +
+		"     how many artifacts are sent at once, 1 to 16. lower it if the endpoint\n" +
+		"     rate-limits you\n" +
+		"  >  " +
+		`     \- parallel requests are a number from 1 to 16` + "\n" +
+		"  >  " +
+		"\n" +
+		"llm review\n" +
+		"+- endpoint  https://llm.example.com/v1\n" +
+		"+- model     m-1\n" +
+		"+- key       from JARX_LLM_KEY  not set in this terminal\n" +
+		`\- parallel  4 at a time` + "\n" +
+		"\n" +
+		"save to " + tilde(".jarx-state", "config.json") + "?  [Y/n]\n" +
+		"  >  " +
+		"saved\n" +
+		"set JARX_LLM_KEY, then run jarx setup llm again to test the connection\n"
 }
