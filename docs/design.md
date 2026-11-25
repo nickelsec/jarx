@@ -1116,6 +1116,96 @@ width, `tree` and `spacedTree` for blocks, and `branch` for title and
 detail lines. Tests pin the layout with an exact expected view of the
 demo scan at 80 columns, so a layout change shows up as a test change.
 
+## Dashboard look
+
+Agreed before any `ui` code, from a clickable mockup. The dashboard shows
+the same data as the CLI, grouped the same way: projects worst first,
+findings worst first, every critical and high one always shown.
+
+### Layout
+
+- **Sidebar:** the logo, then Overview, Changes, LLM review and Settings,
+  then the projects worst first with a small bar of their findings by
+  severity, then when the last scan ran.
+- **Overview:** one tile per severity plus what changed, each with the
+  change since the last scan as text and no chart. A tile filters the
+  findings table. Below them, exposure paths (an agent, the way in, and
+  the credential it reaches, from the reach verdicts) and an "at a
+  glance" column: agent installs and advisories, MCP servers by status,
+  credential states per agent, and the last LLM review. Then the findings
+  table.
+- **Project page:** the path, each agent's trust, how it was walked, its
+  counts, then tabs: Findings, Loads, Credentials and reach, MCP,
+  Permissions, Egress, Sessions. Credentials and reach is a grid of every
+  credential by channel, a verdict in each cell, and the selected cell's
+  why trail and fix beside it.
+- **LLM review:** what would be sent, what's cached, what failed last
+  time and what you skipped, then a checklist of every artifact with its
+  state, "Review checked", "Rerun failed" and "Skip checked", and a
+  progress strip while it runs.
+- **Settings:** the LLM settings (base URL, model, key env var and
+  whether it's set, parallel requests, test connection, turn off), extra
+  repos, and about.
+
+### Filters
+
+The findings table has quick filters as chips: one per severity, with its
+count. Next to them a Filters button (a funnel icon, with the number of
+active filters) opens a panel to pick several at once: severity, project,
+agent, area (MCP, secrets, reach, permissions, instructions, history,
+versions, LLM review) and status (new since the last scan). The panel has
+Clear all, and each active filter shows as a chip that removes it. Filters
+live in the URL, so the back button and bookmarks work.
+
+### Color
+
+Dark only, matte. There's no light theme and no theme switch. Neutrals
+are zinc, a little lifted from black so nothing glares, and buttons,
+pickers and the active nav item use gray, not a brand color. Severity is
+the only color on the page, muted, and always next to its word.
+
+| Token | Value | Use |
+|---|---|---|
+| `bg` | `#0e0e10` | page |
+| `surface` | `#151518` | cards, sidebar |
+| `raised` | `#1b1b1f` | nested panels, table hover |
+| `hover` | `#212126` | nav and button hover, active nav |
+| `border` | `#26262b` | dividers |
+| `border-2` | `#34343b` | inputs, outlined buttons |
+| `text` | `#e7e7ea` | body (14.8:1 on surface) |
+| `text-2` | `#a1a1aa` | secondary (7.1:1) |
+| `text-3` | `#85858f` | labels, hints (at least 4.5:1 on every panel) |
+| `button` | `#26262b`, text `#e7e7ea` | primary buttons, selected chips |
+| `crit` | `#f0a3ab` on a 16% `#d9596a` tint; solid `#9c3a47` with `#f6e3e5` for the CRIT pill | critical |
+| `high` | `#e9a593` on a 16% `#cf6f5c` tint | high, "runs without asking" |
+| `med` | `#dcbd85` on a 16% `#c79a4b` tint | medium, "may run without asking" |
+| `info` | `#97bccb` on a 16% `#6f9fb3` tint | info, "asks first" |
+| `ok` | `#a3c7ae` on a 16% `#7fae8c` tint | trusted, blocked |
+
+Every text pair passes 4.5:1. CRIT is the only solid pill, so it stands
+apart from HIGH in lightness, not just hue. Small square dots, after the
+pixel logo, mark severity and status.
+
+### Type
+
+Two families, both open-licensed (SIL OFL) and embedded, since nothing
+loads from a CDN: Space Grotesk for page and section titles, Inter for
+everything else at 13.5px. Paths, rule IDs and evidence use the system's
+monospace font (Cascadia Mono, Consolas, SF Mono, Menlo).
+
+### Logo
+
+`logo.png` traced into rectangles: a 9 KB SVG in `currentColor` instead of
+an 856 KB PNG, with no background. Plus a jar-only mark for the favicon
+and the collapsed sidebar. Both are embedded.
+
+### How it's built
+
+One CSS file with these tokens as custom properties, classes for every
+component, and no inline `style` attributes, since the CSP allows styles
+only from that file. The little JavaScript there is (the filter panel,
+expanding a row, the LLM review progress) is one embedded file too.
+
 ## Package layout
 
 | Package | Job | PRD section |

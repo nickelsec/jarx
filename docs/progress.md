@@ -544,7 +544,16 @@ masked leak.
 
 ## Phase 7: Dashboard
 
-- [ ] talk through how the UI should look (before any `ui` code)
+- [x] talk through how the UI should look (before any `ui` code). Agreed
+  from a clickable mockup and written up as Dashboard look in design.md:
+  a projects-first sidebar, an overview of severity tiles, exposure paths
+  and the findings table, project pages with tabs, an LLM review page with
+  a checklist, and settings. Dark only and matte, gray for buttons and
+  pickers, color only for severity. Space Grotesk for titles and Inter for
+  text, embedded. Quick filters plus a Filters panel with Clear all. The
+  logo traced to an SVG
+  - Not covered yet: the fonts and logo files themselves come with the
+    pages item, where the CSS uses them
 - [ ] `ui` server and security middleware with tests
 - [ ] pages
 - [ ] snapshot picker and write actions (repo add and remove, rescan)
