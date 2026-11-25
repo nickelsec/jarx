@@ -17,3 +17,9 @@ func termOS(f *os.File) termFacts {
 	}
 	return termFacts{tty: true, width: int(ws.Col), vt: true}
 }
+
+// isTTY asks whether f is a terminal: only a terminal answers TIOCGWINSZ.
+func isTTY(f *os.File) bool {
+	_, err := unix.IoctlGetWinsize(int(f.Fd()), unix.TIOCGWINSZ)
+	return err == nil
+}

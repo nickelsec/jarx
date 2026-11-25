@@ -548,14 +548,107 @@ masked leak.
 - [ ] `ui` server and security middleware with tests
 - [ ] pages
 - [ ] snapshot picker and write actions (repo add and remove, rescan)
+- [ ] the LLM review button and LLM settings, with how many to send at
+  once (phase 8 came first)
+- [ ] choose which artifacts the LLM review sends, rerun only the ones that
+  failed, and show a skipped one as "not reviewed, you skipped it". A skip
+  is remembered by the artifact's content hash in jarx's state dir, so a
+  changed file comes back
 
 **Run it:** `jarx ui --home testdata/demo`.
 
 ## Phase 8: LLM review
 
-- [ ] `keystore` and `jarx setup llm`
-- [ ] `llm` client: preview, schema check and retry, quote check, cache,
-  canary test
-- [ ] `jarx scan --llm` and the dashboard button
+Built before phase 7, so the dashboard button moved there. The key stays
+in an env var you name; jarx never stores it.
+
+- [x] `jarx setup llm`: one question at a time for the base URL, model and
+  key env var name, `setup llm off`, the one-line flag version, the
+  connection test, and the llm row in `jarx setup`. `netguard.CheckURL`
+  checks a URL by its text with the same rules a request gets, and also
+  refuses a user, password, query or fragment. An answer that looks like a
+  key is refused, checked with a scrubber that has no fingerprint key so a
+  refused answer writes nothing. `llm.Key` prints as `[key]` and encodes
+  as null, and `llm.Ping` sends one fixed chat request and names what went
+  wrong without quoting the reply or the URL. `report` gained the question
+  pieces from the new Questions section and the settings tree, so `jarx
+  setup` is a block now. `cli.Run` takes stdin, and questions need both
+  stdin and stdout to be terminals (`platform.IsTerminal`). go-keyring is
+  out of depguard and the docs. While it asks, setup catches ctrl+c itself and says "cancelled, nothing saved" (exit
+  130), or that the settings are saved when it comes after the save, and
+  ctrl+c stops a running connection test
+  - Not covered yet: the questions are tested with a forced terminal and a
+    fake ctrl+c, not a real one; endpoints that want the key in a header other than `Authorization:
+    Bearer` (like Azure's `api-key`); a fish command for setting the key;
+    and LLM settings in the dashboard (phase 7) (63ded48)
+- [x] `llm` client: preview, schema check and retry, quote check, cache,
+  canary test. `Collect` takes instruction files, skills, hook commands
+  with their scripts and listed tools, in effect and read, once each, and
+  never memory or history; an artifact over 64 KiB is cut. `Review` sends
+  one artifact per request with a fixed prompt, checks the reply's fixed
+  shape, retries once with what was wrong, keeps a finding only when its
+  quote is in what was sent, and masks the model's words. Three rules:
+  `JARX-LLM-001` (high), `002` (medium) and `003` (info, no valid answer).
+  A rejected key or an unreachable endpoint stops the review. `Plan` gives
+  the preview: what would be sent by kind, what's cached, rough tokens and
+  the host. The cache is `llm-cache.json`, keyed on the prompt version,
+  base URL, model and artifact, and never keeps a failure.
+  `netguard.NewLLM` waits 120s, since headers only come once the model is
+  done, and setup's connection test uses it too. The canary test plants
+  two token formats and a secret known only by its name in every slot of
+  every artifact kind, runs a review with a retry, and checks no request
+  body and no finding holds one
+  - Not covered yet: the review isn't wired into `jarx scan` yet (item 3);
+    one request at a time, with no concurrency or backoff on a 429; prompts
+    and resources servers offer; and the token count is bytes over four,
+    not a real tokenizer (2357bff)
+- [x] `jarx scan --llm`: the preview and the yes or no question. Before
+  scanning it refuses without a terminal, when the review isn't set up,
+  and when the key's var isn't set in this terminal (with the commands
+  that set it). After the scanned block it shows the `llm review` block
+  (artifacts by kind, rough tokens, what's cached, host, model and key
+  var) and asks `[y/N]`. Nothing cached and nothing sent are said on their
+  own line, all cached asks nothing, and ctrl+c at the question or during
+  the review stops the scan with exit 130. The findings join the groups,
+  and the snapshot keeps the rules' findings only, so a scan without
+  `--llm` doesn't show them as removed. A rejected key or an unreachable
+  endpoint says why, prints the rest and exits 1. `report.Scan` split into
+  `ScanHead` and `ScanBody` for the block in between. The key is read
+  from the terminal's env even with `--home` (`cli.streams.lookupKey`,
+  `platform.LookupReal` in `cli.Run`), so the demo never needs a real key
+  in a file, and setup reads it the same way
+  - Not covered yet: the dashboard button (phase 7), and a review of
+    servers' prompts and resources (cf1cc61)
+- [x] fix: OpenCode Go answered `400 MissingSessionID`. Its docs ask
+  clients for their own user agent and a stable `x-opencode-session` per
+  conversation. Every LLM request now sends `User-Agent: jarx/<version>`
+  and a random session ID, one per review run (retries included) and one
+  per connection test. The ID says nothing about the user or the scan, so
+  it goes to every endpoint, which also covers a proxy in front of Go
+  - Not covered yet: checked against a fake endpoint only, not OpenCode Go
+    itself, and MCP probes still send Go's default user agent (cb0884b)
+- [x] progress line: while a scan works, one line on stderr names the step
+  (session history, agent config, walking projects, probing MCP servers,
+  checking findings) with a count and the time so far, and it's erased
+  before the report. The `--llm` review is a bar and setup's connection
+  test a spinner. Step names are padded to the longest and counts to their
+  total, so nothing moves as it updates. It only draws when stderr is a
+  terminal and only shows jarx's own words. `report.Progress` draws it,
+  with `discover.RunWith`, `probe.Options.OnProgress` and `llm.ReviewWith`
+  reporting counts. A new Progress part in the Terminal output section
+  - Not covered yet: a count while history is read and while the adapters
+    read settings, and checking it by eye in every terminal the PRD lists
+    (cb0884b)
+- [x] parallel review and rate limits. The review sends artifacts several
+  at once, 4 unless setup says otherwise (1 to 16, the 4th question and
+  `--parallel`), with findings in the artifacts' order. A 429 waits for
+  `Retry-After`, or backs off from 2s, at most 60s a wait and 5 times,
+  then that artifact fails and the rest go on. The cache marks failures,
+  so the preview says what's cached, what failed last time and is sent
+  again, and what's new, plus how many go at once. The bar counts what's
+  running and waiting
+  - Not covered yet: no slowing down for the whole run after a 429 (each
+    request waits on its own), and `x-ratelimit-*` headers aren't read
+    (ce6d7a5)
 
 **Run it:** `jarx setup llm`, then `jarx scan --llm --home testdata/demo`.

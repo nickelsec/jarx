@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -400,5 +401,34 @@ func TestOAuthAndHelperServersAreNeverContacted(t *testing.T) {
 				t.Errorf("the server got %q, want no contact", got)
 			}
 		})
+	}
+}
+
+func TestRunSaysHowFarItGot(t *testing.T) {
+	c := fakeContext(t, map[string]string{"p/a.json": poisoned, "p/b.json": poisoned})
+	type step struct{ done, running, total int }
+	var mu sync.Mutex
+	var steps []step
+	opts := Options{OnProgress: func(done, running, total int) {
+		mu.Lock()
+		defer mu.Unlock()
+		steps = append(steps, step{done, running, total})
+	}}
+	shared := demo(c, "a.json")
+	shared.Origin.Scope = model.ScopeUser
+
+	// Two definitions: a server shared by two projects counts once.
+	run(t, c, opts, project(c, shared, demo(c, "b.json")), project(c, shared))
+
+	if len(steps) == 0 || steps[0] != (step{0, 0, 2}) {
+		t.Fatalf("steps = %v, want it to start at 0 of 2", steps)
+	}
+	if last := steps[len(steps)-1]; last != (step{2, 0, 2}) {
+		t.Errorf("last step = %v, want 2 of 2 with none running", last)
+	}
+	for _, s := range steps {
+		if s.total != 2 || s.running > 2 || s.done+s.running > 2 {
+			t.Errorf("step %v doesn't add up", s)
+		}
 	}
 }

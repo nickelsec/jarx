@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"runtime/debug"
 
 	"github.com/nickelsec/jarx/internal/catalog"
@@ -37,9 +39,42 @@ type helpFunc func(*report.Stream)
 
 func mainHelp(s *report.Stream) { s.Printf(usage) }
 
+// streams are where a run reads and writes. interactive says a person is
+// there to answer questions: both stdin and stdout are terminals.
+// interrupt catches ctrl+c while jarx asks questions; nil means the real
+// signal, and tests pass their own.
+type streams struct {
+	in          io.Reader
+	out, err    io.Writer
+	interactive bool
+	interrupt   func() (<-chan os.Signal, func())
+	lookupKey   keyLookup // the terminal's env, where the LLM key is; nil means no key
+	userAgent   string    // jarx/<version>, what jarx calls itself to the LLM endpoint
+	errLive     bool      // stderr is a terminal, so the progress line can draw there
+}
+
+// keyLookup reads one env var from the terminal jarx runs in. It's how the
+// LLM key is read, even with --home, since the key is set in the terminal
+// and never in a file.
+type keyLookup func(string) (string, bool)
+
+// catchInterrupt catches ctrl+c until stop is called, so a command that's
+// asking questions can say what it did and didn't save.
+func catchInterrupt() (<-chan os.Signal, func()) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt)
+	return ch, func() { signal.Stop(ch) }
+}
+
 // Run runs jarx with args (without the program name) and returns the exit
 // code. ldflagsVersion is the version set at build time, or "".
-func Run(args []string, stdout, stderr io.Writer, ldflagsVersion string) int {
+func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, ldflagsVersion string) int {
+	interactive := platform.DetectTerm(stdout).TTY && platform.IsTerminal(stdin)
+	errLive := platform.DetectTerm(stderr).TTY
+	return runWith(args, streams{in: stdin, out: stdout, err: stderr, interactive: interactive, lookupKey: platform.LookupReal, errLive: errLive}, ldflagsVersion)
+}
+
+func runWith(args []string, st streams, ldflagsVersion string) int {
 	// No patterns until the catalog lands in phase 3, and no fingerprint key:
 	// this scrubber only masks error text and wraps values as Text. New can
 	// only fail on bad patterns, and there are none.
@@ -47,11 +82,15 @@ func Run(args []string, stdout, stderr io.Writer, ldflagsVersion string) int {
 	if err != nil {
 		panic("redact.New with no patterns failed: " + err.Error())
 	}
-	p := report.New(stdout, stderr, plain)
-	t := platform.DetectTerm(stdout)
+	p := report.New(st.out, st.err, plain)
+	t := platform.DetectTerm(st.out)
 	p.Style = report.Style{Width: t.Width, Color: t.Color, Unicode: t.Unicode}
+	et := platform.DetectTerm(st.err)
+	p.ErrStyle = report.Style{Width: et.Width, Color: et.Color, Unicode: et.Unicode}
+	p.Live = st.errLive
 	info, _ := debug.ReadBuildInfo() // nil when not available
 	version := versionFrom(ldflagsVersion, info)
+	st.userAgent = "jarx/" + version
 	// Every run starts with the banner, which has the version.
 	p.Banner(scrubbed(plain, version))
 
@@ -72,9 +111,9 @@ func Run(args []string, stdout, stderr io.Writer, ldflagsVersion string) int {
 	}
 	switch rest[0] {
 	case "scan":
-		return runScan(p, plain, rest[1:])
+		return runScan(p, plain, rest[1:], st)
 	case "setup":
-		return runSetup(p, plain, rest[1:])
+		return runSetup(p, plain, rest[1:], st)
 	default:
 		return usageError(p, mainHelp, scrubbed(plain, fmt.Sprintf("unknown command %q", rest[0])))
 	}

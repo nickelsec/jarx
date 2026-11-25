@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/nickelsec/jarx/internal/fsys"
@@ -18,21 +17,32 @@ import (
 
 const setupUsage = `usage: jarx setup [--home <dir>]
        jarx setup [--home <dir>] repo add|rm <path>
+       jarx setup [--home <dir>] llm [--url <url> --model <model> --key-env <name>]
+       jarx setup [--home <dir>] llm off
 
-Shows jarx's own settings, or adds or removes an extra project path that
-every scan includes. jarx only ever writes its own state dir.
+Shows jarx's own settings, adds or removes an extra project path that every
+scan includes, or sets up the optional LLM review. In a terminal, jarx setup
+llm asks one question at a time; with all three flags it asks nothing. The
+key stays in the env var you name and jarx never stores it. jarx only ever
+writes its own state dir.
 
 flags:
-  --home <dir>  use <dir> as the home dir instead of the real one
-  -h, --help    show this help
+  --home <dir>      use <dir> as the home dir instead of the real one
+  --url <url>       llm: the OpenAI-compatible base URL
+  --model <model>   llm: the model name
+  --key-env <name>  llm: the env var that holds the key
+  -h, --help        show this help
 `
 
 func setupHelp(s *report.Stream) { s.Printf(setupUsage) }
 
-func runSetup(p *report.Printer, plain *redact.Scrubber, args []string) int {
+func runSetup(p *report.Printer, plain *redact.Scrubber, args []string, st streams) int {
 	home, rest, code, ok := parseSetup(p, plain, args)
 	if !ok {
 		return code
+	}
+	if len(rest) > 0 && rest[0] == "llm" {
+		return runSetupLLM(p, plain, rest[1:], home, st)
 	}
 	env, files, scrub, err := openEnv(home)
 	if err != nil {
@@ -47,7 +57,7 @@ func runSetup(p *report.Printer, plain *redact.Scrubber, args []string) int {
 	}
 
 	if len(rest) == 0 {
-		showSetup(p.Out, scrub, env, files, cfg)
+		showSetup(p, scrub, env, files, cfg, st.lookupKey)
 		return exitOK
 	}
 	if err := changeRepos(p.Out, scrub, env, files, cfg, rest[1], rest[2]); err != nil {
@@ -71,7 +81,7 @@ func parseSetup(p *report.Printer, plain *redact.Scrubber, args []string) (strin
 	}
 	rest := fs.Args()
 	switch {
-	case len(rest) == 0:
+	case len(rest) == 0, rest[0] == "llm":
 		return *home, rest, exitOK, true
 	case rest[0] != "repo":
 		return "", nil, usageError(p, setupHelp, scrubbed(plain, fmt.Sprintf("unknown setup topic %q", rest[0]))), false
@@ -92,18 +102,20 @@ func changeRepos(out *report.Stream, s *redact.Scrubber, env platform.Env, files
 	return rmRepo(out, s, env, cfg, path)
 }
 
-func showSetup(out *report.Stream, s *redact.Scrubber, env platform.Env, files *fsys.FS, cfg jarxdir.Config) {
-	stateStatus := pathStatus(files, env.StateDir)
-	if stateStatus == statusMissing {
-		stateStatus = "not created yet"
+func showSetup(p *report.Printer, s *redact.Scrubber, env platform.Env, files *fsys.FS, cfg jarxdir.Config, lookup keyLookup) {
+	v := report.SettingsView{
+		Home:     scrubbed(s, env.Home),
+		StateDir: scrubbed(s, env.StateDir),
+		StateNew: pathStatus(files, env.StateDir) == statusMissing,
 	}
-	out.Printf("jarx settings\n")
-	out.Printf("  %-12s %s  (%s)\n", scrubbed(s, "state dir"), scrubbed(s, env.StateDir), scrubbed(s, stateStatus))
-	out.Printf("repos (%s)\n", scrubbed(s, strconv.Itoa(len(cfg.Repos))))
 	for _, r := range cfg.Repos {
-		out.Printf("  %s  (%s)\n", scrubbed(s, r), scrubbed(s, pathStatus(files, r)))
+		v.Repos = append(v.Repos, report.RepoRow{Path: scrubbed(s, r), Missing: pathStatus(files, r) == statusMissing})
 	}
-	out.Printf("llm          not set up\n")
+	if cfg.LLM != nil {
+		view := llmView(s, lookup, *cfg.LLM)
+		v.LLM = &view
+	}
+	p.Settings(v)
 }
 
 func addRepo(out *report.Stream, s *redact.Scrubber, env platform.Env, files *fsys.FS, cfg jarxdir.Config, path string) error {

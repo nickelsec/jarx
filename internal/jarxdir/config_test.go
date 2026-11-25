@@ -71,3 +71,32 @@ func TestNewerConfigVersionIsRefused(t *testing.T) {
 		t.Errorf("LoadConfig() error = %v, want ErrBadConfig for a version jarx doesn't know", err)
 	}
 }
+
+func TestSaveThenLoadLLMSettings(t *testing.T) {
+	d, env := openDir(t)
+	want := LLM{BaseURL: "https://llm.example.com/v1", Model: "m-1", KeyEnv: "JARX_LLM_KEY"}
+
+	if err := d.SaveConfig(Config{LLM: &want}); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	cfg, err := LoadConfig(env)
+
+	if err != nil || cfg.LLM == nil || *cfg.LLM != want {
+		t.Errorf("LoadConfig() = %+v, %v; want LLM %+v", cfg, err, want)
+	}
+}
+
+func TestConfigWithoutLLMSettingsHasNoLLMKey(t *testing.T) {
+	d, env := openDir(t)
+
+	if err := d.SaveConfig(Config{}); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(env.StateDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "llm") {
+		t.Errorf("config.json = %s, want no llm key when it's off", data)
+	}
+}

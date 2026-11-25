@@ -88,3 +88,10 @@ func utf8Locale(get func(string) string) bool {
 	}
 	return false
 }
+
+// IsTerminal reports whether r is a terminal, like stdin typed into by a
+// person. jarx only asks questions when both stdin and stdout are one.
+func IsTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	return ok && isTTY(f)
+}

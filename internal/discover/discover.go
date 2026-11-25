@@ -40,6 +40,15 @@ type Result struct {
 // that reads settings or instructions reads them for the ok projects. Files
 // fsys refused to read show up as findings, so this comes last.
 func Run(c agent.Context, adapters []agent.Adapter, extra []string) Result {
+	return RunWith(c, adapters, extra, nil)
+}
+
+// RunWith is Run, and tells onWalk how many projects are done out of the
+// total as it walks them, from 0 to all. onWalk may be nil.
+func RunWith(c agent.Context, adapters []agent.Adapter, extra []string, onWalk func(done, total int)) Result {
+	if onWalk == nil {
+		onWalk = func(int, int) {}
+	}
 	var all []model.Project
 	var findings []finding.Finding
 	for _, a := range adapters {
@@ -58,14 +67,7 @@ func Run(c agent.Context, adapters []agent.Adapter, extra []string) Result {
 	}
 
 	projects := merge(all, c.Env.GOOS)
-	for i := range projects {
-		p := &projects[i]
-		p.Status = status(c.Files, p.Path.Raw())
-		if p.Status == model.ProjectOK {
-			findings = append(findings, walkProject(c, p, maxFiles)...)
-			p.Credentials = projectCredentials(c, *p)
-		}
-	}
+	findings = append(findings, walkAll(c, projects, onWalk)...)
 	var unknown []model.Unknown
 	var global []model.Instruction
 	for _, a := range adapters {
@@ -87,6 +89,23 @@ func Run(c agent.Context, adapters []agent.Adapter, extra []string) Result {
 	findings = append(findings, finding.FromSkips(c.Scrub, c.Files.Skips())...)
 	return Result{Projects: projects, Unknown: unknown, Instructions: global, Findings: findings, Credentials: credentials(c),
 		Installs: ins}
+}
+
+// walkAll sets each project's status and walks the ones that are there,
+// telling onWalk how many are done.
+func walkAll(c agent.Context, projects []model.Project, onWalk func(done, total int)) []finding.Finding {
+	var findings []finding.Finding
+	onWalk(0, len(projects))
+	for i := range projects {
+		p := &projects[i]
+		p.Status = status(c.Files, p.Path.Raw())
+		if p.Status == model.ProjectOK {
+			findings = append(findings, walkProject(c, p, maxFiles)...)
+			p.Credentials = projectCredentials(c, *p)
+		}
+		onWalk(i+1, len(projects))
+	}
+	return findings
 }
 
 // walkProject lists p's files. A walk cut off at limit is a finding, so it's

@@ -1166,15 +1166,48 @@ each was set.
 
 Off unless the user sets it up. Without it, jarx is rules only.
 
-`jarx setup llm` (or the dashboard) asks for a base URL, model and key. Any
-OpenAI-compatible endpoint works. The key goes in the OS keychain under jarx's
-own entry, or the user gives an env var name to read it from. jarx never picks
-up keys from the env on its own. On headless Linux with no Secret Service,
-only the env var option is offered.
+Any OpenAI-compatible endpoint works. jarx needs three things: a base URL, a
+model and the name of an env var that holds the key. jarx never stores the
+key, not in its config and not in a keychain. It reads the var when a review
+runs and only sends it to the base URL. It never picks up a key from the env
+on its own, only from the var you named.
+
+Set the key only in the terminal you run jarx from. A key in your shell
+profile is in every agent's env too, so the agents can read it. To set it
+without it landing in shell history:
+
+- PowerShell: `$env:JARX_LLM_KEY = [Net.NetworkCredential]::new('', (Read-Host -AsSecureString 'key')).Password`
+- bash and zsh: `read -rs JARX_LLM_KEY && export JARX_LLM_KEY`
+
+`jarx setup llm` asks one question at a time: the base URL, then the model,
+then the env var name (`JARX_LLM_KEY` by default), then how many artifacts
+to send at once (4 by default, 1 to 16). Enter keeps the default, and a bad
+answer gets the same question again with the reason:
+
+- The base URL has to be `https://`, or `http://` to a loopback address. It
+  can't hold a user, a password or a query string, and it can't be a cloud
+  metadata address. A URL that looks like it holds a secret is refused, so
+  a key can't end up in the config by accident. The model name and the var
+  name get the same secret check.
+- Right after the var name, jarx says whether that var is set in this
+  terminal (never its value), with the commands above when it isn't.
+- Then it shows a short summary and asks whether to save. Ctrl+C or the end
+  of input before that saves nothing and says "cancelled, nothing saved".
+- After saving it asks whether to test the connection (default no), since
+  that's a network call. The test sends one short request with fixed text
+  and no scan content. It's skipped when the var isn't set.
+
+When input or output isn't a terminal, `jarx setup llm` asks nothing and
+says how to use the one-line version for scripts: `jarx setup llm --url
+<url> --model <model> --key-env <name>`. That version needs all three, runs
+the same checks, saves and never tests. `jarx setup llm off` clears the LLM
+settings and leaves the env var alone. `jarx setup` shows the current ones.
 
 The review runs only on `jarx scan --llm` or the dashboard button. Before
 sending anything, jarx shows how many artifacts it will send, roughly how many
-tokens, and to which host.
+tokens, and to which host, and asks yes or no (default no). When input or
+output isn't a terminal, `--llm` refuses before scanning and says why. It
+also refuses when the LLM isn't set up or the env var isn't set.
 
 The LLM sees one artifact at a time: a tool's name, description and schema, a
 skill, an instruction file, or a hook command. It checks whether what the
@@ -1193,6 +1226,13 @@ retry fails too, that artifact gets an "LLM review failed" info finding
 instead of guessed results.
 
 Results are cached by content hash, so an unchanged artifact isn't sent twice.
+A failure isn't cached: it's sent again next time, and the preview says how
+many are cached, how many failed last time and are sent again, and how many
+are new.
+
+Artifacts go several at once, as many as setup says. When the endpoint
+answers 429, jarx waits as long as `Retry-After` asks, or backs off, and
+tries again, up to 5 times, before that artifact counts as failed.
 
 ## Snapshots and diff
 
@@ -1224,7 +1264,9 @@ The CLI stays small: three commands and a version flag.
 | `jarx ui` | start the dashboard |
 | `jarx setup` | show jarx's own settings: extra repo paths, and whether the LLM is set up |
 | `jarx setup repo add\|rm <path>` | add or remove an extra project path |
-| `jarx setup llm` | set base URL, model, and key or env var name |
+| `jarx setup llm` | set the base URL, model and key env var name, one question at a time |
+| `jarx setup llm --url <url> --model <model> --key-env <name> [--parallel <n>]` | the same in one line, for scripts |
+| `jarx setup llm off` | clear the LLM settings |
 | `jarx --version` | print the banner, version and advisory data date |
 
 Flags:
@@ -1253,6 +1295,9 @@ terminals.
   turns off when output is piped, with `NO_COLOR`, and with `TERM=dumb`.
   Piped output is plain ASCII.
 - Every run starts with a banner and the version next to it.
+- While a scan works, one line on stderr says which step it's on, with a
+  count and the time so far, and it's erased before the report prints. It
+  only shows on a terminal, and never shows a path.
 
 ### Demo home
 
@@ -1264,7 +1309,10 @@ jarx's state goes in `<dir>/.jarx-state/`, which the repo's `.gitignore`
 ignores under `testdata/`, so demo runs never dirty the repo. With
 `--home`, jarx doesn't read managed policy dirs, the Windows registry, macOS
 plists, the real env or the real PATH. Env vars for the env var channel come
-from `<dir>/.jarx-env` instead. Absolute paths inside the fake home's agent
+from `<dir>/.jarx-env` instead. The one exception is the LLM key: it's
+read from the env var you named in the terminal jarx runs in, even with
+`--home`, so the demo never needs a real key in a file. A key in
+`.jarx-env` doesn't count. Absolute paths inside the fake home's agent
 records are read relative to `<dir>`, so `/projects/app` in the demo's
 `.claude.json` means `<dir>/projects/app` on any machine.
 
@@ -1302,8 +1350,13 @@ a real machine.
   settings report, and what changed.
 - **Write actions** (POST only, token plus `Origin` check):
   - add or remove a repo path
-  - set the LLM config and key. The key is write-only, and the page only ever
-    shows "set" or "not set".
+  - set the LLM base URL, model, key env var name and how many to send at
+    once. The page never takes the key itself, and only shows whether the
+    var is set.
+  - choose which artifacts the LLM review sends, and rerun only the ones
+    that failed. An artifact you skip shows as "not reviewed, you skipped
+    it". A skip is remembered by the artifact's content hash, so when the
+    file changes it's offered again.
   - rescan
 - A pasted repo still only probes servers the agent would start.
 - Never writes agent config.
@@ -1316,7 +1369,8 @@ This is the full list. Anything not here is a bug.
 |---|---|---|---|
 | `jarx scan` with probing (default) | MCP `server/discover` or `initialize` and list calls to remote servers that would connect anyway, with their configured static creds if any | the server's configured `https://` URL | `--no-probe` |
 | `jarx scan` with probing (default) | jarx starts stdio servers. **The servers themselves** may use the network (for example `npx` downloading a package), just like when the agent starts them | whatever the server does | `--no-probe` |
-| `jarx scan --llm` or dashboard button | LLM review requests, redacted | the base URL the user set up | don't pass `--llm` |
+| `jarx scan --llm` or dashboard button | LLM review requests, redacted, with jarx's user agent and a random session ID for the run | the base URL the user set up | don't pass `--llm` |
+| `jarx setup llm`, after you answer yes to the test | one short chat request with fixed text and no scan content, with the key, jarx's user agent and a random session ID | the base URL just saved | answer no (the default) |
 | `jarx ui` | listens for the browser | `127.0.0.1` only, inbound | not running `jarx ui` |
 
 Rules for every outbound call jarx makes itself:
@@ -1422,7 +1476,6 @@ a new fixture dir and the old ones keep passing.
 Approved for v1:
 
 - `github.com/BurntSushi/toml`: Codex config
-- `github.com/zalando/go-keyring`: jarx's own LLM key
 - `github.com/klauspost/compress`: zstd Codex session files
 - `modernc.org/sqlite`: Codex sqlite files, pure Go
 - `golang.org/x/sys`: Windows job objects for probe process trees
@@ -1547,6 +1600,8 @@ Things jarx can't see, stated plainly in the README and the dashboard:
 - Typosquat and lookalike detection.
 - Behavior evidence from history (file reads, network calls by tools).
 - Cross-artifact LLM review.
+- The LLM key in the OS keychain, under jarx's own entry, as an option next
+  to the env var. v1 never stores the key.
 - Release binaries.
 - More agents.
 - Agent files shipped inside dependencies. npm packages can ship their own

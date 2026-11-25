@@ -48,7 +48,6 @@ linters:
             - $gostd
             - github.com/nickelsec/jarx
             - github.com/BurntSushi/toml
-            - github.com/zalando/go-keyring
             - github.com/klauspost/compress
             - modernc.org/sqlite
             - golang.org/x/sys

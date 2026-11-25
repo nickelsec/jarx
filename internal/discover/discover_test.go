@@ -289,3 +289,25 @@ func TestRunReadsExtensionsForEachOKProject(t *testing.T) {
 		t.Errorf("projects = %+v, want app with its deploy skill", r.Projects)
 	}
 }
+
+func TestRunWithSaysHowManyProjectsAreWalked(t *testing.T) {
+	c := fakeContext(t)
+	a := mkdir(t, filepath.Join(c.Env.Home, "a"))
+	b := mkdir(t, filepath.Join(c.Env.Home, "b"))
+	var got [][2]int
+
+	RunWith(c, nil, []string{a, b, filepath.Join(c.Env.Home, "gone")}, func(done, total int) {
+		got = append(got, [2]int{done, total})
+	})
+
+	// Every project counts, walked or not, so the count reaches the total.
+	want := [][2]int{{0, 3}, {1, 3}, {2, 3}, {3, 3}}
+	if len(got) != len(want) {
+		t.Fatalf("calls = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("call %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}

@@ -24,6 +24,7 @@ func Real() (Env, error) {
 	return env, nil
 }
 
-// LookupReal reads one variable from the real env, for a process that runs
-// without a home dir, like the demo's fake MCP server checking its marker.
+// LookupReal reads one variable from the real env, for what isn't about
+// the home dir: the demo's fake MCP server checking its marker, and the LLM
+// key, which is set in the terminal jarx runs in even with --home.
 func LookupReal(name string) (string, bool) { return os.LookupEnv(name) }

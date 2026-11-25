@@ -19,10 +19,20 @@ const (
 // ErrBadConfig means jarx's own config file couldn't be used.
 var ErrBadConfig = errors.New("bad config")
 
-// Config is jarx's own settings. The LLM settings join it in phase 8.
+// Config is jarx's own settings.
 type Config struct {
 	Version int      `json:"version"`
-	Repos   []string `json:"repos"` // extra project paths, absolute
+	Repos   []string `json:"repos"`         // extra project paths, absolute
+	LLM     *LLM     `json:"llm,omitempty"` // nil when the LLM review is off
+}
+
+// LLM is where the optional LLM review sends artifacts. It names the env var
+// that holds the key and never holds the key itself.
+type LLM struct {
+	BaseURL  string `json:"baseUrl"`
+	Model    string `json:"model"`
+	KeyEnv   string `json:"keyEnv"`
+	Parallel int    `json:"parallel,omitempty"` // artifacts sent at once; 0 means the default
 }
 
 // LoadConfig reads jarx's config. With nothing saved it returns an empty

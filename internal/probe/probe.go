@@ -56,6 +56,10 @@ type Options struct {
 	// Self is the jarx binary, which runs the demo server under --home.
 	Self          string
 	ClientVersion string
+	// OnProgress, when set, hears how many definitions are done and running
+	// out of the total, from 0 at the start to all done. It's called from
+	// the probing goroutines, one call at a time.
+	OnProgress func(done, running, total int)
 }
 
 // Run probes every server that starts in projects and stores the result on
@@ -72,6 +76,8 @@ func Run(ctx context.Context, c agent.Context, projects []model.Project, opts Op
 		opts.Start = proc.Start
 	}
 	jobs, order := collect(c, projects, opts)
+	tell := tally(opts.OnProgress, len(order))
+	tell(0, 0)
 	sem := make(chan struct{}, opts.Parallel)
 	var wg sync.WaitGroup
 	for _, key := range order {
@@ -79,13 +85,31 @@ func Run(ctx context.Context, c agent.Context, projects []model.Project, opts Op
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			tell(0, 1)
 			r := probeOne(ctx, c, j.server, j.project, opts)
 			for _, s := range j.targets {
 				r.apply(c, s)
 			}
+			tell(1, -1)
 		})
 	}
 	wg.Wait()
+}
+
+// tally keeps the done and running counts and passes each change to f, one
+// call at a time. With no f it does nothing.
+func tally(f func(done, running, total int), total int) func(done, running int) {
+	if f == nil {
+		return func(int, int) {}
+	}
+	var mu sync.Mutex
+	done, running := 0, 0
+	return func(d, r int) {
+		mu.Lock()
+		defer mu.Unlock()
+		done, running = done+d, running+r
+		f(done, running, total)
+	}
 }
 
 // job is one server definition to probe and every copy of it.
