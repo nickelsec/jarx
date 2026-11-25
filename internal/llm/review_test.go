@@ -56,6 +56,14 @@ func (f *scripted) serve(t *testing.T) string {
 	return srv.URL + "/v1"
 }
 
+// count is how many requests came in. The server may still be recording
+// a cancelled request when a review returns, so it reads under the lock.
+func (f *scripted) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.bodies)
+}
+
 func endpoint(t *testing.T, base string) Endpoint {
 	t.Helper()
 	return Endpoint{BaseURL: base, Model: "m-1", Key: testKey(t)}
@@ -113,8 +121,8 @@ func TestReviewSendsEachArtifactOnItsOwn(t *testing.T) {
 
 	res, err := review(t, f, arts, NewCache())
 
-	if err != nil || res.Sent != len(arts) || len(f.bodies) != len(arts) {
-		t.Fatalf("Review() = %+v, %v with %d requests; want one per artifact (%d)", res, err, len(f.bodies), len(arts))
+	if err != nil || res.Sent != len(arts) || f.count() != len(arts) {
+		t.Fatalf("Review() = %+v, %v with %d requests; want one per artifact (%d)", res, err, f.count(), len(arts))
 	}
 	// Several go at once, so each request is matched to its artifact by
 	// what it holds, and each artifact goes exactly once.
@@ -190,8 +198,8 @@ func TestReviewRetriesOnceWithWhatWasWrong(t *testing.T) {
 
 	res, err := review(t, f, []Artifact{skillArtifact(t, lintSkill)}, NewCache())
 
-	if err != nil || len(f.bodies) != 2 || len(res.Findings) != 1 {
-		t.Fatalf("Review() = %+v, %v with %d requests; want a retry that worked", res, err, len(f.bodies))
+	if err != nil || f.count() != 2 || len(res.Findings) != 1 {
+		t.Fatalf("Review() = %+v, %v with %d requests; want a retry that worked", res, err, f.count())
 	}
 	if !strings.Contains(f.bodies[1], "isn't JSON") || !strings.Contains(f.bodies[1], "looks fine to me") {
 		t.Errorf("retry body = %s, want the first reply and what was wrong with it", f.bodies[1])
@@ -204,8 +212,8 @@ func TestReviewGivesUpAfterTheRetryWithoutGuessing(t *testing.T) {
 
 	res, err := review(t, f, []Artifact{art}, NewCache())
 
-	if err != nil || len(f.bodies) != 2 || res.Failed != 1 {
-		t.Fatalf("Review() = %+v, %v with %d requests; want 2 requests and one failure", res, err, len(f.bodies))
+	if err != nil || f.count() != 2 || res.Failed != 1 {
+		t.Fatalf("Review() = %+v, %v with %d requests; want 2 requests and one failure", res, err, f.count())
 	}
 	if len(res.Findings) != 1 || res.Findings[0].RuleID != "JARX-LLM-003" || res.Findings[0].Severity != finding.Info {
 		t.Errorf("findings = %+v, want only the JARX-LLM-003 info finding", res.Findings)
@@ -218,8 +226,8 @@ func TestReviewKeepsGoingPastAServerError(t *testing.T) {
 
 	res, err := review(t, f, arts, NewCache())
 
-	if err != nil || res.Failed != len(arts) || len(f.bodies) != len(arts) {
-		t.Errorf("Review() = %+v, %v with %d requests; want every artifact tried and failed", res, err, len(f.bodies))
+	if err != nil || res.Failed != len(arts) || f.count() != len(arts) {
+		t.Errorf("Review() = %+v, %v with %d requests; want every artifact tried and failed", res, err, f.count())
 	}
 }
 
@@ -231,8 +239,8 @@ func TestReviewStopsWhenTheKeyIsRejected(t *testing.T) {
 
 	// The ones already out when the first 401 comes back still finish;
 	// nothing after them starts.
-	if !errors.Is(err, ErrKeyRejected) || len(f.bodies) > DefaultParallel {
-		t.Errorf("Review() error = %v with %d requests, want ErrKeyRejected and no more than the %d in flight", err, len(f.bodies), DefaultParallel)
+	if !errors.Is(err, ErrKeyRejected) || f.count() > DefaultParallel {
+		t.Errorf("Review() error = %v with %d requests, want ErrKeyRejected and no more than the %d in flight", err, f.count(), DefaultParallel)
 	}
 }
 
@@ -265,15 +273,15 @@ func TestReviewCachesByContent(t *testing.T) {
 	first := run(ep, art)
 	again := run(ep, art)
 
-	if len(f.bodies) != 1 || again.Cached != 1 || again.Sent != 0 || len(again.Findings) != len(first.Findings) {
-		t.Errorf("second run = %+v with %d requests, want it all from the cache with the same findings", again, len(f.bodies))
+	if f.count() != 1 || again.Cached != 1 || again.Sent != 0 || len(again.Findings) != len(first.Findings) {
+		t.Errorf("second run = %+v with %d requests, want it all from the cache with the same findings", again, f.count())
 	}
 	other := ep
 	other.Model = "m-2"
 	run(other, art)
 	run(ep, skillArtifact(t, lintSkill+" also"))
-	if len(f.bodies) != 3 {
-		t.Errorf("got %d requests, want a new model and a changed text each sent again", len(f.bodies))
+	if f.count() != 3 {
+		t.Errorf("got %d requests, want a new model and a changed text each sent again", f.count())
 	}
 }
 
@@ -289,8 +297,8 @@ func TestReviewNeverCachesAFailure(t *testing.T) {
 		}
 	}
 
-	if len(f.bodies) != 3 {
-		t.Errorf("got %d requests, want the failed artifact sent again next time", len(f.bodies))
+	if f.count() != 3 {
+		t.Errorf("got %d requests, want the failed artifact sent again next time", f.count())
 	}
 }
 
@@ -319,8 +327,8 @@ func TestCacheSavesAndLoads(t *testing.T) {
 	loaded := LoadCache(env)
 	res, err := Review(context.Background(), netguard.NewLLM(), ep, scrubber(t), []Artifact{art}, loaded)
 
-	if err != nil || res.Cached != 1 || len(res.Findings) != 1 || len(f.bodies) != 1 {
-		t.Errorf("after loading = %+v, %v with %d requests; want it from the cache", res, err, len(f.bodies))
+	if err != nil || res.Cached != 1 || len(res.Findings) != 1 || f.count() != 1 {
+		t.Errorf("after loading = %+v, %v with %d requests; want it from the cache", res, err, f.count())
 	}
 }
 
@@ -412,8 +420,8 @@ func TestNoCanaryEverReachesTheEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.bodies) < len(arts) {
-		t.Fatalf("only %d requests for %d artifacts", len(f.bodies), len(arts))
+	if f.count() < len(arts) {
+		t.Fatalf("only %d requests for %d artifacts", f.count(), len(arts))
 	}
 	for i, body := range f.bodies {
 		for _, c := range []string{canaryGitHub, canaryAWS, canaryNamed} {
