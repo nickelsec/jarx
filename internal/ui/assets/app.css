@@ -494,3 +494,54 @@ main .toast { position: fixed; z-index: 60; top: 18px; right: 18px; }
 .modal.confirm .modal-foot form { margin: 0; }
 .btn.danger { background: var(--crit-solid); border-color: var(--crit-solid); color: var(--crit-on-solid); }
 .btn.danger:hover { filter: brightness(1.12); }
+
+/* LLM settings and the review's progress. */
+.llm-form { display: flex; flex-direction: column; gap: 14px; margin: 0; }
+.llm-form .btn { align-self: flex-start; }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+@media (max-width: 860px) { .fields { grid-template-columns: 1fr; } }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field-label { color: var(--text-3); font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; }
+.field input { height: 36px; padding: 0 12px; border: 1px solid var(--border-2); border-radius: 9px; background: var(--surface); color: var(--text); font-family: var(--mono); font-size: 12.5px; }
+.field input::placeholder { color: var(--text-3); }
+.field input:focus { outline: none; border-color: var(--text-3); }
+.field-hint { font-size: 12px; color: var(--text-3); }
+.llm-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
+.review-progress { display: flex; flex-direction: column; gap: 12px; padding: 18px 22px; }
+.review-progress progress { width: 100%; height: 6px; border: 0; border-radius: 3px; overflow: hidden; background: var(--raised); appearance: none; }
+.review-progress progress::-webkit-progress-bar { background: var(--raised); }
+.review-progress progress::-webkit-progress-value { background: var(--text-2); border-radius: 3px; }
+.review-progress progress::-moz-progress-bar { background: var(--text-2); }
+.btn:disabled.primary { opacity: .5; }
+
+.confirm-text { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.55; }
+
+/* The checklist: five tiles, and what a skip says. */
+.tiles:has(.tile:nth-child(5)) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1000px) { .tiles:has(.tile:nth-child(5)) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.st-skipped { background: transparent; border: 1px solid var(--border-2); color: var(--text-3); }
+.llm-bar .btn { height: 32px; }
+
+/* The Inventory page. */
+.agents { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.agent-card { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.agent-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.agent-name { font-weight: 600; }
+.agent-facts { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text-3); font-size: 12px; }
+.totals { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); overflow: hidden; }
+@media (max-width: 1000px) { .totals { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.totals .stat { padding: 14px 18px; border-top: 1px solid var(--border); border-left: 1px solid var(--border); margin: -1px 0 0 -1px; }
+.totals .stat-n { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+.totals .faint { font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; }
+.stat-note { font-size: 11.5px; color: var(--text-3); }
+.irow { display: grid; gap: 16px; align-items: center; padding: 12px 20px; border-top: 1px solid var(--border); color: var(--text); }
+a.irow:hover { background: var(--raised); color: var(--text); }
+.thead.inv-p, .irow.inv-p { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.2fr) 100px 70px 60px 80px; }
+.thead.inv-s, .irow.inv-s { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, 1.3fr) 130px 120px 90px; }
+.thead + .irow { border-top: 0; }
+.irow .n { font-variant-numeric: tabular-nums; }
+.irow .pills { margin: 0; }
+.st-start-starts { background: var(--ok-tint); color: var(--ok); }
+.st-start-may-start { background: var(--info-tint); color: var(--info); }
+.st-start-approval-unknown { background: var(--med-tint); color: var(--med); }
+@media (max-width: 1000px) { .thead.inv-p, .irow.inv-p, .thead.inv-s, .irow.inv-s { grid-template-columns: 1fr 1fr; } .thead.inv-p span:nth-child(n+3), .irow.inv-p > span:nth-child(n+3), .thead.inv-s span:nth-child(n+3), .irow.inv-s > span:nth-child(n+3) { display: none; } }

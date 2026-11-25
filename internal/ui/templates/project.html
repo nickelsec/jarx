@@ -4,7 +4,7 @@
 <header class="head">
 <div>
 <h1 class="mono-title">{{.Path}}</h1>
-<div class="pills">{{range .Trust}}<span class="pill">{{.}}</span>{{end}}{{if .Walk}}<span class="pill plain">{{.Walk}}</span>{{end}}</div>
+<div class="pills">{{range .Trust}}<span class="pill{{if not .Trusted}} plain{{end}}">{{.Text}}</span>{{end}}{{if .Walk}}<span class="pill plain">{{.Walk}}</span>{{end}}</div>
 </div>
 <div class="counts">
 <span><b class="f-text-high">{{index .Counts 1}}</b>High</span>

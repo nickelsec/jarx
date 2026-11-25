@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/nickelsec/jarx/internal/fsys"
 	"github.com/nickelsec/jarx/internal/jarxdir"
+	"github.com/nickelsec/jarx/internal/llm"
+	"github.com/nickelsec/jarx/internal/netguard"
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
@@ -172,6 +175,155 @@ func (a *uiApp) Folders(dir string) (ui.Folder, error) {
 	return f, nil
 }
 
+// SaveLLM checks the LLM settings as typed, the way jarx setup llm does,
+// and saves them. The checklist and cached findings follow the new
+// settings at once; nothing is sent.
+func (a *uiApp) SaveLLM(f ui.LLMForm) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s := a.ss.scrub
+	base, err := checkBaseURL(s, f.BaseURL)
+	if err != nil {
+		return llmFieldErr(err, ui.ErrLLMURL)
+	}
+	model, err := checkModel(s, f.Model)
+	if err != nil {
+		return llmFieldErr(err, ui.ErrLLMModel)
+	}
+	keyEnv, err := checkVarName(s, f.KeyEnv)
+	if err != nil {
+		return llmFieldErr(err, ui.ErrLLMVar)
+	}
+	parallel, err := checkParallel(f.Parallel)
+	if err != nil {
+		return ui.ErrLLMParallel
+	}
+	cfg := a.ss.cfg
+	cfg.LLM = &jarxdir.LLM{BaseURL: base, Model: model, KeyEnv: keyEnv, Parallel: parallel}
+	return a.saveLLM(cfg)
+}
+
+// llmFieldErr is a field's error for the page: a key, or the field's own.
+func llmFieldErr(err, field error) error {
+	if errors.Is(err, errLooksLikeKey) {
+		return ui.ErrLooksLikeKey
+	}
+	return field
+}
+
+// LLMOff turns the LLM review off. The key's env var is untouched.
+func (a *uiApp) LLMOff() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	cfg := a.ss.cfg
+	cfg.LLM = nil
+	return a.saveLLM(cfg)
+}
+
+// TestLLM sends the one fixed request jarx setup llm's test sends.
+func (a *uiApp) TestLLM() error {
+	a.mu.RLock()
+	ep, _, err := a.endpoint()
+	a.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), llmTestWait)
+	defer cancel()
+	_, err = llm.Ping(ctx, netguard.NewLLM(), ep)
+	return llmErr(err)
+}
+
+// Review starts sending the artifacts with these keys in the background.
+// The page shows it going, and when it ends the checklist and findings
+// follow what came back.
+func (a *uiApp) Review(keys []string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if r := a.state.Review; r != nil && r.Running {
+		return ui.ErrBusy
+	}
+	ep, parallel, err := a.endpoint()
+	if err != nil {
+		return err
+	}
+	var arts []llm.Artifact
+	skips := llm.LoadSkips(a.ss.env)
+	for _, art := range a.d.LLM.Artifacts {
+		// A skipped one isn't sent, even when it's checked.
+		if k := llm.KeyOf(art); slices.Contains(keys, k) && !skips.Has(k) {
+			arts = append(arts, art)
+		}
+	}
+	if len(arts) == 0 {
+		return ui.ErrNothingToSend
+	}
+	finished := 0
+	if a.state.Review != nil {
+		finished = a.state.Review.Finished
+	}
+	a.state.Review = &ui.ReviewState{Running: true, Total: len(arts), Finished: finished}
+	go a.review(ep, parallel, arts)
+	return nil
+}
+
+// Skip skips the artifacts with these keys, or unskips them, in the skip
+// list jarx scan --llm reads too.
+func (a *uiApp) Skip(keys []string, skip bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	sk := llm.LoadSkips(a.ss.env)
+	sk.Set(keys, skip)
+	if err := sk.Save(a.ss.env); err != nil {
+		return err //nolint:wrapcheck // the skip list's errors say what failed
+	}
+	withLLM(&a.d, a.ss, a.st)
+	return nil
+}
+
+// llmTestWait is how long Test connection waits for the endpoint.
+const llmTestWait = 30 * time.Second
+
+// endpoint is the LLM review's endpoint with the key from the terminal
+// that started jarx ui, and how many to send at once. The caller holds mu.
+func (a *uiApp) endpoint() (llm.Endpoint, int, error) {
+	c := a.ss.cfg.LLM
+	if c == nil {
+		return llm.Endpoint{}, 0, ui.ErrLLMOff
+	}
+	key, ok := llm.KeyFrom(a.st.lookupKey, c.KeyEnv)
+	if !ok {
+		return llm.Endpoint{}, 0, ui.ErrKeyNotSet
+	}
+	return llm.Endpoint{BaseURL: c.BaseURL, Model: c.Model, Key: key, UserAgent: a.st.userAgent}, parallelOf(*c), nil
+}
+
+// llmErr is an LLM error as the page names it.
+func llmErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, llm.ErrKeyRejected):
+		return ui.ErrKeyRejected
+	case errors.Is(err, llm.ErrUnreachable), errors.Is(err, netguard.ErrBlocked), errors.Is(err, netguard.ErrInsecure):
+		return ui.ErrUnreachable
+	}
+	return err
+}
+
+// stoppedNote is the notice for a review that ended early, or "".
+func stoppedNote(err error) string {
+	switch e := llmErr(err); {
+	case e == nil:
+		return ""
+	case errors.Is(e, ui.ErrKeyRejected):
+		return "review-rejected"
+	case errors.Is(e, ui.ErrUnreachable):
+		return "review-unreach"
+	}
+	return "review-stopped"
+}
+
 // watch hears a rescan's progress: which step and how far along.
 func (a *uiApp) watch(step string, done, total int) {
 	a.mu.Lock()
@@ -179,6 +331,39 @@ func (a *uiApp) watch(step string, done, total int) {
 	if a.state.Running {
 		a.state.Step, a.state.StepDone, a.state.StepTotal = step, done, total
 	}
+}
+
+// saveLLM writes cfg and puts the LLM review as it now stands on the
+// page. The caller holds mu.
+func (a *uiApp) saveLLM(cfg jarxdir.Config) error {
+	if err := save(a.ss.env, cfg); err != nil {
+		return err
+	}
+	a.ss.cfg = cfg
+	withLLM(&a.d, a.ss, a.st)
+	return nil
+}
+
+// review sends arts in the background, then saves the cache and puts what
+// came back on the page.
+func (a *uiApp) review(ep llm.Endpoint, parallel int, arts []llm.Artifact) {
+	cache := llm.LoadCache(a.ss.env)
+	_, err := llm.ReviewWith(context.Background(), netguard.NewLLM(), ep, a.ss.scrub, arts, cache, llm.Options{
+		Parallel: parallel,
+		OnStatus: func(st llm.Status) {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			if r := a.state.Review; r != nil {
+				r.Done, r.Waiting = st.Done, st.Waiting
+			}
+		},
+	})
+	_ = cache.Save(a.ss.env) // a cache that can't be saved only means more is sent next time
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	r := a.state.Review
+	a.state.Review = &ui.ReviewState{Done: r.Done, Total: r.Total, Finished: r.Finished + 1, Stopped: stoppedNote(err)}
+	withLLM(&a.d, a.ss, a.st)
 }
 
 // rescan runs one scan in the background and swaps the result in.

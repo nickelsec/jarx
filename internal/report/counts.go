@@ -289,3 +289,36 @@ func (k *counter) servers(ss []model.Server) {
 		}
 	}
 }
+
+// Total is what the scanned block counts, for the dashboard's inventory,
+// so both say the same numbers.
+type Total struct {
+	Projects, NotScanned                 int
+	Instructions, Imports                int
+	Skills, Hooks, HookScripts           int
+	Servers, ServersOff, ApprovalUnknown int
+	Rules, Modes                         int
+	CredentialLocations                  int
+	Configs, UnknownSettings             int
+	Sessions, HistoryFiles               int
+}
+
+// Totals counts v the way the scanned block does: each thing once, even
+// when several projects share it.
+func Totals(v ScanView) Total {
+	c := countAll(v)
+	notScanned := 0
+	for _, n := range c.notScannedWhy {
+		notScanned += n
+	}
+	return Total{
+		Projects: c.projects, NotScanned: notScanned,
+		Instructions: c.instructions, Imports: c.imports,
+		Skills: c.skills, Hooks: c.hooks, HookScripts: c.scripts,
+		Servers: c.servers, ServersOff: c.serversOff, ApprovalUnknown: c.approval,
+		Rules: c.rules, Modes: c.modes,
+		CredentialLocations: c.creds,
+		Configs:             c.configs, UnknownSettings: c.unknowns,
+		Sessions: c.sessions, HistoryFiles: c.historyFiles,
+	}
+}

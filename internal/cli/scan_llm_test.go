@@ -300,3 +300,26 @@ func TestScanLLMSaysWhatFailedLastTime(t *testing.T) {
 		t.Errorf("stdout doesn't say what failed last time:\n%s", got.stdout)
 	}
 }
+
+func TestScanLLMLeavesOutWhatWasSkipped(t *testing.T) {
+	f := &reviewer{}
+	demo := llmDemo(t, f.serve(t))
+	a := keyApp(t, demo, true)
+	skill := firstSkill(a.Data())
+	if err := a.Skip([]string{llm.KeyOf(skill)}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	got := withKey().ask("y\n", "scan", "--llm", "--home", demo)
+
+	if got.code != 0 || !strings.Contains(got.stdout, "1 not sent, you skipped them") {
+		t.Errorf("exit %d, stdout %q; want the preview to say one was skipped", got.code, got.stdout)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, b := range f.bodies {
+		if userArtifact([]byte(b)).Kind == "skill" {
+			t.Error("the skipped skill was sent")
+		}
+	}
+}

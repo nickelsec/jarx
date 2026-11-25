@@ -130,7 +130,7 @@
   // postInPlace sends a POST form (rescan, add or remove a repo) and swaps
   // in the page it lands on. Its button says what's happening meanwhile.
   // If the fetch fails, the form posts the usual way.
-  var postInPlace = function (form) {
+  var postInPlace = function (form, submitter) {
     var btn = form.querySelector('button[type="submit"]');
     var label = btn && btn.querySelector("span");
     if (btn) {
@@ -141,7 +141,14 @@
     if (inflight) inflight.abort();
     inflight = new AbortController();
     loading();
-    fetch(form.getAttribute("action"), { method: "POST", body: new URLSearchParams(new FormData(form)), credentials: "same-origin", signal: inflight.signal })
+    var action = (submitter && submitter.getAttribute("formaction")) || form.getAttribute("action");
+    var body = new URLSearchParams(new FormData(form, submitter || undefined));
+    if (form.id === "review" && picks) {
+      body.delete("a");
+      picks.forEach(function (k) { body.append("a", k); });
+      try { sessionStorage.removeItem(picksKey); } catch (err) { /* storage off */ }
+    }
+    fetch(action, { method: "POST", body: body, credentials: "same-origin", signal: inflight.signal })
       .then(function (r) {
         if (!r.ok) return Promise.reject(r.status);
         var u = new URL(r.url);
@@ -180,6 +187,7 @@
     var opener = e.target.closest && e.target.closest("[data-open]");
     if (opener) {
       var dlg = document.getElementById(opener.getAttribute("data-open"));
+      if (dlg && dlg.id === "review-confirm") fillSend(dlg);
       if (dlg && dlg.showModal) { dlg.showModal(); dlg.focus(); return; }
     }
     if (e.target.tagName === "DIALOG" && e.target.open) { e.target.close(); return; }
@@ -197,9 +205,10 @@
   document.addEventListener("submit", function (e) {
     var form = e.target;
     var method = (form.method || "get").toLowerCase();
-    if (canSwap && method === "post" && inApp(new URL(form.getAttribute("action") || location.pathname, location.href))) {
+    var target = (e.submitter && e.submitter.getAttribute("formaction")) || form.getAttribute("action") || location.pathname;
+    if (canSwap && method === "post" && inApp(new URL(target, location.href))) {
       e.preventDefault();
-      postInPlace(form);
+      postInPlace(form, e.submitter);
       return;
     }
     if (!canSwap || method !== "get") return;
@@ -351,22 +360,57 @@
 
   // A running rescan: any page that says one is running asks every second
   // or so until it's done, then says so and shows the new results in place.
+  // A running review is watched the same way, with its progress bar on
+  // the LLM review page.
   var watching = false;
   var watchScan = function () {
-    if (watching || !canSwap || !document.querySelector('[data-scan="running"]')) return;
+    var scan = !!document.querySelector('[data-scan="running"]');
+    var rev = !!document.querySelector('[data-review="running"]');
+    if (watching || !canSwap || (!scan && !rev)) return;
     watching = true;
     var poll = function () {
       fetch("/rescan/status", { credentials: "same-origin", cache: "no-store" })
         .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function (st) {
-          if (st.running) { showSteps(st); setTimeout(poll, 700); return; }
+          var rv = st.review || {};
+          if (st.running) showSteps(st);
+          if (rv.running) showReview(rv);
+          if ((scan && st.running) || (rev && rv.running)) { setTimeout(poll, 700); return; }
           watching = false;
-          showToast(st.failed ? "Scan failed" : "Scan complete", st.failed);
+          if (scan) showToast(st.failed ? "Scan failed" : "Scan complete", st.failed);
+          if (rev) showToast(rv.note || "Review complete", !!rv.note);
           navigate(location.pathname + location.search, false, false);
         })
         .catch(function () { setTimeout(poll, 3000); });
     };
     setTimeout(poll, 700);
+  };
+
+  // showReview moves the LLM review page's progress along.
+  var showReview = function (rv) {
+    var bar = document.querySelector("[data-review-bar]");
+    if (bar) { bar.max = rv.total; bar.value = rv.done; }
+    var count = document.querySelector("[data-review-count]");
+    if (count) count.textContent = rv.done + " of " + rv.total;
+    var wait = document.querySelector("[data-review-wait]");
+    if (wait) wait.textContent = rv.waiting ? rv.waiting + " waiting on a rate limit" : "";
+  };
+
+  // fillSend says, in the confirmation, how many checked artifacts would go
+  // and about how many tokens. Send is off when nothing is checked.
+  var fillSend = function (dlg) {
+    var n = 0, tokens = 0;
+    arts.forEach(function (a) {
+      if (picks && picks.has(a.key)) { n++; tokens += a.tokens; }
+    });
+    var c = dlg.querySelector("[data-send-count]");
+    if (c) c.textContent = n;
+    var noun = dlg.querySelector("[data-send-noun]");
+    if (noun) noun.textContent = n === 1 ? "artifact" : "artifacts";
+    var t = dlg.querySelector("[data-send-tokens]");
+    if (t) t.textContent = tokens.toLocaleString();
+    var send = dlg.querySelector('button[form="review"]');
+    if (send) send.disabled = n === 0;
   };
 
   // showSteps marks the Scan page's steps done, now or to come, from a
@@ -406,31 +450,83 @@
     history.replaceState(null, "", u.pathname + u.search);
   }, true);
 
-  // "All" checks or unchecks every artifact on the LLM review page. It runs
-  // on load and after every swap, once per checkbox. So do the page's own
-  // toasts and the scan watch.
-  var initPage = function () {
-  document.querySelectorAll(".toast:not([data-ready])").forEach(function (t) {
-    t.setAttribute("data-ready", "");
-    setTimeout(function () { dismiss(t); }, 6000);
-  });
-  watchScan();
-  document.querySelectorAll("[data-check-all]:not([data-ready])").forEach(function (all) {
-    all.setAttribute("data-ready", "");
-    var form = all.closest("form");
-    var boxes = form ? form.querySelectorAll('input[name="a"]') : [];
-    var sync = function () {
-      var on = 0;
-      boxes.forEach(function (b) { if (b.checked) on++; });
-      all.checked = on === boxes.length && on > 0;
-      all.indeterminate = on > 0 && on < boxes.length;
-    };
-    all.addEventListener("change", function () {
-      boxes.forEach(function (b) { b.checked = all.checked; });
+  // The LLM review checklist's picks: every artifact, on every page, as
+  // the page lists them in data-arts. They start as the page checks them
+  // (new and failed ones) and are kept for the session as you page, so
+  // "All" means all of them and Send, Skip and Unskip send every pick.
+  var picks = null;
+  var arts = [];
+  var picksKey = "jarx-llm-picks";
+  var initPicks = function () {
+    var form = document.getElementById("review");
+    if (!form) { picks = null; arts = []; return; }
+    arts = (form.getAttribute("data-arts") || "").split(" ").filter(Boolean).map(function (s) {
+      var p = s.split(":");
+      return { key: p[0], tokens: parseInt(p[1], 10) || 0, state: p[2] };
     });
-    boxes.forEach(function (b) { b.addEventListener("change", sync); });
-    sync();
+    var sig = arts.map(function (a) { return a.key.slice(0, 12) + a.state; }).join(",");
+    var stored = null;
+    try { stored = JSON.parse(sessionStorage.getItem(picksKey) || "null"); } catch (err) { stored = null; }
+    var known = {};
+    arts.forEach(function (a) { known[a.key] = true; });
+    if (stored && stored.sig === sig) {
+      picks = new Set(stored.keys.filter(function (k) { return known[k]; }));
+    } else {
+      picks = new Set(arts.filter(function (a) { return a.state === "new" || a.state === "failed"; }).map(function (a) { return a.key; }));
+    }
+    picks.sig = sig;
+    showPicks();
+  };
+  // sendable is every artifact that isn't skipped: what "All" checks.
+  var sendable = function () { return arts.filter(function (a) { return a.state !== "skipped"; }); };
+  var savePicks = function () {
+    if (!picks) return;
+    try { sessionStorage.setItem(picksKey, JSON.stringify({ sig: picks.sig, keys: Array.from(picks) })); } catch (err) { /* storage off */ }
+  };
+  var showPicks = function () {
+    if (!picks) return;
+    document.querySelectorAll('#review input[name="a"]').forEach(function (b) { b.checked = picks.has(b.value); });
+    var all = document.querySelector("[data-check-all]");
+    var n = sendable().length;
+    if (all) {
+      all.checked = n > 0 && picks.size >= n;
+      all.indeterminate = picks.size > 0 && picks.size < n;
+    }
+    var label = document.querySelector("[data-picked]");
+    if (label) label.textContent = picks.size ? " · " + picks.size + " checked" : "";
+  };
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (!picks || !t.closest || !t.closest("#review")) return;
+    if (t.hasAttribute("data-check-all")) {
+      picks = Object.assign(new Set(t.checked ? sendable().map(function (a) { return a.key; }) : []), { sig: picks.sig });
+    } else if (t.name === "a") {
+      if (t.checked) picks.add(t.value); else picks.delete(t.value);
+    } else {
+      return;
+    }
+    savePicks();
+    showPicks();
   });
+  // Rerun failed checks just the ones that failed last time, then asks.
+  document.addEventListener("click", function (e) {
+    if (!picks || !e.target.closest || !e.target.closest("[data-rerun]")) return;
+    picks = Object.assign(new Set(arts.filter(function (a) { return a.state === "failed"; }).map(function (a) { return a.key; })), { sig: picks.sig });
+    savePicks();
+    showPicks();
+    var dlg = document.getElementById("review-confirm");
+    if (dlg && dlg.showModal) { fillSend(dlg); dlg.showModal(); dlg.focus(); }
+  });
+
+  // Each page's own toasts fade, the scan and review watch starts, and the
+  // checklist's picks show. It runs on load and after every swap.
+  var initPage = function () {
+    document.querySelectorAll(".toast:not([data-ready])").forEach(function (t) {
+      t.setAttribute("data-ready", "");
+      setTimeout(function () { dismiss(t); }, 6000);
+    });
+    watchScan();
+    initPicks();
   };
   initPage();
 })();

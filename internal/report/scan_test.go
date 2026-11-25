@@ -365,3 +365,24 @@ func TestAFindingAboutTheProjectItselfIsInItsGroup(t *testing.T) {
 		t.Errorf("output =\n%s\nwant the finding in the project's group", out)
 	}
 }
+
+func TestTotalsAreTheScannedBlocksNumbers(t *testing.T) {
+	f := newScanFixture(t)
+	v := f.view()
+	v.Projects[0].Servers = []model.Server{
+		f.server("db", model.StartYes), f.server("feed", model.StartMaybe),
+		f.server("evil", model.StartUnknown), f.server("old", model.StartNo),
+	}
+	out := render(Style{Width: 80}, v)
+
+	got := Totals(v)
+
+	if got.Servers != 4 || got.ServersOff != 1 || got.ApprovalUnknown != 1 || got.Projects != len(v.Projects) {
+		t.Errorf("Totals = %+v, want the 4 servers, 1 off, 1 unknown and every project", got)
+	}
+	for _, want := range []string{plural(got.Projects, "project", "projects"), plural(got.Instructions, "instruction file", "instruction files"), plural(got.Skills, "skill", "skills")} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the scanned block doesn't say %q, so Totals doesn't match it", want)
+		}
+	}
+}

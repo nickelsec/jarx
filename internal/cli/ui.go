@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/nickelsec/jarx/internal/finding"
 	"github.com/nickelsec/jarx/internal/jarxdir"
 	"github.com/nickelsec/jarx/internal/llm"
 	"github.com/nickelsec/jarx/internal/platform"
@@ -123,18 +125,46 @@ func uiData(p *report.Printer, ss scanSetup, st streams) (ui.Data, error) {
 	for _, r := range ss.cfg.Repos {
 		d.Repos = append(d.Repos, scrubbed(s, r))
 	}
-	if c := ss.cfg.LLM; c != nil {
-		ep := llm.Endpoint{BaseURL: c.BaseURL, Model: c.Model}
-		arts := llm.Collect(s, sc.res.Projects)
-		cache := llm.LoadCache(ss.env)
-		_, set := llm.KeyFrom(st.lookupKey, c.KeyEnv)
-		d.LLM = ui.LLM{
-			On: true, BaseURL: scrubbed(s, c.BaseURL), Model: scrubbed(s, c.Model), KeyEnv: scrubbed(s, c.KeyEnv),
-			KeySet: set, Parallel: parallelOf(*c),
-			Artifacts: arts, States: llm.States(ep, arts, cache), Plan: llm.Plan(ep, arts, cache),
+	withLLM(&d, ss, st)
+	return d, nil
+}
+
+// withLLM puts the LLM review's settings, checklist and cached findings on
+// d, for the settings as they are now. Nothing is sent: the findings are
+// what earlier reviews found. The snapshot was saved before this, so it
+// keeps the rules' findings only, as with jarx scan --llm.
+func withLLM(d *ui.Data, ss scanSetup, st streams) {
+	llmRules := map[string]bool{}
+	for _, r := range llm.Rules() {
+		llmRules[r.ID] = true
+	}
+	d.Scan.Findings = slices.DeleteFunc(slices.Clone(d.Scan.Findings), func(f finding.Finding) bool { return llmRules[f.RuleID] })
+	d.LLM = ui.LLM{}
+	c := ss.cfg.LLM
+	if c == nil {
+		return
+	}
+	s := ss.scrub
+	ep := llm.Endpoint{BaseURL: c.BaseURL, Model: c.Model}
+	arts := llm.Collect(s, d.Scan.Projects)
+	cache := llm.LoadCache(ss.env)
+	skips := llm.LoadSkips(ss.env)
+	// A skipped artifact isn't sent and isn't counted to send, and what an
+	// earlier review found in it doesn't show: it reads as not reviewed.
+	kept, skipped := llm.Unskipped(arts, skips)
+	states := llm.States(ep, arts, cache)
+	for i, a := range arts {
+		if skips.Has(llm.KeyOf(a)) {
+			states[i] = llm.StateSkipped
 		}
 	}
-	return d, nil
+	_, set := llm.KeyFrom(st.lookupKey, c.KeyEnv)
+	d.LLM = ui.LLM{
+		On: true, BaseURL: scrubbed(s, c.BaseURL), Model: scrubbed(s, c.Model), KeyEnv: scrubbed(s, c.KeyEnv),
+		KeySet: set, Parallel: parallelOf(*c),
+		Artifacts: arts, States: states, Skipped: skipped, Plan: llm.Plan(ep, kept, cache),
+	}
+	d.Scan.Findings = append(d.Scan.Findings, llm.FromCache(ep, s, kept, cache)...)
 }
 
 // runLog reads the scan history the scans keep in the state dir.

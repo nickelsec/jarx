@@ -1354,8 +1354,8 @@ a real machine.
     once. The page never takes the key itself, and only shows whether the
     var is set.
   - choose which artifacts the LLM review sends, and rerun only the ones
-    that failed. An artifact you skip shows as "not reviewed, you skipped
-    it". A skip is remembered by the artifact's content hash, so when the
+    that failed. An artifact you skip shows as skipped. A skip is
+    remembered by the artifact's content hash, so when the
     file changes it's offered again.
   - rescan
 - A pasted repo still only probes servers the agent would start.

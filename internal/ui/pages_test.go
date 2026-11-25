@@ -280,7 +280,7 @@ func TestTheLLMPageSaysHowToSetItUp(t *testing.T) {
 
 	_, body, _ := get(t, d, "/llm")
 
-	if !strings.Contains(body, "jarx setup llm") || strings.Contains(body, `type="checkbox"`) {
+	if !strings.Contains(body, `<a href="/settings">Settings</a>`) || strings.Contains(body, `type="checkbox"`) {
 		t.Errorf("/llm when it's off = %q, want how to set it up and no checklist", body)
 	}
 }
@@ -298,7 +298,7 @@ func TestTheChangesPageListsWhatChanged(t *testing.T) {
 func TestTheSettingsPageShowsTheKeysVarNeverTheKey(t *testing.T) {
 	_, body, _ := get(t, newFixture(t).data(), "/settings")
 
-	for _, want := range []string{"https://llm.example.com/v1", "m-1", "JARX_LLM_KEY", "Not set", "<dt>Parallel requests</dt><dd>4</dd>", "v1.2.3-test"} {
+	for _, want := range []string{"https://llm.example.com/v1", "m-1", "JARX_LLM_KEY", "Not set", `name="parallel" value="4"`, "v1.2.3-test"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/settings lacks %q", want)
 		}

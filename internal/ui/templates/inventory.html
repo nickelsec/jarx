@@ -1,0 +1,41 @@
+{{template "top" .}}
+{{with .Body}}
+<header class="head">
+<div><h1>Inventory</h1><p class="sub">Everything your coding agents can see and use.</p></div>
+</header>
+{{if .Agents}}<section class="agents" aria-label="Agents">
+{{range .Agents}}<div class="agent-card">
+<div class="agent-head"><span class="agent-name">{{.Name}}</span>{{if .Found}}{{if .Version}}<span class="pill plain">{{.Version}}</span>{{end}}{{else}}<span class="pill plain">not found</span>{{end}}</div>
+<div class="agent-facts">{{if .Method}}<span>{{.Method}}</span>{{end}}{{if .OnPath}}<span>on PATH</span>{{end}}<span class="mono">{{.ConfigDir}}</span></div>
+</div>{{end}}
+</section>{{end}}
+<section class="totals card" data-totals aria-label="Totals">
+{{range .Totals}}<div class="stat"><span class="stat-n">{{.N}}</span><span class="faint">{{.Label}}</span>{{if .Note}}<span class="stat-note">{{.Note}}</span>{{end}}</div>{{end}}
+</section>
+<section class="block" id="inv-projects">
+<div class="block-head"><h2>Projects</h2><span class="faint">{{len .Projects}}</span></div>
+<div class="card table">
+<div class="thead inv-p"><span>Project</span><span>Trust</span><span>Instructions</span><span>Skills</span><span>MCP</span><span>Findings</span></div>
+{{range .Projects}}<a class="irow inv-p" href="{{.Href}}">
+<span class="ftitle"><span class="t"><span class="cut" title="{{.Full}}">{{.Name}}</span>{{if .Status}}<span class="proj-status">{{.Status}}</span>{{end}}</span><span class="ev mono">{{.Full}}{{if .Walk}} · {{.Walk}}{{end}}</span></span>
+<span class="pills">{{range .Trust}}<span class="pill{{if not .Trusted}} plain{{end}}">{{.Text}}</span>{{else}}<span class="faint">none</span>{{end}}</span>
+<span class="n">{{.Instructions}}</span><span class="n">{{.Skills}}</span><span class="n">{{.Servers}}</span><span class="n">{{.Findings}}</span>
+</a>{{else}}<p class="empty">No projects found.</p>{{end}}
+</div>
+</section>
+<section class="block" id="inv-servers">
+<div class="block-head"><h2>MCP servers</h2><span class="faint">{{len .Servers}}</span></div>
+<div class="card table">
+<div class="thead inv-s"><span>Server</span><span>Defined in</span><span>Runs</span><span>Starts</span><span>Probe</span><span>Tools</span></div>
+{{range .Servers}}<div class="irow inv-s">
+<span class="ftitle"><span class="t"><span class="cut">{{.Name}}</span></span><span class="ev mono">{{.Agent}}</span></span>
+<span class="ftitle"><span class="t"><span class="cut" title="{{.WhereFull}}">{{.Where}}</span></span><span class="ev mono cut">{{.File}}</span></span>
+<span class="mono dim cut" title="{{.Runs}}">{{.Runs}}</span>
+<span><span class="state st-start-{{.StartKey}}">{{.Start}}</span></span>
+<span class="dim">{{.Probe}}</span>
+<span class="n">{{if .Tools}}{{.Tools}} tools{{else}}<span class="faint">none listed</span>{{end}}</span>
+</div>{{else}}<p class="empty">No MCP servers found.</p>{{end}}
+</div>
+</section>
+{{end}}
+{{template "bottom" .}}

@@ -18,23 +18,64 @@ import (
 type App interface {
 	// Data is the scan to show.
 	Data() Data
-	// Rescan scans again and swaps in the result. ErrBusy says one is
-	// running already.
+	Scans
+	Reviews
+}
+
+// Scans is what the Scan and Changes pages do: scan again, keep the extra
+// repos, and compare with an older snapshot.
+type Scans interface {
+	// Rescan starts a scan in the background. ErrBusy says one is running
+	// already.
 	Rescan() error
-	// AddRepo saves an extra repo, as typed in Settings. It returns one of
+	// ScanState says whether a rescan is running, how many have finished,
+	// whether the last one failed, and how a review is going.
+	ScanState() ScanState
+	// AddRepo saves an extra repo, as typed or picked. It returns one of
 	// the ErrRepo errors when the path won't do.
 	AddRepo(path string) error
 	// RemoveRepo drops the saved repo at index i of Data().Repos.
 	RemoveRepo(i int) error
+	// Folders lists the folders in dir for the folder browser. It returns
+	// one of the ErrRepo errors when dir won't do.
+	Folders(dir string) (Folder, error)
 	// ChangesSince diffs the current scan against an older snapshot, and
 	// says when that one was taken.
 	ChangesSince(id string) (time.Time, []snapshot.Change, error)
-	// ScanState says whether a rescan is running, how many have finished,
-	// and whether the last one failed.
-	ScanState() ScanState
-	// Folders lists the folders in dir, as typed or picked in Settings'
-	// folder browser. It returns one of the ErrRepo errors when dir won't do.
-	Folders(dir string) (Folder, error)
+}
+
+// Reviews is what the LLM review page and its settings do.
+type Reviews interface {
+	// SaveLLM checks and saves the LLM review's settings as typed, the way
+	// jarx setup llm does. It returns one of the ErrLLM errors, or
+	// ErrLooksLikeKey, when a field won't do.
+	SaveLLM(f LLMForm) error
+	// LLMOff turns the LLM review off.
+	LLMOff() error
+	// TestLLM sends the one fixed request jarx setup llm's test sends.
+	TestLLM() error
+	// Review starts sending the artifacts with these keys (llm.KeyOf) in
+	// the background. ScanState's Review says how it's going.
+	Review(keys []string) error
+	// Skip skips the artifacts with these keys, or unskips them. A skip
+	// lasts until the artifact changes.
+	Skip(keys []string, skip bool) error
+}
+
+// LLMForm is the LLM settings as typed in Settings, not checked yet.
+type LLMForm struct{ BaseURL, Model, KeyEnv, Parallel string }
+
+// ReviewState is how a review sent from the dashboard is going. Finished
+// counts the reviews that ended, so a page can tell one ended while it
+// waited, and Stopped says why one ended early.
+type ReviewState struct {
+	Running  bool   `json:"running"`
+	Done     int    `json:"done"`
+	Total    int    `json:"total"`
+	Waiting  int    `json:"waiting,omitempty"`
+	Finished int    `json:"finished"`
+	Stopped  string `json:"stopped,omitempty"` // a notice key, like review-rejected
+	Note     string `json:"note,omitempty"`    // that notice's text, for the toast
 }
 
 // ScanState is where the rescans are. Done counts the finished ones, so a
@@ -49,6 +90,9 @@ type ScanState struct {
 	Step      string   `json:"step,omitempty"`
 	StepDone  int      `json:"stepDone,omitempty"`
 	StepTotal int      `json:"stepTotal,omitempty"`
+	// Review is the LLM review sent from the dashboard, once there's been
+	// one.
+	Review *ReviewState `json:"review,omitempty"`
 }
 
 // Folder is one folder in Settings' folder browser: its path, the one
@@ -71,6 +115,17 @@ var (
 	ErrRepoOutside  = errors.New("outside the fake home")
 	ErrRepoSaved    = errors.New("already saved")
 	ErrRepoNotSaved = errors.New("not saved")
+
+	ErrLLMOff        = errors.New("the llm review is off")
+	ErrLLMURL        = errors.New("that base url won't do")
+	ErrLLMModel      = errors.New("that model won't do")
+	ErrLLMVar        = errors.New("that env var name won't do")
+	ErrLLMParallel   = errors.New("parallel requests won't do")
+	ErrLooksLikeKey  = errors.New("that looks like a key")
+	ErrKeyNotSet     = errors.New("the key's env var isn't set")
+	ErrKeyRejected   = errors.New("the endpoint rejected the key")
+	ErrUnreachable   = errors.New("the endpoint can't be reached")
+	ErrNothingToSend = errors.New("nothing to send")
 )
 
 // notice is the line a page shows after an action, picked by the msg query
@@ -93,11 +148,39 @@ var notices = map[string]notice{
 	"repo-relative": {Text: "Use a full path, like ~/work/api.", Bad: true},
 	"repo-removed":  {Text: "Removed."},
 	msgNotSaved:     {Text: "That folder isn't in the list.", Bad: true},
-	"save-failed":   {Text: "Couldn't save jarx's settings.", Bad: true},
+
+	"llm-saved":       {Text: "Saved."},
+	"llm-url":         {Text: "That base URL won't do. Use https, or http to this machine, with no user, password or query.", Bad: true},
+	"llm-model":       {Text: "Add a model name, with no spaces.", Bad: true},
+	"llm-var":         {Text: "An env var name is letters, digits and _, and doesn't start with a digit.", Bad: true},
+	"llm-parallel":    {Text: "Parallel requests is a number from 1 to 16.", Bad: true},
+	"llm-key":         {Text: "That looks like a key. jarx won't save one.", Bad: true},
+	"llm-ok":          {Text: "Connected."},
+	"llm-nokey":       {Text: "The key's env var isn't set in the terminal that started jarx ui.", Bad: true},
+	"llm-rejected":    {Text: "The endpoint rejected the key.", Bad: true},
+	"llm-unreachable": {Text: "Couldn't reach the endpoint.", Bad: true},
+	msgLLMFailed:      {Text: "That didn't work.", Bad: true},
+	"llm-off":         {Text: "LLM review is off."},
+
+	"review-busy":     {Text: "A review is already running."},
+	"review-nokey":    {Text: "The key's env var isn't set in the terminal that started jarx ui.", Bad: true},
+	"review-none":     {Text: "Nothing is checked to send.", Bad: true},
+	"review-off":      {Text: "The LLM review is off. Turn it on in Settings.", Bad: true},
+	"review-failed":   {Text: "The review couldn't start.", Bad: true},
+	"review-rejected": {Text: "Review stopped: the endpoint rejected the key.", Bad: true},
+	"review-unreach":  {Text: "Review stopped: couldn't reach the endpoint.", Bad: true},
+	"review-stopped":  {Text: "Review stopped early.", Bad: true},
+	"skipped":         {Text: "Skipped."},
+	"unskipped":       {Text: "Unskipped."},
+	"skip-failed":     {Text: "Couldn't save that.", Bad: true},
+	"save-failed":     {Text: "Couldn't save jarx's settings.", Bad: true},
 }
 
 // keyMsg is the query key a notice comes in.
 const keyMsg = "msg"
+
+// msgLLMFailed is the notice for an LLM settings action that didn't work.
+const msgLLMFailed = "llm-failed"
 
 // msgNotSaved is the notice for a repo that isn't in the list.
 const msgNotSaved = "repo-notsaved"
@@ -212,7 +295,13 @@ func scanStatus(app App) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(app.ScanState())
+		st := app.ScanState()
+		if st.Review != nil && st.Review.Stopped != "" {
+			r := *st.Review
+			r.Note = notices[r.Stopped].Text
+			st.Review = &r
+		}
+		_ = json.NewEncoder(w).Encode(st)
 	}
 }
 
@@ -247,4 +336,82 @@ func browseOf(app App, dir string) *browseView {
 		b.Subs = append(b.Subs, browseLink{Name: s.Name, Href: browseHref(s.Path)})
 	}
 	return b
+}
+
+// llmSettings changes the LLM review's settings from Settings: save, test
+// the connection, or turn it off.
+func llmSettings(app App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		form(w, r)
+		var msg string
+		switch r.PostFormValue("action") {
+		case "save":
+			msg = llmMsg(app.SaveLLM(LLMForm{
+				BaseURL: r.PostFormValue("url"), Model: r.PostFormValue("model"),
+				KeyEnv: r.PostFormValue("keyenv"), Parallel: r.PostFormValue("parallel"),
+			}), "llm-saved")
+		case "test":
+			msg = llmMsg(app.TestLLM(), "llm-ok")
+		case "off":
+			msg = llmMsg(app.LLMOff(), "llm-off")
+		default:
+			msg = msgLLMFailed
+		}
+		http.Redirect(w, r, "/settings?"+keyMsg+"="+msg, http.StatusSeeOther)
+	}
+}
+
+// llmMsg is the notice for an LLM settings action's result.
+func llmMsg(err error, ok string) string {
+	for e, msg := range map[error]string{
+		ErrLLMURL: "llm-url", ErrLLMModel: "llm-model", ErrLLMVar: "llm-var", ErrLLMParallel: "llm-parallel",
+		ErrLooksLikeKey: "llm-key", ErrKeyNotSet: "llm-nokey", ErrKeyRejected: "llm-rejected", ErrUnreachable: "llm-unreachable",
+	} {
+		if errors.Is(err, e) {
+			return msg
+		}
+	}
+	if err != nil {
+		return msgLLMFailed
+	}
+	return ok
+}
+
+// review starts the LLM review of the checked artifacts and goes back to
+// the LLM page, which shows it running.
+func review(app App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		form(w, r)
+		back := "/llm"
+		switch err := app.Review(r.PostForm["a"]); {
+		case err == nil:
+		case errors.Is(err, ErrBusy):
+			back += "?" + keyMsg + "=review-busy"
+		case errors.Is(err, ErrKeyNotSet):
+			back += "?" + keyMsg + "=review-nokey"
+		case errors.Is(err, ErrNothingToSend):
+			back += "?" + keyMsg + "=review-none"
+		case errors.Is(err, ErrLLMOff):
+			back += "?" + keyMsg + "=review-off"
+		default:
+			back += "?" + keyMsg + "=review-failed"
+		}
+		http.Redirect(w, r, back, http.StatusSeeOther)
+	}
+}
+
+// skip skips or unskips the checked artifacts.
+func skip(app App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		form(w, r)
+		on := r.PostFormValue("action") != "unskip"
+		msg := "skipped"
+		if !on {
+			msg = "unskipped"
+		}
+		if err := app.Skip(r.PostForm["a"], on); err != nil {
+			msg = "skip-failed"
+		}
+		http.Redirect(w, r, "/llm?"+keyMsg+"="+msg, http.StatusSeeOther)
+	}
 }

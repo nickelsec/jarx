@@ -60,6 +60,7 @@ type LLM struct {
 	Parallel  int
 	Artifacts []llm.Artifact
 	States    []llm.State // one per artifact
+	Skipped   int         // how many the user skipped
 	Plan      llm.Preview
 }
 
@@ -91,10 +92,6 @@ func Pages(app App) http.Handler {
 		}
 		render(w, r, "project.html", newPage(d, "project", d.Scan.Projects[n].Path.Text().String(), n, projectOf(d, n, r.URL.Query())))
 	})
-	mux.HandleFunc("GET /llm", func(w http.ResponseWriter, r *http.Request) {
-		d := app.Data()
-		render(w, r, "llm.html", newPage(d, "llm", "LLM review", -1, llmOf(d, r.URL.Query())))
-	})
 	mux.HandleFunc("GET /changes", func(w http.ResponseWriter, r *http.Request) {
 		d := app.Data()
 		q := r.URL.Query()
@@ -109,6 +106,28 @@ func Pages(app App) http.Handler {
 		}
 		render(w, r, "changes.html", newPage(d, "changes", "Changes", -1, changesOf(d, q.Get(keyChange), picked)))
 	})
+	simplePages(mux, app, render)
+	actions(mux, app)
+	mux.HandleFunc("GET /static/{file...}", serveAsset)
+	return mux
+}
+
+// renderer renders one page.
+type renderer func(w http.ResponseWriter, r *http.Request, name string, p page)
+
+// simplePages adds the pages that only read: LLM review, Inventory,
+// Settings and Scan.
+func simplePages(mux *http.ServeMux, app App, render renderer) {
+	mux.HandleFunc("GET /llm", func(w http.ResponseWriter, r *http.Request) {
+		d := app.Data()
+		b := llmOf(d, r.URL.Query())
+		b.Review = app.ScanState().Review
+		render(w, r, "llm.html", newPage(d, "llm", "LLM review", -1, b))
+	})
+	mux.HandleFunc("GET /inventory", func(w http.ResponseWriter, r *http.Request) {
+		d := app.Data()
+		render(w, r, "inventory.html", newPage(d, "inventory", "Inventory", -1, inventoryOf(d)))
+	})
 	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
 		d := app.Data()
 		render(w, r, "settings.html", newPage(d, "settings", "Settings", -1, settingsOf(d)))
@@ -121,11 +140,18 @@ func Pages(app App) http.Handler {
 		}
 		render(w, r, "scan.html", newPage(d, "scan", "Scan", -1, b))
 	})
+}
+
+// actions adds the routes that do things: scan, repos, LLM settings and
+// review. Every write is a POST, behind the guard's cookie and
+// cross-origin check.
+func actions(mux *http.ServeMux, app App) {
 	mux.HandleFunc("POST /rescan", rescan(app))
 	mux.HandleFunc("GET /rescan/status", scanStatus(app))
 	mux.HandleFunc("POST /scan/repos", repos(app))
-	mux.HandleFunc("GET /static/{file...}", serveAsset)
-	return mux
+	mux.HandleFunc("POST /settings/llm", llmSettings(app))
+	mux.HandleFunc("POST /llm/review", review(app))
+	mux.HandleFunc("POST /llm/skip", skip(app))
 }
 
 // dict makes a map from key and value pairs, so a template can hand a
@@ -190,6 +216,9 @@ type navProject struct {
 const sidebarProjects = 6
 
 const userConfig = "User config"
+
+// userConfigNote is what User config means, on hover.
+const userConfigNote = "settings and installs outside any project"
 
 // whereOf says what was scanned: this machine or a fake home, and the OS.
 func whereOf(d Data) string {
@@ -256,7 +285,7 @@ func newPage(d Data, nav, title string, current int, body any) page {
 		}
 	}
 	p.AllCount = len(list)
-	p.User = navProject{Name: userConfig, Full: "settings and installs outside any project", Href: "/?project=user", Count: strconv.Itoa(sum(user)), User: true}
+	p.User = navProject{Name: userConfig, Full: userConfigNote, Href: "/?project=user", Count: strconv.Itoa(sum(user)), User: true}
 	return p
 }
 
@@ -433,7 +462,7 @@ func rowFor(d Data, fd finding.Finding, f filters, newKeys map[string]bool) (row
 	}
 	evidence := shortenAll(fd.Evidence.String(), home)
 	return row{
-		Sev: sevWords[k], SevKey: sevKeys[k], Title: capital(title), Evidence: evidence, Short: cut(evidence, evidenceCut),
+		Sev: sevWords[k], SevKey: sevKeys[k], Title: capital(title), Evidence: evidence, Short: cut(evidence),
 		Project: base(projName), ProjectFull: projName, ProjectHref: projHref, Loc: loc, Rule: shortRule(fd.RuleID), New: isNew,
 		Why: sentence(cmp.Or(rule.Detail, rule.Title)), Fix: sentence(rule.Fix), Open: f.id != "",
 		Meta: metaOf(fd.Origin), File: fd.Origin.File.Text().String(),
@@ -489,13 +518,14 @@ func shortenAll(s, home string) string {
 // all.
 const evidenceCut = 72
 
-// cut is s up to n characters, with an ellipsis when it's longer.
-func cut(s string, n int) string {
+// cut is s up to evidenceCut characters, with an ellipsis when it's
+// longer.
+func cut(s string) string {
 	r := []rune(s)
-	if len(r) <= n {
+	if len(r) <= evidenceCut {
 		return s
 	}
-	return string(r[:n]) + "…"
+	return string(r[:evidenceCut]) + "…"
 }
 
 // sentence is s capitalized, ending in a period, so rule text reads as a
@@ -674,7 +704,7 @@ func toolbarOf(d Data, q url.Values, f filters, baseURL string, withProject bool
 		tb.Facets = append(tb.Facets, mk(keyProject, "Project", f.project, projectChoices(d, home)))
 	}
 	tb.Facets = append(tb.Facets, mk(keyAgent, "Agent", f.agent, []choice{{Value: "claude", Label: "Claude"}, {Value: "codex", Label: "Codex"}}))
-	tb.Facets = append(tb.Facets, mk(keyArea, "Area", f.area, areaChoices(d)))
+	tb.Facets = append(tb.Facets, mk(keyArea, "Category", f.area, areaChoices(d)))
 	return tb
 }
 
@@ -686,7 +716,7 @@ func projectChoices(d Data, home string) []choice {
 		full := tilde(p.Path.Text().String(), home)
 		out = append(out, choice{Value: strconv.Itoa(i), Label: base(full), Title: full})
 	}
-	return append(out, choice{Value: keyUser, Label: userConfig, Title: "settings and installs outside any project"})
+	return append(out, choice{Value: keyUser, Label: userConfig, Title: userConfigNote})
 }
 
 // areaChoices is each rule area that has a finding, sorted.
@@ -834,7 +864,7 @@ type projectBody struct {
 	overview
 
 	Path   string
-	Trust  []string
+	Trust  []trustPill
 	Walk   string
 	Counts [4]int
 }
@@ -847,9 +877,7 @@ func projectOf(d Data, n int, q url.Values) projectBody {
 	f := filtersOf(q)
 	f.project = []string{key}
 	b := projectBody{Path: tilde(p.Path.Text().String(), d.Scan.Home.Text().String())}
-	for _, t := range p.Trust {
-		b.Trust = append(b.Trust, string(t.Origin.Agent)+" "+string(t.Level))
-	}
+	b.Trust = trustOf(p)
 	switch p.Walk {
 	case model.WalkGit:
 		b.Walk = "Files from git · " + plural(len(p.Files), "file")
@@ -870,16 +898,53 @@ func projectOf(d Data, n int, q url.Values) projectBody {
 type llmRow struct {
 	Key, Kind, Name, File, Project, State, StateKey string
 	Checked                                         bool
+	Tokens                                          int // what sending it costs, about; 0 when the cache answers it
 }
 
 type llmBody struct {
-	Pager                               pager
-	Total                               int
-	On                                  bool
-	Host, Model, KeyEnv                 string
-	KeySet                              bool
-	Parallel, Send, Cached, Failed, New int
-	Rows                                []llmRow
+	Pager                                        pager
+	Total                                        int
+	Review                                       *ReviewState // a review sent from the dashboard, once there's been one
+	On                                           bool
+	Host, Model, KeyEnv                          string
+	KeySet                                       bool
+	Parallel, Send, Cached, Failed, New, Skipped int
+	Rows                                         []llmRow
+	// Arts is every artifact, on every page, as "key:tokens:state" with a
+	// space between, so the page can keep what's checked as you page.
+	Arts string
+}
+
+// trustPill is an agent's trust in a project. Only trusted shows as
+// trusted; untrusted and unknown are plain.
+type trustPill struct {
+	Text    string
+	Trusted bool
+}
+
+func trustOf(p model.Project) []trustPill {
+	out := make([]trustPill, 0, len(p.Trust))
+	for _, t := range p.Trust {
+		out = append(out, trustPill{Text: string(t.Origin.Agent) + " " + string(t.Level), Trusted: t.Level == model.TrustTrusted})
+	}
+	return out
+}
+
+// tokensOf is about what sending a, in state st, costs. The cache answers
+// a cached one, so it costs nothing.
+func tokensOf(a llm.Artifact, st llm.State) int {
+	if st == llm.StateCached || st == llm.StateSkipped {
+		return 0
+	}
+	return llm.Estimate(a)
+}
+
+// stateWord is a state as one word, for the page's script.
+func stateWord(st llm.State) string {
+	if st == llm.StateFailed {
+		return "failed"
+	}
+	return string(st)
 }
 
 // artifactName is what a checklist row calls an artifact. An instruction
@@ -896,7 +961,8 @@ func artifactName(a llm.Artifact) string {
 func llmOf(d Data, q url.Values) llmBody {
 	l := d.LLM
 	b := llmBody{On: l.On, Model: l.Model.String(), KeyEnv: l.KeyEnv.String(), KeySet: l.KeySet, Parallel: l.Parallel,
-		Host: l.Plan.Host, Send: l.Plan.Send, Cached: l.Plan.Cached, Failed: l.Plan.Failed, New: l.Plan.New}
+		Host: l.Plan.Host, Send: l.Plan.Send, Cached: l.Plan.Cached, Failed: l.Plan.Failed, New: l.Plan.New, Skipped: l.Skipped}
+	arts := make([]string, 0, len(l.Artifacts))
 	home := d.Scan.Home.Text().String()
 	for i, a := range l.Artifacts {
 		st := llm.StateNew
@@ -911,9 +977,12 @@ func llmOf(d Data, q url.Values) llmBody {
 		b.Rows = append(b.Rows, llmRow{
 			Key: llm.KeyOf(a), Kind: capital(string(a.Kind)), Name: artifactName(a),
 			File: relTo(a.Origin.File.Text().String(), projDir(d, pi), home), Project: proj,
-			State: string(st), StateKey: strings.ReplaceAll(string(st), " ", "-"), Checked: st != llm.StateCached,
+			State: string(st), StateKey: strings.ReplaceAll(string(st), " ", "-"), Tokens: tokensOf(a, st),
+			Checked: st == llm.StateNew || st == llm.StateFailed, // what a review sends unless you change it
 		})
+		arts = append(arts, llm.KeyOf(a)+":"+strconv.Itoa(tokensOf(a, st))+":"+stateWord(st))
 	}
+	b.Arts = strings.Join(arts, " ")
 	b.Total = len(b.Rows)
 	b.Rows, b.Pager = paginate(b.Rows, q, "/llm")
 	return b
@@ -1045,7 +1114,7 @@ func changeRowOf(d Data, c snapshot.Change) changeRow {
 	r.Kind = "Finding"
 	if id, _, _ := strings.Cut(key, " "); id != "" {
 		if rule, ok := d.Scan.Rules.Lookup(id); ok {
-			r.Title, r.Sub = capital(rule.Title), cut(shortenAll(key, home), evidenceCut)
+			r.Title, r.Sub = capital(rule.Title), cut(shortenAll(key, home))
 		}
 	}
 	return r
@@ -1056,7 +1125,7 @@ func changeRowOf(d Data, c snapshot.Change) changeRow {
 func findingChange(r changeRow, fr row, fd finding.Finding) changeRow {
 	k := sevIndex(fd.Severity)
 	r.Title, r.Sev, r.SevKey = fr.Title, sevWords[k], sevKeys[k]
-	r.Sub = cut(fr.Rule+" · "+fr.Evidence, evidenceCut)
+	r.Sub = cut(fr.Rule + " · " + fr.Evidence)
 	return r
 }
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nickelsec/jarx/internal/llm"
 	"github.com/nickelsec/jarx/internal/snapshot"
 	"github.com/nickelsec/jarx/internal/ui"
 )
@@ -264,5 +265,29 @@ func TestChangesCompareWithAnOlderSnapshot(t *testing.T) {
 	}
 	if _, _, err := a.ChangesSince("nope"); !errors.Is(err, snapshot.ErrNoSnapshot) {
 		t.Errorf("ChangesSince(nope) = %v, want ErrNoSnapshot", err)
+	}
+}
+
+func TestTheDashboardShowsCachedLLMFindingsWithoutSending(t *testing.T) {
+	f := &reviewer{}
+	demo := llmDemo(t, f.serve(t))
+	if got := withKey().ask("y\n", "scan", "--llm", "--home", demo); got.code != 0 {
+		t.Fatalf("scan --llm = %d, %q", got.code, got.stderr)
+	}
+	sent := f.count()
+
+	a := testApp(t, demo)
+
+	if f.count() != sent {
+		t.Errorf("the dashboard sent %d requests, want none", f.count()-sent)
+	}
+	n := 0
+	for _, fd := range a.Data().Scan.Findings {
+		if fd.RuleID == llm.RuleHigh().ID {
+			n++
+		}
+	}
+	if n == 0 {
+		t.Error("the dashboard doesn't show the findings the last review cached")
 	}
 }

@@ -609,13 +609,43 @@ masked leak.
   - Not covered yet: the modals and the live progress need JavaScript; the
     browser check only saw the first step because the demo scan finishes
     in half a second (the step reporting is tested in Go); and adding a
-    repo doesn't start a scan by itself
-- [ ] the LLM review button and LLM settings, with how many to send at
-  once (phase 8 came first)
-- [ ] choose which artifacts the LLM review sends, rerun only the ones that
-  failed, and show a skipped one as "not reviewed, you skipped it". A skip
+    repo doesn't start a scan by itself (b3df71e)
+- [x] the LLM review button and LLM settings, with how many to send at
+  once (phase 8 came first): Settings edits the base URL, model, key env
+  var and parallel requests with `jarx setup llm`'s own checks, tests the
+  connection and turns the review off (asking first). Review checked asks
+  first (how many, about how many tokens, where) and sends in the
+  background like a rescan, with a progress bar and a toast when it ends,
+  or why it stopped. Findings from earlier reviews show from the cache
+  everywhere, with nothing sent (`llm.FromCache`), and `llm.Estimate`
+  gives each artifact's rough token cost
+  - Not covered yet: Review checked needs JavaScript to ask first; the key
+    is only ever read from the terminal that started `jarx ui`, so setting
+    it means restarting from a terminal where it's set
+- [x] choose which artifacts the LLM review sends, rerun only the ones that
+  failed, and show a skipped one as SKIPPED. A skip
   is remembered by the artifact's content hash in jarx's state dir, so a
-  changed file comes back
+  changed file comes back: `llm-skips.json` with `llm.LoadSkips` and
+  `Unskipped`. The checklist keeps what you check as you page, All means
+  every artifact that isn't skipped, Rerun failed checks just the failed
+  ones, and Skip checked and Unskip checked change the list. A skipped one
+  is never sent and its old findings don't show. `jarx scan --llm` leaves
+  skipped ones out too, and its preview gains a `skipped` line
+  - Not covered yet: the picks across pages live in the browser's session
+    storage, so they start over in a new tab
+- [x] inventory: a page after LLM review with each agent's version and
+  install, the totals the terminal's scanned block counts (from the same
+  counter, `report.Totals`), every project with its trust and counts, and
+  every MCP server with where it's defined, what it runs, whether it
+  starts, what the probe found and its tools. Only "trusted" shows as
+  trusted, here and on the project page. The findings filter's Area is
+  called Category now
+  - Not covered yet: whether an MCP server is "official", since there's no
+    documented list to check against
+- [x] moved to a later phase: exposure paths and the "at a glance" column
+  on the overview, the project page's other tabs (loads, credentials and
+  reach, MCP, permissions, egress, sessions), and opening the browser for
+  you. The dashboard does what this phase set out to do without them
 
 **Run it:** `jarx ui --home testdata/demo`.
 

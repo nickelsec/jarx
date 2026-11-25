@@ -796,7 +796,14 @@ prints what comes back.
 - **The preview** says how many artifacts would go and roughly how many
   tokens, how many at a time, and, after an earlier run, how many are
   cached and not sent, how many failed last time and are sent again, and
-  how many are new or changed.
+  how many are new or changed. When some were skipped in the dashboard, a
+  `skipped` line says how many.
+- **Skips.** `llm-skips.json` in the state dir is the artifacts skipped in
+  the dashboard, by `llm.KeyOf`: a hash of the artifact's kind, name and
+  text, not of the endpoint or model. A skip lasts until the artifact
+  changes. A skipped artifact is never sent, by the dashboard or by `jarx
+  scan --llm`, and what an earlier review found in it doesn't show. The
+  file holds hashes and times only. A broken one skips nothing.
 - **When it stops.** A rejected key or an endpoint jarx can't reach stops
   the whole review with that error, since every request after it would
   fail the same way. The requests already out finish, and nothing new
@@ -1157,7 +1164,8 @@ critical and high one always shown.
 
 ### Layout
 
-- **Sidebar:** the logo, then Overview, Scan, Changes and LLM review. A thin
+- **Sidebar:** the logo, then Overview, Scan, Changes, LLM review and
+  Inventory. A thin
   line, then Projects: user config first with a small person icon, then
   the projects worst first by folder name, with the full path on hover and
   the finding count on the right. A project that's gone shows a STALE tag
@@ -1177,8 +1185,9 @@ critical and high one always shown.
   outside it.
 - **Project page:** the path, each agent's trust, how its files were
   listed (from git or found on disk), its counts by severity, and its
-  findings with the same table and filters. Still to come: the other tabs
-  (Loads, Credentials and reach, MCP, Permissions, Egress, Sessions).
+  findings with the same table and filters. Its other tabs (Loads,
+  Credentials and reach, MCP, Permissions, Egress, Sessions) moved to a
+  later phase.
 - **Scan:** the one place to scan again. While no scan runs, the last
   scan's time and its findings, projects and new findings. While one runs,
   the scan's five steps from the progress line, each ticked off as it
@@ -1197,26 +1206,45 @@ critical and high one always shown.
   opens its modal right there. Then the scan history: every scan with its
   time, how many findings were new, and what changed, plus how many scans
   there were in all.
-- **LLM review:** the host and model, four counts (to send, cached,
-  failed last time, new), then a checklist of every artifact with its
-  kind, project and state. Still to come: sending from the page, Rerun
-  failed and Skip checked.
-- **Settings:** the LLM settings (base URL, model, key env var and
-  whether it's set, parallel requests) and about (what was scanned and
-  when, the version and the state dir). Changing the LLM settings from the
-  page is still to come.
+- **LLM review:** the host and model, five counts (to send, cached,
+  failed last time, new, skipped), then a paged checklist of every
+  artifact with its kind, project and state. New and failed ones start
+  checked. What you check is kept as you page, and All means every
+  artifact that isn't skipped. Review checked asks first, saying how many
+  artifacts, about how many tokens and where they go, then sends in the
+  background with a progress bar and a toast when it ends. Rerun failed
+  checks just the ones that failed last time and asks. Skip checked and
+  Unskip checked change the skip list; a skipped one shows as SKIPPED.
+  Findings from earlier reviews show from the
+  cache everywhere findings show, with nothing sent.
+- **Inventory:** a summary of what the agents can see and use. A card
+  per agent (version, how it's installed, whether it's on PATH, its config
+  folder), then the totals the terminal's scanned block counts, from the
+  same counter (`report.Totals`), so the two never disagree. Then every
+  project with its trust, how its files were listed and its counts of
+  instructions, skills, MCP servers and findings, and every MCP server
+  once: its agent, where it's defined, what it runs (a remote one by host
+  only, since a URL's path or query can hold a token), whether the agent
+  starts it, what the probe found, and how many tools it lists. Only
+  "trusted" shows as a green pill; untrusted and unknown are plain.
+- **Settings:** the LLM review's base URL, model, key env var (and
+  whether it's set in the terminal that started `jarx ui`) and parallel
+  requests, with Save (or Turn on), Test connection and Turn off, which
+  asks first. They're checked the way `jarx setup llm` checks them. Then
+  about (what was scanned and when, the version and the state dir).
 
 Notices are toasts in the top right, in the caps font with a tick or a
 warning icon, with an X to dismiss. They fade after a few seconds. "Scan
 complete" shows on whatever page is open when a rescan ends.
 
-Still to come on the overview: exposure paths (an agent, the way in, and
-the credential it reaches) and an "at a glance" column.
+Moved to a later phase: exposure paths on the overview (an agent, the
+way in, and the credential it reaches), an "at a glance" column, the
+project page's other tabs, and opening the browser for you.
 
 ### Filters
 
 Above the table: a search box that filters as you type (`/` jumps to it),
-then one dropdown each for Severity, Project, Agent and Area. Each is a
+then one dropdown each for Severity, Project, Agent and Category. Each is a
 checkbox list with Clear and Apply, and its button names what's picked,
 like "Severity: High, Medium". Then a New only toggle, and Clear all when
 anything is on. Filters live in the URL, so back, reload and shared links
@@ -1322,6 +1350,12 @@ over the scan setup, so the `ui` package never touches disk.
   by ID. An ID only loads if it's in the list of saved snapshots, so it
   can't name another file. Snapshots don't change once saved, so each
   comparison is worked out once and kept until the next scan.
+- **LLM:** a POST saves the settings, tests the connection, or turns the
+  review off. Another starts a review of the checked keys in the
+  background, one at a time, with the key read from the terminal that
+  started `jarx ui` only when it runs. A skipped artifact is left out even
+  when checked. `/rescan/status` carries the review's progress too, and
+  why it stopped when it did. A third skips or unskips.
 - Every write goes through the guard's cookie and cross-origin check, form
   bodies stop at 16 KiB, and a form only ever goes back to a page on the
   dashboard: anything with a scheme, a host, `//`, a backslash or

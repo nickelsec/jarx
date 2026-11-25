@@ -26,6 +26,26 @@ type fakeApp struct {
 	since     map[string][]snapshot.Change
 	state     ScanState
 	folders   map[string]Folder
+	llm       LLMForm
+	llmErr    error
+	reviewed  []string
+	reviewErr error
+	skipped   []string
+	skipOn    bool
+	skipErr   error
+}
+
+func (a *fakeApp) SaveLLM(f LLMForm) error { a.llm = f; return a.llmErr }
+
+func (a *fakeApp) LLMOff() error { return a.llmErr }
+
+func (a *fakeApp) TestLLM() error { return a.llmErr }
+
+func (a *fakeApp) Review(keys []string) error { a.reviewed = keys; return a.reviewErr }
+
+func (a *fakeApp) Skip(keys []string, skip bool) error {
+	a.skipped, a.skipOn = keys, skip
+	return a.skipErr
 }
 
 func (a *fakeApp) Data() Data { return a.d }
