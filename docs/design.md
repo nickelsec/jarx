@@ -683,6 +683,30 @@ and `Origin`). Every request also goes through a Host allowlist
 (`127.0.0.1:<port>`, `localhost:<port>`) to stop DNS rebinding. A strict CSP
 blocks inline script, and `frame-ancestors 'none'` stops framing.
 
+How `internal/ui`'s guard does it, in the order every request meets it:
+
+1. Every answer, refusals and redirects too, carries the CSP
+   (`default-src 'none'`, and `'self'` only for script, style, fonts,
+   images, fetches and forms, no `unsafe-inline` or `unsafe-eval`),
+   `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `no-store` and
+   same-origin opener and resource policies. It never sends a CORS
+   header.
+2. A Host that isn't `127.0.0.1:<port>` or `localhost:<port>` gets a 403.
+   `[::1]` isn't on the list, since the server only listens on IPv4
+   loopback.
+3. A `t` in the query is checked in constant time and works once. Its
+   cookie holds a separate random session value, never the token, so the
+   link can't be replayed from the history or a shared screen. A wrong or
+   used token is a 403 and sets nothing.
+4. Anything without the session cookie is a 403 that says to open the
+   printed link.
+5. Anything but GET, HEAD and OPTIONS also has to pass Go's
+   `http.CrossOriginProtection`.
+
+The server listens on `127.0.0.1` with port 0, so the OS picks a free
+port, and has a 5s header timeout and a 64 KiB header cap. Ctrl+C shuts it
+down and waits up to 5s for answers in flight.
+
 Sources: https://www.calhoun.io/csrf-protection-via-headers-in-go-125,
 https://developer.mozilla.org/en-US/docs/Web/Security/Attacks/CSRF
 

@@ -554,7 +554,17 @@ masked leak.
   logo traced to an SVG
   - Not covered yet: the fonts and logo files themselves come with the
     pages item, where the CSS uses them
-- [ ] `ui` server and security middleware with tests
+- [x] `ui` server and security middleware with tests. `ui.Listen` binds
+  `127.0.0.1` on a random port, and `ui.Protect` puts every request
+  through the guard: security headers and a strict CSP on every answer and
+  never CORS, the Host allowlist, a one-time token traded for an
+  `HttpOnly`, `SameSite=Strict` session cookie with a 303, and Go's
+  cross-origin check on writes. `jarx ui [--home]` prints the link whole,
+  serves a placeholder page until the pages item, and shuts down on
+  ctrl+c. Tests break each protection on purpose: host, token reuse,
+  cross-origin writes and framing all fail when removed
+  - Not covered yet: the pages (next item), and opening the browser for
+    you (jarx prints the link instead)
 - [ ] pages
 - [ ] snapshot picker and write actions (repo add and remove, rescan)
 - [ ] the LLM review button and LLM settings, with how many to send at

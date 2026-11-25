@@ -103,9 +103,8 @@ func TestNoArgsPrintsUsageToStderr(t *testing.T) {
 }
 
 func TestUnknownCommandIsAUsageError(t *testing.T) {
-	// "version" is no longer a subcommand, and "ui" doesn't exist until
-	// phase 7.
-	for _, cmd := range []string{"frobnicate", "version", "ui"} {
+	// "version" is no longer a subcommand.
+	for _, cmd := range []string{"frobnicate", "version"} {
 		t.Run(cmd, func(t *testing.T) {
 			got := run(cmd)
 
