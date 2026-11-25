@@ -1,0 +1,126 @@
+{{define "top"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · jarx</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<script src="/static/theme.js"></script>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="app">
+<aside class="side">
+<a class="brand" href="/"><img class="logo" src="/static/logo.svg" alt="jarx" width="74" height="29"></a>
+<nav class="nav" aria-label="Main">
+<a href="/"{{if eq .Nav "overview"}} aria-current="page"{{end}}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="16" width="7" height="5" rx="1.5"></rect></svg>Overview</a>
+<a href="/changes"{{if eq .Nav "changes"}} aria-current="page"{{end}}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg>Changes</a>
+<a href="/llm"{{if eq .Nav "llm"}} aria-current="page"{{end}}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"></path><path d="M19 15l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"></path></svg>LLM review</a>
+</nav>
+<hr class="rule">
+<section class="side-projects" aria-label="Projects">
+<div class="side-label">Projects</div>
+<nav class="projects" aria-label="Projects">
+{{template "navproject" .User}}
+{{range .Projects}}{{template "navproject" .}}{{end}}
+{{if .More}}<details class="more"><summary><span class="when-closed">View all {{.AllCount}}</span><span class="when-open">Show less</span></summary><div class="more-list">{{range .More}}{{template "navproject" .}}{{end}}</div></details>{{end}}
+</nav>
+</section>
+<div class="side-foot">
+<a class="settings-link" href="/settings"{{if eq .Nav "settings"}} aria-current="page"{{end}}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>Settings</a>
+<button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to light mode" title="Switch theme"><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"></path></svg></button>
+</div>
+</aside>
+<main class="main">
+{{end}}
+
+{{define "navproject"}}<a class="proj-link{{if .User}} user{{end}}" href="{{.Href}}" title="{{.Full}}"{{if .Active}} aria-current="page"{{end}}>{{if .User}}<svg class="proj-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>{{end}}<span class="proj-name">{{.Name}}</span>{{if .Status}}<span class="proj-status">{{.Count}}</span>{{else}}<span class="proj-count">{{.Count}}</span>{{end}}</a>{{end}}
+
+{{define "bottom"}}
+</main>
+</div>
+</body>
+</html>
+{{end}}
+
+{{define "toolbar"}}
+<div class="toolbar">
+<form class="search" method="get" action="{{.Base}}" role="search">
+{{range .SearchHidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+<label class="sr" for="q">Search findings</label><input id="q" type="search" name="q" value="{{.Query}}" placeholder="Search findings" data-search>
+<kbd>/</kbd>
+</form>
+<div class="facets" data-facets>
+{{range .Facets}}<details class="facet{{if .On}} on{{end}}" data-facet="{{.Key}}">
+<summary><span class="cut">{{.Summary}}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></summary>
+<form class="menu" method="get" action="{{$.Base}}">
+{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<div class="opts">{{range .Options}}<label{{if .Title}} title="{{.Title}}"{{end}}><input type="checkbox" name="{{.Name}}" value="{{.Value}}"{{if .On}} checked{{end}}><span class="cut">{{.Label}}</span></label>{{end}}</div>
+<div class="menu-foot"><a href="{{.ClearHref}}">Clear</a><button type="submit" class="btn primary small">Apply</button></div>
+</form>
+</details>{{end}}
+<a class="toggle{{if .NewOn}} on{{end}}" href="{{.NewHref}}" aria-pressed="{{if .NewOn}}true{{else}}false{{end}}">New only</a>
+{{if .Active}}<a class="clear" href="{{.ClearHref}}">Clear all</a>{{end}}
+</div>
+</div>
+{{end}}
+
+{{define "findings"}}
+<section class="card table" id="findings" aria-label="Findings">
+<div class="thead"><span>Severity</span><span>Finding</span><span>Project</span><span>Location</span><span>Rule</span></div>
+{{range $i, $r := .Rows}}<div class="finding">
+<button type="button" class="frow" data-open="f-{{$i}}" aria-haspopup="dialog">
+<span class="sev s-{{.SevKey}}"><i></i>{{.Sev}}</span>
+<span class="ftitle"><span class="t"><span class="cut">{{.Title}}</span>{{if .New}}<span class="new">NEW</span>{{end}}</span><span class="ev mono">{{.Short}}</span></span>
+<span class="dim cut" title="{{.ProjectFull}}">{{.Project}}</span>
+<span class="mono dim cut">{{.Loc}}</span>
+<span class="mono faint">{{.Rule}}</span>
+</button>
+{{template "modal" (dict "ID" (printf "f-%d" $i) "R" .)}}
+</div>
+{{else}}<p class="empty">No findings match these filters.</p>{{end}}
+{{template "pager" .Pager}}
+</section>
+{{end}}
+
+{{define "pager"}}
+<div class="pager">
+<span class="range">{{if .Total}}Showing {{.From}}–{{.To}} of {{.Total}}{{else}}Nothing to show{{end}}</span>
+<form class="per" method="get" action="{{.Base}}">
+{{range .PerHidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<label>Rows per page<select name="per" data-autosubmit>{{range .Per}}<option value="{{.N}}"{{if .Selected}} selected{{end}}>{{.N}}</option>{{end}}</select></label>
+<noscript><button type="submit" class="btn small">Go</button></noscript>
+</form>
+{{if .Many}}<nav class="pages" aria-label="Pages">
+{{if .PrevHref}}<a class="pg step" rel="prev" href="{{.PrevHref}}" aria-label="Previous page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg></a>{{else}}<span class="pg step off" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"></path></svg></span>{{end}}
+{{range .Pages}}{{if .Gap}}<span class="gap" aria-hidden="true">…</span>{{else if .Current}}<span class="pg cur" aria-current="page">{{.N}}</span>{{else}}<a class="pg" href="{{.Href}}">{{.N}}</a>{{end}}{{end}}
+{{if .NextHref}}<a class="pg step" rel="next" href="{{.NextHref}}" aria-label="Next page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></a>{{else}}<span class="pg step off" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"></path></svg></span>{{end}}
+</nav>{{end}}
+</div>
+{{end}}
+
+{{define "modal"}}{{with .R}}<dialog class="modal" id="{{$.ID}}" aria-labelledby="{{$.ID}}-t" tabindex="-1"{{if .Open}} data-autoopen{{end}}>
+<div class="modal-box">
+<header class="modal-head">
+<div class="modal-tags"><span class="sev s-{{.SevKey}}"><i></i>{{.Sev}}</span>{{if .New}}<span class="new">NEW</span>{{end}}<span class="mono faint">{{.Rule}}</span></div>
+<h3 id="{{$.ID}}-t">{{.Title}}</h3>
+<form method="dialog"><button type="submit" class="modal-x" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></form>
+</header>
+<div class="modal-body">
+<section>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"></path></svg>Vulnerable line</h4>
+<div class="snippet">
+<div class="snippet-head"><span class="mono cut" title="{{.File}}">{{.Loc}}</span><button type="button" class="copy" data-copy="{{.File}}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h8"></path></svg><span>Copy path</span></button></div>
+<pre class="code">{{.Evidence}}</pre>
+</div>
+</section>
+<section class="rec">
+<div class="rec-part"><h4><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4.5M12 16h.01"></path></svg>Issue</h4><p class="issue">{{.Why}}</p></div>
+<div class="rec-part"><h4><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"></path></svg>Recommendation</h4><p>{{.Fix}}</p></div>
+</section>
+</div>
+<footer class="modal-foot"><div class="foot-where"><span class="foot-path cut" title="{{.ProjectFull}}">{{.ProjectFull}}</span><span class="dot">·</span><span class="foot-meta">{{.Meta}}</span></div><a class="btn small" href="{{.ProjectHref}}">Open project</a></footer>
+</div>
+</dialog>{{end}}{{end}}

@@ -40,7 +40,7 @@ func DestructiveRunsUnasked() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-CAP-001", Severity: finding.High, Title: "A tool that changes things runs unasked",
 		Detail: "an MCP tool marked destructive, or named for a change (delete, write, send and the like), is pre-approved by an allow rule or approval mode, so the agent can call it without asking you",
-		Fix:    "remove it from the allow, or set it to ask; allow only the tools that read",
+		Fix:    "remove it from the allow list or set it to ask. Only allow tools that just read.",
 	}
 }
 
@@ -49,7 +49,7 @@ func DestructiveRunsUnasked() finding.Rule {
 func UndocumentedApproval() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-CAP-002", Severity: finding.Medium, Title: "A Codex MCP approval mode may skip asking",
-		Detail: "a Codex MCP server or tool sets approval_mode or default_tools_approval_mode to auto or approve; the docs don't say what these do, and they may let tools run without asking you",
+		Detail: "a Codex MCP server or tool sets approval_mode or default_tools_approval_mode to auto or approve. The docs don't say what these do, and they may let tools run without asking you.",
 		Fix:    "use prompt, or writes to ask only for tools that aren't marked read-only",
 	}
 }

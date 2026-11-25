@@ -405,6 +405,12 @@ went away", not "line 12 changed".
 
 - Snapshots go through `jarxdir` as `snapshots/<UTC time>-<random>.json`,
   and each save drops all but the newest 20.
+- Each scan also adds a line to `runs.json`, the run log the dashboard's
+  scan history reads: when it ran, how many findings, how many were new,
+  and how many items were added, removed or changed. It holds times and
+  numbers only, never text from a scan. It keeps the newest 200 lines and
+  counts every scan. A log that's broken or from a newer jarx shows a
+  note, and the next scan starts it over.
 - Reading one back puts every string through the scrubber again. That's
   safe because scrubbing is idempotent: a match that overlaps a mask the
   scrubber writes is left alone. A mask only counts when it's one of the
@@ -1142,93 +1148,145 @@ demo scan at 80 columns, so a layout change shows up as a test change.
 
 ## Dashboard look
 
-Agreed before any `ui` code, from a clickable mockup. The dashboard shows
-the same data as the CLI, grouped the same way: projects worst first,
-findings worst first, every critical and high one always shown.
+Agreed before any `ui` code from a clickable mockup, then reworked over
+several rounds of feedback on the real pages. The dashboard shows the same
+data as the CLI, grouped the same way: findings worst first, and every
+critical and high one always shown.
 
 ### Layout
 
-- **Sidebar:** the logo, then Overview, Changes, LLM review and Settings,
-  then the projects worst first with a small bar of their findings by
-  severity, then when the last scan ran.
-- **Overview:** one tile per severity plus what changed, each with the
-  change since the last scan as text and no chart. A tile filters the
-  findings table. Below them, exposure paths (an agent, the way in, and
-  the credential it reaches, from the reach verdicts) and an "at a
-  glance" column: agent installs and advisories, MCP servers by status,
-  credential states per agent, and the last LLM review. Then the findings
-  table.
-- **Project page:** the path, each agent's trust, how it was walked, its
-  counts, then tabs: Findings, Loads, Credentials and reach, MCP,
-  Permissions, Egress, Sessions. Credentials and reach is a grid of every
-  credential by channel, a verdict in each cell, and the selected cell's
-  why trail and fix beside it.
-- **LLM review:** what would be sent, what's cached, what failed last
-  time and what you skipped, then a checklist of every artifact with its
-  state, "Review checked", "Rerun failed" and "Skip checked", and a
-  progress strip while it runs.
+- **Sidebar:** the logo, then Overview, Changes and LLM review. A thin
+  line, then Projects: user config first with a small person icon, then
+  the projects worst first by folder name, with the full path on hover and
+  the finding count on the right. A project that's gone shows a STALE tag
+  instead. The first 6 show, and VIEW ALL N opens the rest (SHOW LESS
+  folds them back). The list scrolls on its own, so Settings never moves.
+  Settings sits at the bottom with the light and dark toggle beside it.
+- **Overview:** a summary card that counts and never filters: the total,
+  a thin bar split by severity with a legend, an "N new issues" pill that
+  shows just the new ones, and on the right what changed since the last
+  scan, how many projects were scanned and how many MCP servers are
+  defined. Then the findings table.
+- **Findings table:** severity, the finding's title with its evidence cut
+  to 72 characters, the project, the file and the rule. A row opens a
+  modal with the vulnerable line (with Copy path), then the issue and the
+  recommendation in one box, and a footer with the project path, agent
+  and scope, and Open project. The modal closes on X, Escape or a click
+  outside it.
+- **Project page:** the path, each agent's trust, how its files were
+  listed (from git or found on disk), its counts by severity, and its
+  findings with the same table and filters. Still to come: the other tabs
+  (Loads, Credentials and reach, MCP, Permissions, Egress, Sessions).
+- **Changes:** the date and time of the previous scan, then three boxes
+  for added, removed and changed that filter the list below them (with
+  Clear all). One list of changes, each tagged ADDED, REMOVED or CHANGED.
+  A finding that's still there shows as the finding, and View finding
+  opens its modal right there. Then the scan history: every scan with its
+  time, how many findings were new, and what changed, plus how many scans
+  there were in all.
+- **LLM review:** the host and model, four counts (to send, cached,
+  failed last time, new), then a checklist of every artifact with its
+  kind, project and state. Still to come: sending from the page, Rerun
+  failed and Skip checked.
 - **Settings:** the LLM settings (base URL, model, key env var and
-  whether it's set, parallel requests, test connection, turn off), extra
-  repos, and about.
+  whether it's set, parallel requests), extra repos, and about (what was
+  scanned and when, the version and the state dir). Changing them from
+  the page is still to come.
+
+Still to come on the overview: exposure paths (an agent, the way in, and
+the credential it reaches) and an "at a glance" column.
 
 ### Filters
 
-The findings table has quick filters as chips: one per severity, with its
-count. Next to them a Filters button (a funnel icon, with the number of
-active filters) opens a panel to pick several at once: severity, project,
-agent, area (MCP, secrets, reach, permissions, instructions, history,
-versions, LLM review) and status (new since the last scan). The panel has
-Clear all, and each active filter shows as a chip that removes it. Filters
-live in the URL, so the back button and bookmarks work.
+Above the table: a search box that filters as you type (`/` jumps to it),
+then one dropdown each for Severity, Project, Agent and Area. Each is a
+checkbox list with Clear and Apply, and its button names what's picked,
+like "Severity: High, Medium". Then a New only toggle, and Clear all when
+anything is on. Filters live in the URL, so back, reload and shared links
+work.
+
+Under the table: `Showing 1–20 of 45`, rows per page (20, 30 or 50), and
+page links with an ellipsis for skipped pages. A page past the end shows
+the last one.
 
 ### Color
 
-Dark only, matte. There's no light theme and no theme switch. Neutrals
-are zinc, a little lifted from black so nothing glares, and buttons,
-pickers and the active nav item use gray, not a brand color. Severity is
-the only color on the page, muted, and always next to its word.
+Dark by default, with a light theme behind the toggle, remembered in the
+browser. Both are neutral grays in the spirit of ChatGPT's and Notion's,
+and severity is the only color on the page, muted, and always next to its
+word.
 
-| Token | Value | Use |
-|---|---|---|
-| `bg` | `#0e0e10` | page |
-| `surface` | `#151518` | cards, sidebar |
-| `raised` | `#1b1b1f` | nested panels, table hover |
-| `hover` | `#212126` | nav and button hover, active nav |
-| `border` | `#26262b` | dividers |
-| `border-2` | `#34343b` | inputs, outlined buttons |
-| `text` | `#e7e7ea` | body (14.8:1 on surface) |
-| `text-2` | `#a1a1aa` | secondary (7.1:1) |
-| `text-3` | `#85858f` | labels, hints (at least 4.5:1 on every panel) |
-| `button` | `#26262b`, text `#e7e7ea` | primary buttons, selected chips |
-| `crit` | `#f0a3ab` on a 16% `#d9596a` tint; solid `#9c3a47` with `#f6e3e5` for the CRIT pill | critical |
-| `high` | `#e9a593` on a 16% `#cf6f5c` tint | high, "runs without asking" |
-| `med` | `#dcbd85` on a 16% `#c79a4b` tint | medium, "may run without asking" |
-| `info` | `#97bccb` on a 16% `#6f9fb3` tint | info, "asks first" |
-| `ok` | `#a3c7ae` on a 16% `#7fae8c` tint | trusted, blocked |
+| Token | Dark | Light | Use |
+|---|---|---|---|
+| `side` | `#0a0a0a` | `#f9f9f9` | sidebar |
+| `bg` | `#0f0f0f` | `#ffffff` | page |
+| `surface` | `#151515` | `#ffffff` | cards |
+| `raised` | `#1a1a1a` | `#f7f7f7` | nested panels, table hover |
+| `hover` | `#202020` | `#efefef` | nav and button hover, active nav |
+| `border` | `#222222` | `#e8e8e8` | dividers |
+| `border-2` | `#2e2e2e` | `#d6d6d6` | inputs, outlined buttons |
+| `text` | `#ececec` | `#0d0d0d` | body |
+| `text-2` | `#a3a3a3` | `#5b5b5b` | secondary |
+| `text-3` | `#8a8a8a` | `#6b6b6b` | labels, hints |
+| `primary` | `#ececec` on `#0f0f0f` | `#0d0d0d` on `#ffffff` | the one primary button per view |
+| `crit` | `#f0a3ab`, solid `#8e3441` for the CRIT pill | `#a82e3d` | critical |
+| `high` | `#e6a493` | `#9a3c27` | high |
+| `med` | `#d8bc88` | `#77561a` | medium |
+| `info` | `#9cbccb` | `#2c5f72` | info, new |
+| `ok` | `#a6c6b0` | `#2d6a44` | trusted, removed |
 
-Every text pair passes 4.5:1. CRIT is the only solid pill, so it stands
-apart from HIGH in lightness, not just hue. Small square dots, after the
-pixel logo, mark severity and status.
+Severity text sits on a 14 to 16% tint of its color. Every text pair
+passes 4.5:1 in both themes. Scrollbars are thin and dark, with no arrows.
 
 ### Type
 
-Two families, both open-licensed (SIL OFL) and embedded, since nothing
-loads from a CDN: Space Grotesk for page and section titles, Inter for
-everything else at 13.5px. Paths, rule IDs and evidence use the system's
-monospace font (Cascadia Mono, Consolas, SF Mono, Menlo).
+Two families, both under the SIL Open Font License and embedded, since
+nothing loads from a CDN:
+
+- **Geist Mono** in capitals with wide letter spacing for headings,
+  labels, tags and pills (OVERVIEW, PROJECTS, HIGH, ADDED, CLAUDE
+  TRUSTED), and as-is for code, paths and rule IDs. Paths keep their case
+  even in a caps heading, since they're case sensitive on some systems.
+- **Inter** (its optical size axis gives titles a display cut) for
+  anything read as a sentence: finding titles, descriptions, menus,
+  buttons and filters, at 13.5px.
+
+Short texts and single words start with a capital. Rule text in the modal
+reads as sentences, ending with a period.
 
 ### Logo
 
-`logo.png` traced into rectangles: a 9 KB SVG in `currentColor` instead of
-an 856 KB PNG, with no background. Plus a jar-only mark for the favicon
-and the collapsed sidebar. Both are embedded.
+`docs/logo.png` traced into rectangles: a 9 KB SVG instead of an 856 KB
+PNG, with no background and about 3px between the jar and the lettering.
+Light mode inverts it. The favicon is the jar alone on a dark tile, so it
+shows on light and dark browser tabs. Both are embedded.
 
 ### How it's built
 
-One CSS file with these tokens as custom properties, classes for every
-component, and no inline `style` attributes, since the CSP allows styles
-only from that file. The little JavaScript there is (the filter panel,
-expanding a row, the LLM review progress) is one embedded file too.
+One CSS file with these tokens as custom properties and no inline `style`
+attributes, since the CSP allows styles only from that file. Severity
+bars are inline SVG colored by class for the same reason. A test checks
+every page for inline styles, inline scripts and `on*=` handlers.
+
+Every filter, page link and form is a plain URL, so the pages work as
+links and forms without JavaScript. Two embedded scripts add the rest:
+
+- `theme.js` sets the theme before the page paints, so it never flashes.
+- `app.js` makes the dashboard feel like one page. A link or GET form
+  inside the dashboard fetches the new page and swaps the main part in
+  place, keeps the sidebar's current item in step, and updates the URL,
+  so back and forward still work. It also does live search, the facet
+  menus, opening and closing the finding modal (and opening one by itself
+  from a link), Copy path, the theme toggle, and "All" on the LLM review
+  checklist.
+
+The finding modal needs `app.js` to open. With scripts off, a row does
+nothing.
+
+`jarx ui` scans the way `jarx scan` does when it starts, with the same
+progress line, and saves the snapshot and the run log, so "changed" means
+the same in both. It serves that scan. Every text in it is masked
+already, and `html/template` escapes it.
 
 ## Package layout
 
@@ -1238,7 +1296,7 @@ expanding a row, the LLM review progress) is one embedded file too.
 | `internal/cli` | subcommands with stdlib `flag` | CLI |
 | `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`), and terminal facts for the report (a terminal or not, width, ANSI, UTF-8). Registry reads land here in phase 3 (macOS plists aren't read, see Limits in the PRD). Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
 | `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. Refuses network paths (and symlinks to them), anything that isn't a regular file, and content reads of credential locations (see "What an @import can point at"). | Walking a repo |
-| `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
+| `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache, snapshots, run log and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
 | `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. A `Text` keeps the kind and fingerprint of what it masked, never the value. | Promise 4, Secrets |
 | `internal/model` | agent-neutral inventory, `Origin`, `Path`, `Setting[T]` (one layer per scope, highest first, with each layer marked in effect or not and why; adapters decide, the model only holds the result), `Project`, `Unknown`. Grows per phase. | Architecture |
 | `internal/finding` | Finding, severity, rules as plain values with IDs like `JARX-MCP-001`, a `Registry` built by `scan` from every analyzer's rules (no global registry), worst-first sort, and `JARX-SCAN-001` for files fsys skipped as too large | Detection rules |
@@ -1259,7 +1317,7 @@ expanding a row, the LLM review progress) is one embedded file too.
 | `internal/probe` | which servers, env expansion rules, concurrency, status | MCP probing, Server status |
 | `internal/analyze/capability` | three-layer view per tool | Capability view |
 | `internal/analyze/egress` | the "where your agent talks to" panel | Where your agent talks to |
-| `internal/snapshot` | versioned schema, retention, diff | Snapshots and diff |
+| `internal/snapshot` | versioned schema, retention, diff, and the scan run log | Snapshots and diff |
 | `internal/analyze/drift` | hash diffs, rerun poison on changed tools | Snapshots, Drift |
 | `internal/history` | cursor, jsonl, zstd and read-only sqlite readers (observed formats) | Session history |
 | `testdata/gendemo` | writes the demo home's binary history fixtures (a `.zst` rollout, Codex's SQLite files) with `go run ./testdata/gendemo`. Go ignores `testdata`, so it's never in the build, and it sits outside the demo home so jarx doesn't scan it | Session history |

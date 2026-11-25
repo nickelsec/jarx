@@ -24,7 +24,7 @@ func ReadableSilently() finding.Rule {
 func BypassableDeny() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-REACH-002", Severity: finding.High, Title: "A credential's deny rule can be bypassed",
-		Detail: "a deny for a credential doesn't hold: for Claude, a Read deny only catches shell commands that name the file, like cat, and no sandbox backs it up; for Codex on native Windows, the unelevated sandbox doesn't support denied read paths",
+		Detail: "a deny rule for a credential doesn't really hold. For Claude, a Read deny only catches shell commands that name the file, like cat, and no sandbox backs it up. For Codex on native Windows, the unelevated sandbox doesn't support denied read paths.",
 		Fix:    "Claude: turn on the sandbox with a denyRead or credentials.files entry, and set allowUnsandboxedCommands to false. Codex: pin windows.sandbox to mxc, or leave unelevated out of allowed_sandbox_implementations",
 	}
 }

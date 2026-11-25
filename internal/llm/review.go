@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -304,4 +306,40 @@ func Plan(ep Endpoint, arts []Artifact, cache *Cache) Preview {
 		p.Tokens += (len(systemPrompt) + len(msg) + bytesPerToken - 1) / bytesPerToken
 	}
 	return p
+}
+
+// State is where one artifact stands before a review.
+type State string
+
+// Artifact states, for the dashboard's checklist.
+const (
+	StateCached State = "cached"           // answered last time, not sent again
+	StateFailed State = "failed last time" // sent again
+	StateNew    State = "new"              // never sent to this model, or changed since
+)
+
+// States says, for each artifact in order, whether the cache answers it,
+// it failed last time, or it's new.
+func States(ep Endpoint, arts []Artifact, cache *Cache) []State {
+	out := make([]State, len(arts))
+	for i, a := range arts {
+		key := cacheKey(ep, content(a))
+		switch {
+		case func() bool { _, ok := cache.get(key); return ok }():
+			out[i] = StateCached
+		case cache.failedBefore(key):
+			out[i] = StateFailed
+		default:
+			out[i] = StateNew
+		}
+	}
+	return out
+}
+
+// KeyOf is a hash of an artifact's content alone: its kind, name and text.
+// It doesn't change with the endpoint or model, so a choice made about the
+// artifact, like skipping it, lasts until the artifact itself changes.
+func KeyOf(a Artifact) string {
+	sum := sha256.Sum256([]byte(content(a)))
+	return hex.EncodeToString(sum[:])
 }

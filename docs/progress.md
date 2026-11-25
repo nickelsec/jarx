@@ -553,7 +553,7 @@ masked leak.
   text, embedded. Quick filters plus a Filters panel with Clear all. The
   logo traced to an SVG
   - Not covered yet: the fonts and logo files themselves come with the
-    pages item, where the CSS uses them
+    pages item, where the CSS uses them (6245ca6)
 - [x] `ui` server and security middleware with tests. `ui.Listen` binds
   `127.0.0.1` on a random port, and `ui.Protect` puts every request
   through the guard: security headers and a strict CSP on every answer and
@@ -564,8 +564,31 @@ masked leak.
   ctrl+c. Tests break each protection on purpose: host, token reuse,
   cross-origin writes and framing all fail when removed
   - Not covered yet: the pages (next item), and opening the browser for
-    you (jarx prints the link instead)
-- [ ] pages
+    you (jarx prints the link instead) (e77e01b)
+- [x] pages: Overview, a project page, Changes, LLM review and Settings,
+  reworked over several feedback rounds (Dashboard look in design.md has
+  the result). The overview has a summary card that counts without
+  filtering, a findings table with live search, a dropdown per facet
+  (severity, project, agent, area), New only, Clear all and paging, and a
+  modal per finding with the vulnerable line, Copy path, the issue and
+  the recommendation. Changes has filter boxes, one tagged list where
+  View finding opens the modal in place, and the scan history. Each scan
+  now logs its counts to `runs.json` in the state dir
+  (`snapshot.AppendRun` and `Runs`, the newest 200, every scan counted).
+  Dark and light themes, Inter and Geist Mono embedded (OFL), the traced
+  logo and favicon, one CSS file, and two small scripts: one sets the
+  theme before paint, the other swaps pages in place so nothing reloads.
+  `jarx ui` scans like `jarx scan`, saves the snapshot and the run log,
+  and serves the result. `snapshot.FindingKey` tags new findings, and
+  `llm.States` and `llm.KeyOf` give each artifact its state and a content
+  hash. Rule texts got rewritten as plain sentences. `docs/logo.png` is
+  the source art
+  - Not covered yet: exposure paths and the "at a glance" column on the
+    overview, the project page's other tabs (loads, credentials and reach,
+    MCP, permissions, egress, sessions), sending and skipping from the LLM
+    review page (items 5 and 6), settings changes from the page (items 4
+    and 5), and opening a finding's modal without JavaScript. The script
+    is checked by driving headless Edge, not by `go test`
 - [ ] snapshot picker and write actions (repo add and remove, rescan)
 - [ ] the LLM review button and LLM settings, with how many to send at
   once (phase 8 came first)

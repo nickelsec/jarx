@@ -82,7 +82,7 @@ func PlainHTTP() finding.Rule {
 func HeadersHelper() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-MCP-009", Severity: finding.Info, Title: "An MCP server runs a headers helper",
-		Detail: "a command runs each time the agent connects, to compute the server's headers; jarx doesn't run it",
+		Detail: "a command runs every time the agent connects, to build the server's headers.",
 		Fix:    "check what the helper runs, since it runs with your rights",
 	}
 }

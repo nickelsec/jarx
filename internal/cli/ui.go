@@ -6,10 +6,15 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/nickelsec/jarx/internal/jarxdir"
+	"github.com/nickelsec/jarx/internal/llm"
+	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
+	"github.com/nickelsec/jarx/internal/snapshot"
 	"github.com/nickelsec/jarx/internal/ui"
 )
 
@@ -41,12 +46,16 @@ func runUI(p *report.Printer, plain *redact.Scrubber, args []string, st streams)
 	if fs.NArg() > 0 {
 		return usageError(p, uiHelp, scrubbed(plain, "jarx ui takes no arguments"))
 	}
-	_, files, _, err := openEnv(*home)
+	ss, ok := openScan(p, scanFlags{home: *home}, st)
+	if !ok {
+		return exitError
+	}
+	defer func() { _ = ss.files.Close() }()
+	d, err := uiData(p, ss, st)
 	if err != nil {
 		p.Error(err)
 		return exitError
 	}
-	defer func() { _ = files.Close() }()
 
 	l, err := ui.Listen(0)
 	if err != nil {
@@ -55,7 +64,7 @@ func runUI(p *report.Printer, plain *redact.Scrubber, args []string, st streams)
 	}
 	port := l.Addr().(*net.TCPAddr).Port //nolint:forcetypeassert // ui.Listen listens on TCP
 	token := ui.NewToken()
-	server := ui.NewServer(ui.Protect(placeholder(), token, port))
+	server := ui.NewServer(ui.Protect(ui.Pages(func() ui.Data { return d }), token, port))
 
 	return serveUI(p, plain, st, l, server, "http://127.0.0.1:"+strconv.Itoa(port)+"/?t="+token)
 }
@@ -95,10 +104,44 @@ func serveUI(p *report.Printer, plain *redact.Scrubber, st streams, l net.Listen
 	return exitOK
 }
 
-// placeholder is the dashboard until its pages land.
-func placeholder() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("jarx dashboard\n"))
-	})
+// uiData scans the way jarx scan does, saves the snapshot, and adds the
+// LLM review's settings and checklist. The key's var is looked up in the
+// terminal's env, and only whether it's set goes on the page.
+func uiData(p *report.Printer, ss scanSetup, st streams) (ui.Data, error) {
+	sc, err := scanOnce(p, ss, scanFlags{})
+	if err != nil {
+		return ui.Data{}, err
+	}
+	saveScan(ss, &sc)
+	s := ss.scrub
+	d := ui.Data{
+		Scan: sc.view, Scanned: time.Now(), Version: strings.TrimPrefix(st.userAgent, "jarx/"),
+		StateDir: scrubbed(s, ss.env.StateDir),
+	}
+	d.History, d.HistoryNote = runLog(ss.env)
+	for _, r := range ss.cfg.Repos {
+		d.Repos = append(d.Repos, scrubbed(s, r))
+	}
+	if c := ss.cfg.LLM; c != nil {
+		ep := llm.Endpoint{BaseURL: c.BaseURL, Model: c.Model}
+		arts := llm.Collect(s, sc.res.Projects)
+		cache := llm.LoadCache(ss.env)
+		_, set := llm.KeyFrom(st.lookupKey, c.KeyEnv)
+		d.LLM = ui.LLM{
+			On: true, BaseURL: scrubbed(s, c.BaseURL), Model: scrubbed(s, c.Model), KeyEnv: scrubbed(s, c.KeyEnv),
+			KeySet: set, Parallel: parallelOf(*c),
+			Artifacts: arts, States: llm.States(ep, arts, cache), Plan: llm.Plan(ep, arts, cache),
+		}
+	}
+	return d, nil
+}
+
+// runLog reads the scan history the scans keep in the state dir.
+func runLog(env platform.Env) (snapshot.RunLog, string) {
+	d, err := jarxdir.Open(env)
+	if err != nil {
+		return snapshot.RunLog{}, "couldn't open jarx's state dir"
+	}
+	defer func() { _ = d.Close() }()
+	return snapshot.Runs(d)
 }

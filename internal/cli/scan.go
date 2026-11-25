@@ -146,6 +146,43 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string, st stream
 		return exitError
 	}
 	defer func() { _ = ss.files.Close() }()
+	sc, err := scanOnce(p, ss, f)
+	if err != nil {
+		p.Error(err)
+		return exitError
+	}
+	if f.all {
+		// What platform resolved, in full, and before the scan saves its
+		// snapshot, so the state dir shows as it was.
+		p.Wrapped(model.Path{}, func() { printEnv(p.Out, ss.scrub, ss.env, ss.files) })
+		p.Out.Printf("\n")
+	}
+	p.ScanHead(sc.view)
+	code = exitOK
+	if ss.review != nil {
+		more, c, stop := ss.review.run(ss.env, sc.res.Projects)
+		if stop {
+			return c
+		}
+		code = c
+		sc.view.Findings = append(slices.Clone(sc.findings), more...)
+	}
+	saveScan(ss, &sc)
+	p.ScanBody(sc.view)
+	return code
+}
+
+// scanned is one scan, before anything about it is printed or saved.
+type scanned struct {
+	view     report.ScanView
+	findings []finding.Finding // the rules' own, without the LLM's
+	res      discover.Result
+	cursor   history.Cursor
+}
+
+// scanOnce reads, probes and analyzes, with the progress line on stderr.
+// It prints nothing else and saves nothing.
+func scanOnce(p *report.Printer, ss scanSetup, f scanFlags) (scanned, error) {
 	env, files, scrub := ss.env, ss.files, ss.scrub
 	g := p.StartProgress(stepHistory, stepConfig, stepWalk, stepProbe, stepFindings)
 	defer g.Stop()
@@ -167,14 +204,7 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string, st stream
 	findings, err := analyze(scrub, env, res, lastSnapshot(env, files, scrub))
 	g.Stop() // before anything else prints
 	if err != nil {
-		p.Error(err)
-		return exitError
-	}
-	if f.all {
-		// What platform resolved, in full, and before the scan saves its
-		// snapshot, so the state dir shows as it was.
-		p.Wrapped(model.Path{}, func() { printEnv(p.Out, scrub, env, files) })
-		p.Out.Printf("\n")
+		return scanned{}, err
 	}
 	view := report.ScanView{
 		Fake: env.Fake(), Home: model.NewPath(scrub, env.Home), GOOS: env.GOOS,
@@ -183,28 +213,21 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string, st stream
 		Findings: findings, Rules: ss.rules, All: f.all, Credentials: res.Credentials,
 		Sessions: hist.Sessions, HistoryFiles: hist.Files,
 	}
-	p.ScanHead(view)
-	code = exitOK
-	if ss.review != nil {
-		more, c, stop := ss.review.run(env, res.Projects)
-		if stop {
-			return c
-		}
-		code = c
-		view.Findings = append(slices.Clone(findings), more...)
-	}
-	// The snapshot keeps the rules' findings only. The LLM's depend on the
-	// model and on whether --llm was passed, so they'd show as changes on
-	// every scan that differs.
-	view.Since, view.Note, view.Changes, view.SaveErr = saveSnapshot(env, scrub, snapshot.Input{
-		Projects: res.Projects, Instructions: res.Instructions, Unknown: res.Unknown, Findings: findings,
-		Credentials: res.Credentials,
+	return scanned{view: view, findings: findings, res: res, cursor: cursor}, nil
+}
+
+// saveScan saves the snapshot and the history cursor, and puts what
+// changed since the last snapshot on the view. The snapshot keeps the
+// rules' findings only. The LLM's depend on the model and on whether --llm
+// was passed, so they'd show as changes on every scan that differs.
+func saveScan(ss scanSetup, sc *scanned) {
+	sc.view.Since, sc.view.Note, sc.view.Changes, sc.view.SaveErr = saveSnapshot(ss.env, ss.scrub, snapshot.Input{
+		Projects: sc.res.Projects, Instructions: sc.res.Instructions, Unknown: sc.res.Unknown, Findings: sc.findings,
+		Credentials: sc.res.Credentials,
 	})
 	// Saved after --all printed the state dir as it was. A cursor that
 	// can't be saved only means the next scan reads more.
-	_ = cursor.Save(env)
-	p.ScanBody(view)
-	return code
+	_ = sc.cursor.Save(ss.env)
 }
 
 // readHistory reads session history from where the last scan left off.
@@ -350,6 +373,9 @@ func saveSnapshot(env platform.Env, scrub *redact.Scrubber, in snapshot.Input) (
 	if err := snapshot.Save(d, cur); err != nil {
 		return prev.Taken, note, changes, fmt.Errorf("write: %w", err)
 	}
+	// The run log only feeds the dashboard's history, so a log that can't
+	// be saved doesn't fail the scan.
+	_ = snapshot.AppendRun(d, snapshot.RunOf(cur.Taken, len(in.Findings), changes, prev.Taken.IsZero()))
 	return prev.Taken, note, changes, nil
 }
 

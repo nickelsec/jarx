@@ -1,0 +1,19 @@
+{{template "top" .}}
+{{with .Body}}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">Overview</a><span aria-hidden="true">/</span><span>{{.Path}}</span></nav>
+<header class="head">
+<div>
+<h1 class="mono-title">{{.Path}}</h1>
+<div class="pills">{{range .Trust}}<span class="pill">{{.}}</span>{{end}}{{if .Walk}}<span class="pill plain">{{.Walk}}</span>{{end}}</div>
+</div>
+<div class="counts">
+<span><b class="f-text-high">{{index .Counts 1}}</b>High</span>
+<span><b class="f-text-med">{{index .Counts 2}}</b>Medium</span>
+<span><b class="f-text-info">{{index .Counts 3}}</b>Info</span>
+</div>
+</header>
+<div class="tabs" role="tablist" aria-label="Project"><span class="tab" role="tab" aria-selected="true">Findings <span class="faint">{{.Total}}</span></span></div>
+{{template "toolbar" .Toolbar}}
+{{template "findings" .}}
+{{end}}
+{{template "bottom" .}}

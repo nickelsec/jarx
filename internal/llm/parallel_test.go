@@ -335,3 +335,34 @@ func assertPlan(t *testing.T, got, want Preview) {
 			got.Send, got.Failed, got.Cached, got.New, want.Send, want.Failed, want.Cached, want.New)
 	}
 }
+
+func TestStatesSaysWhereEachArtifactStands(t *testing.T) {
+	f := &flex{answer: func(_ int, a sentArtifact) (int, string, string, time.Duration) {
+		if strings.Contains(a.Text, "number 0") {
+			return http.StatusOK, "", "not json", 0
+		}
+		return http.StatusOK, "", noFindings, 0
+	}}
+	ep := endpoint(t, f.serve(t))
+	arts := lintSkills(t, 2)
+	cache := NewCache()
+	if _, err := ReviewWith(context.Background(), netguard.NewLLM(), ep, scrubber(t), arts, cache, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	all := slices.Concat(arts, []Artifact{skillArtifact(t, lintSkill)})
+
+	got := States(ep, all, cache)
+
+	want := []State{StateFailed, StateCached, StateNew}
+	if !slices.Equal(got, want) {
+		t.Errorf("States() = %v, want %v", got, want)
+	}
+}
+
+func TestKeyOfIsStableAndDiffersPerArtifact(t *testing.T) {
+	arts := lintSkills(t, 2)
+
+	if KeyOf(arts[0]) != KeyOf(lintSkills(t, 1)[0]) || KeyOf(arts[0]) == KeyOf(arts[1]) || len(KeyOf(arts[0])) != 64 {
+		t.Errorf("KeyOf = %q, %q; want a stable hash per artifact's content", KeyOf(arts[0]), KeyOf(arts[1]))
+	}
+}

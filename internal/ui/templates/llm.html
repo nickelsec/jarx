@@ -1,0 +1,37 @@
+{{template "top" .}}
+{{with .Body}}
+<header class="head">
+<div><h1>LLM review</h1><p class="sub">Choose what goes to your model.</p></div>
+{{if .On}}<a class="btn ghost" href="/settings">{{.Host}} · {{.Model}}</a>{{end}}
+</header>
+{{if .On}}
+<div class="tiles">
+<div class="tile"><span class="tile-label">To send</span><span class="tile-n">{{.Send}}</span></div>
+<div class="tile"><span class="tile-label">Cached</span><span class="tile-n">{{.Cached}}</span></div>
+<div class="tile"><span class="tile-label">Failed last time</span><span class="tile-n f-text-high">{{.Failed}}</span></div>
+<div class="tile"><span class="tile-label">New</span><span class="tile-n">{{.New}}</span></div>
+</div>
+<form class="card table" method="post" action="/llm/review" aria-label="Artifacts">
+<div class="llm-bar">
+<label class="check-all"><input type="checkbox" data-check-all>All</label>
+<span class="faint">{{len .Rows}} artifacts</span>
+<span class="spacer"></span>
+<button type="submit" class="btn primary" disabled>Review checked</button>
+</div>
+<div class="thead llm"><span></span><span>Kind</span><span>Artifact</span><span>Project</span><span>State</span></div>
+{{range .Rows}}<label class="lrow">
+<input type="checkbox" name="a" value="{{.Key}}"{{if .Checked}} checked{{end}} aria-label="Send {{.Name}}">
+<span class="dim">{{.Kind}}</span>
+<span class="ftitle"><span class="t">{{.Name}}</span><span class="ev mono">{{.File}}</span></span>
+<span class="mono dim cut">{{.Project}}</span>
+<span class="state st-{{.StateKey}}">{{.State}}</span>
+</label>{{else}}<p class="empty">Nothing to review: no instruction files, skills, hooks or listed tools were found.</p>{{end}}
+</form>
+{{else}}
+<section class="card pad">
+<h2>The LLM review is off</h2>
+<p class="sub">Set it up in a terminal with <code>jarx setup llm</code>. It asks for the endpoint, the model and the env var that holds the key, then restart <code>jarx ui</code> from a terminal where that var is set.</p>
+</section>
+{{end}}
+{{end}}
+{{template "bottom" .}}

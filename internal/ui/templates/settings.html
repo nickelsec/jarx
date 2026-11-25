@@ -1,0 +1,31 @@
+{{template "top" .}}
+{{with .Body}}
+<header class="head">
+<div><h1>Settings</h1></div>
+</header>
+<section class="card pad">
+<div class="block-head"><h2>LLM review</h2>{{if .LLM.On}}<span class="pill">on</span>{{else}}<span class="pill plain">off</span>{{end}}</div>
+{{if .LLM.On}}
+<dl class="kv">
+<dt>Base URL</dt><dd class="mono">{{.BaseURL}}</dd>
+<dt>Model</dt><dd class="mono">{{.LLM.Model}}</dd>
+<dt>Key env var</dt><dd><span class="mono">{{.LLM.KeyEnv}}</span> · {{if .LLM.KeySet}}Set in the terminal that started jarx ui{{else}}<span class="f-text-med">Not set in the terminal that started jarx ui</span>{{end}}</dd>
+<dt>Parallel requests</dt><dd>{{.LLM.Parallel}}</dd>
+</dl>
+<p class="note boxed">Change these with <code>jarx setup llm</code> for now.</p>
+{{else}}<p class="sub">Off. Set it up with <code>jarx setup llm</code>.</p>{{end}}
+</section>
+<section class="card pad">
+<div class="block-head"><h2>Extra repos</h2><span class="faint">projects every scan includes</span></div>
+{{if .Repos}}<ul class="list">{{range .Repos}}<li class="mono">{{.}}</li>{{end}}</ul>{{else}}<p class="sub">None. Add one with <code>jarx setup repo add &lt;path&gt;</code>.</p>{{end}}
+</section>
+<section class="card pad">
+<h2>About</h2>
+<dl class="kv">
+<dt>Scanned</dt><dd>{{.Where}} · {{.Scanned}}</dd>
+<dt>Version</dt><dd class="mono">{{.Version}}</dd>
+<dt>State dir</dt><dd class="mono">{{.StateDir}}</dd>
+</dl>
+</section>
+{{end}}
+{{template "bottom" .}}

@@ -20,7 +20,7 @@ import (
 func ToolChanged() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-DRIFT-001", Severity: finding.Medium, Title: "An MCP tool changed since the last scan",
-		Detail: "a tool's definition (its description, schema or annotations) is different from the last scan, so what the agent reads about it changed under the same config; the text rules ran on the new version",
+		Detail: "a tool's description, schema or annotations changed since the last scan, so the agent now reads something different about it under the same config. The text checks ran on the new version.",
 		Fix:    "read the tool's new description and schema before the agent uses it again",
 	}
 }

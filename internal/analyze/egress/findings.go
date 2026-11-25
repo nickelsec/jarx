@@ -16,7 +16,7 @@ func RepoEndpoint() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-EGRESS-001", Severity: finding.High, Title: "A repo points the model endpoint elsewhere",
 		Detail: "a repository's .claude/settings.json sets the model endpoint or provider in its env block, so Claude sends your prompts, code and API key where the repository chose",
-		Fix:    "remove it from the repository's settings; set an endpoint you trust in your own user settings or env",
+		Fix:    "remove it from the repository's settings. If you need a custom endpoint, set one you trust in your own user settings or env.",
 	}
 }
 
@@ -34,8 +34,8 @@ func RepoProxy() finding.Rule {
 func IgnoredRepoEndpoint() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-EGRESS-003", Severity: finding.Info, Title: "A repo tries to set Codex's endpoint",
-		Detail: "a repository's .codex/config.toml sets the model endpoint or provider; Codex ignores these keys in project config and warns at startup, so it doesn't take effect",
-		Fix:    "ask why the repository sets it; nothing to change on your side",
+		Detail: "a repository's .codex/config.toml sets the model endpoint or provider. Codex ignores these keys in project config and warns at startup, so it has no effect.",
+		Fix:    "nothing to change on your side, but it's worth asking why the repository sets it.",
 	}
 }
 

@@ -10,7 +10,7 @@ func RuleHigh() finding.Rule {
 		Severity: finding.High,
 		Title:    "LLM review: goes past its stated purpose",
 		Detail:   "the optional LLM review says this artifact tells the agent to do something its stated purpose doesn't need, and quoted where",
-		Fix:      "read the quoted text; remove or rewrite the artifact if the agent shouldn't do that",
+		Fix:      "read the quoted text, and remove or rewrite the artifact if the agent shouldn't do that.",
 	}
 }
 
@@ -33,7 +33,7 @@ func RuleFailed() finding.Rule {
 		Severity: finding.Info,
 		Title:    "LLM review failed for an artifact",
 		Detail:   "the endpoint gave no valid answer for this artifact, even after a retry, so the LLM review has nothing to say about it",
-		Fix:      "the rules still checked it; run jarx scan --llm again, or try another model",
+		Fix:      "the regular checks still ran on it. Run jarx scan --llm again, or try another model.",
 	}
 }
 

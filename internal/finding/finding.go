@@ -125,7 +125,7 @@ func SkippedTooLarge() Rule {
 		ID:       "JARX-SCAN-001",
 		Severity: Info,
 		Title:    "file skipped, too large to read",
-		Fix:      "check the file by hand; jarx reads files up to 10 MiB",
+		Fix:      "check the file by hand. Files over 10 MiB aren't read.",
 	}
 }
 
@@ -136,7 +136,7 @@ func UnreadableRecord() Rule {
 		ID:       "JARX-SCAN-002",
 		Severity: Info,
 		Title:    "couldn't read an agent's records",
-		Fix:      "check that the file is valid; jarx only reads it and never changes it",
+		Fix:      "check that the file is valid.",
 	}
 }
 
@@ -148,7 +148,7 @@ func WalkTruncated() Rule {
 		Severity: Info,
 		Title:    "stopped listing a very large project",
 		Detail:   "stopped listing files in a very large project",
-		Fix:      "files past the limit weren't checked; scan a subfolder with jarx scan <path>",
+		Fix:      "files past the limit weren't checked. Scan a subfolder with jarx scan <path> to cover them.",
 	}
 }
 
