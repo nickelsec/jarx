@@ -11,10 +11,11 @@
 <div class="tile"><span class="tile-label">Failed last time</span><span class="tile-n f-text-high">{{.Failed}}</span></div>
 <div class="tile"><span class="tile-label">New</span><span class="tile-n">{{.New}}</span></div>
 </div>
-<form class="card table" method="post" action="/llm/review" aria-label="Artifacts">
+<div class="card table">
+<form method="post" action="/llm/review" aria-label="Artifacts">
 <div class="llm-bar">
 <label class="check-all"><input type="checkbox" data-check-all>All</label>
-<span class="faint">{{len .Rows}} artifacts</span>
+<span class="faint">{{.Total}} Artifacts</span>
 <span class="spacer"></span>
 <button type="submit" class="btn primary" disabled>Review checked</button>
 </div>
@@ -27,6 +28,8 @@
 <span class="state st-{{.StateKey}}">{{.State}}</span>
 </label>{{else}}<p class="empty">Nothing to review: no instruction files, skills, hooks or listed tools were found.</p>{{end}}
 </form>
+{{if .Total}}{{template "pager" .Pager}}{{end}}
+</div>
 {{else}}
 <section class="card pad">
 <h2>The LLM review is off</h2>

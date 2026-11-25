@@ -588,8 +588,28 @@ masked leak.
     MCP, permissions, egress, sessions), sending and skipping from the LLM
     review page (items 5 and 6), settings changes from the page (items 4
     and 5), and opening a finding's modal without JavaScript. The script
-    is checked by driving headless Edge, not by `go test`
-- [ ] snapshot picker and write actions (repo add and remove, rescan)
+    is checked by driving headless Edge, not by `go test` (6d21a98)
+- [x] snapshot picker and write actions (repo add and remove, rescan): a
+  Scan page in the menu after Overview, the only place to scan again. A
+  rescan runs in the background (`ui.App`, `uiApp` in `cli`), one at a
+  time, and every page shows it running. Its steps come from the progress
+  line through a new `report.Printer.Watch`, and `/rescan/status` answers
+  the page that waits. The Scan page lists the steps as they tick off,
+  then a "Scan complete" toast shows wherever you are and the page
+  refreshes in place. Extra repos moved there from Settings: type a path
+  or pick one in a folder browser jarx serves (names only, no dot-folders,
+  inside the fake home with `--home`), and Remove asks first. The checks
+  are shared with `jarx setup repo add`. Changes has Compare with, a
+  picker of the saved snapshots (`snapshot.List` and `Load`, only listed
+  IDs load), cached per snapshot until the next scan. Also toasts instead
+  of a notice line, a skeleton while a slow page loads, styled dropdowns,
+  and the LLM review checklist paged (generic `paginate`). Writes are
+  POSTs behind the cookie and cross-origin check, with a 16 KiB body cap
+  and a redirect that only goes back to a dashboard page
+  - Not covered yet: the modals and the live progress need JavaScript; the
+    browser check only saw the first step because the demo scan finishes
+    in half a second (the step reporting is tested in Go); and adding a
+    repo doesn't start a scan by itself
 - [ ] the LLM review button and LLM settings, with how many to send at
   once (phase 8 came first)
 - [ ] choose which artifacts the LLM review sends, rerun only the ones that

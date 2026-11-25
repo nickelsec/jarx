@@ -2,6 +2,8 @@ package report
 
 import (
 	"bytes"
+	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -192,5 +194,26 @@ func TestProgressSaysWhatIsRunningAndWaiting(t *testing.T) {
 	}
 	if strings.Contains(none, "waiting") {
 		t.Errorf("render = %q, want no waiting once nothing waits", none)
+	}
+}
+
+func TestProgressTellsItsWatcherEvenWhenItDoesntDraw(t *testing.T) {
+	type seen struct {
+		step        string
+		done, total int
+	}
+	var got []seen
+	p := New(io.Discard, io.Discard, nil)
+	p.Watch = func(step string, done, total int) { got = append(got, seen{step, done, total}) }
+
+	g := p.StartProgress(scanSteps()...)
+	g.Step("reading session history")
+	g.Count("walking projects", 8)
+	g.Set(3, 1)
+	g.Stop()
+
+	want := []seen{{"reading session history", 0, 0}, {"walking projects", 0, 8}, {"walking projects", 3, 8}}
+	if !slices.Equal(got, want) {
+		t.Errorf("the watcher saw %+v, want %+v", got, want)
 	}
 }

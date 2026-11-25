@@ -44,6 +44,9 @@ type Data struct {
 	// empty when it couldn't be read.
 	History     snapshot.RunLog
 	HistoryNote string
+	// Snapshots is the saved snapshots before this scan, newest first, for
+	// Changes to compare against.
+	Snapshots []snapshot.Info
 }
 
 // LLM is the LLM review's settings and what it would send. It holds the
@@ -60,12 +63,13 @@ type LLM struct {
 	Plan      llm.Preview
 }
 
-// Pages serves the dashboard's pages and its embedded files. get is called
-// once per request for the scan to show.
-func Pages(get func() Data) http.Handler {
+// Pages serves the dashboard's pages, its actions and its embedded files.
+// app.Data is called once per request for the scan to show.
+func Pages(app App) http.Handler {
 	t := template.Must(template.New("").Funcs(template.FuncMap{"dict": dict}).ParseFS(templateFS, "templates/*.html"))
 	mux := http.NewServeMux()
-	render := func(w http.ResponseWriter, name string, p page) {
+	render := func(w http.ResponseWriter, r *http.Request, name string, p page) {
+		p.Notice, p.Here, p.Scan = noticeOf(r), here(r), app.ScanState()
 		var buf bytes.Buffer
 		if err := t.ExecuteTemplate(&buf, name, p); err != nil {
 			http.Error(w, "jarx: couldn't render the page", http.StatusInternalServerError)
@@ -75,30 +79,51 @@ func Pages(get func() Data) http.Handler {
 		_, _ = w.Write(buf.Bytes())
 	}
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		d := get()
-		render(w, "overview.html", newPage(d, "overview", "Overview", -1, overviewOf(d, r.URL.Query())))
+		d := app.Data()
+		render(w, r, "overview.html", newPage(d, "overview", "Overview", -1, overviewOf(d, r.URL.Query())))
 	})
 	mux.HandleFunc("GET /projects/{n}", func(w http.ResponseWriter, r *http.Request) {
-		d := get()
+		d := app.Data()
 		n, err := strconv.Atoi(r.PathValue("n"))
 		if err != nil || n < 0 || n >= len(d.Scan.Projects) {
 			http.NotFound(w, r)
 			return
 		}
-		render(w, "project.html", newPage(d, "project", d.Scan.Projects[n].Path.Text().String(), n, projectOf(d, n, r.URL.Query())))
+		render(w, r, "project.html", newPage(d, "project", d.Scan.Projects[n].Path.Text().String(), n, projectOf(d, n, r.URL.Query())))
 	})
-	mux.HandleFunc("GET /llm", func(w http.ResponseWriter, _ *http.Request) {
-		d := get()
-		render(w, "llm.html", newPage(d, "llm", "LLM review", -1, llmOf(d)))
+	mux.HandleFunc("GET /llm", func(w http.ResponseWriter, r *http.Request) {
+		d := app.Data()
+		render(w, r, "llm.html", newPage(d, "llm", "LLM review", -1, llmOf(d, r.URL.Query())))
 	})
 	mux.HandleFunc("GET /changes", func(w http.ResponseWriter, r *http.Request) {
-		d := get()
-		render(w, "changes.html", newPage(d, "changes", "Changes", -1, changesOf(d, r.URL.Query().Get(keyChange))))
+		d := app.Data()
+		q := r.URL.Query()
+		picked := q.Get(keySince)
+		if picked != "" {
+			// An ID that isn't a saved snapshot shows the usual changes.
+			if since, changes, err := app.ChangesSince(picked); err == nil {
+				d.Scan.Since, d.Scan.Changes, d.Scan.Note = since, changes, ""
+			} else {
+				picked = ""
+			}
+		}
+		render(w, r, "changes.html", newPage(d, "changes", "Changes", -1, changesOf(d, q.Get(keyChange), picked)))
 	})
-	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, _ *http.Request) {
-		d := get()
-		render(w, "settings.html", newPage(d, "settings", "Settings", -1, settingsOf(d)))
+	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
+		d := app.Data()
+		render(w, r, "settings.html", newPage(d, "settings", "Settings", -1, settingsOf(d)))
 	})
+	mux.HandleFunc("GET /scan", func(w http.ResponseWriter, r *http.Request) {
+		d := app.Data()
+		b := scanOf(d, app.ScanState())
+		if q := r.URL.Query(); q.Has(keyBrowse) {
+			b.Browse = browseOf(app, q.Get(keyBrowse))
+		}
+		render(w, r, "scan.html", newPage(d, "scan", "Scan", -1, b))
+	})
+	mux.HandleFunc("POST /rescan", rescan(app))
+	mux.HandleFunc("GET /rescan/status", scanStatus(app))
+	mux.HandleFunc("POST /scan/repos", repos(app))
 	mux.HandleFunc("GET /static/{file...}", serveAsset)
 	return mux
 }
@@ -144,6 +169,9 @@ func serveAsset(w http.ResponseWriter, r *http.Request) {
 type page struct {
 	Nav      string
 	Title    string
+	Here     string  // this page's URL, for a form to come back to
+	Notice   *notice // what the last action did, if anything
+	Scan     ScanState
 	Projects []navProject // shown
 	More     []navProject // behind View all
 	AllCount int
@@ -322,6 +350,7 @@ const (
 	keyUser    = "user"
 	keyFinding = "finding"
 	keyChange  = "change"
+	keySince   = "since"
 )
 
 // filters is what the findings table is narrowed to.
@@ -709,7 +738,7 @@ type perOption struct {
 
 // paginate cuts rs to the page q asks for, clamped to the pages there are,
 // and builds the links. Every link keeps the filters.
-func paginate(rs []row, q url.Values, baseURL string) ([]row, pager) {
+func paginate[T any](rs []T, q url.Values, baseURL string) ([]T, pager) {
 	per := defaultPer
 	if n, err := strconv.Atoi(q.Get(keyPer)); err == nil && slices.Contains(perOptions, n) {
 		per = n
@@ -844,6 +873,8 @@ type llmRow struct {
 }
 
 type llmBody struct {
+	Pager                               pager
+	Total                               int
 	On                                  bool
 	Host, Model, KeyEnv                 string
 	KeySet                              bool
@@ -862,7 +893,7 @@ func artifactName(a llm.Artifact) string {
 	return name
 }
 
-func llmOf(d Data) llmBody {
+func llmOf(d Data, q url.Values) llmBody {
 	l := d.LLM
 	b := llmBody{On: l.On, Model: l.Model.String(), KeyEnv: l.KeyEnv.String(), KeySet: l.KeySet, Parallel: l.Parallel,
 		Host: l.Plan.Host, Send: l.Plan.Send, Cached: l.Plan.Cached, Failed: l.Plan.Failed, New: l.Plan.New}
@@ -883,6 +914,8 @@ func llmOf(d Data) llmBody {
 			State: string(st), StateKey: strings.ReplaceAll(string(st), " ", "-"), Checked: st != llm.StateCached,
 		})
 	}
+	b.Total = len(b.Rows)
+	b.Rows, b.Pager = paginate(b.Rows, q, "/llm")
 	return b
 }
 
@@ -891,6 +924,12 @@ func llmOf(d Data) llmBody {
 type changeRow struct {
 	Tag, TagKey, Kind, Title, Sub, Sev, SevKey string
 	Modal                                      string // the modal's id, for a finding that's still there
+}
+
+// pick is one snapshot in the Changes picker.
+type pick struct {
+	ID, When string
+	Selected bool
 }
 
 // changeBox is a summary count that filters the list to its kind.
@@ -908,6 +947,9 @@ type modal struct {
 
 type changesBody struct {
 	SinceDate, SinceTime, Note string
+	Compared                   bool   // against a picked snapshot, not the previous scan
+	Picks                      []pick // the snapshots to compare against
+	ClearHref                  string
 	Boxes                      []changeBox
 	Filtered                   bool
 	Rows                       []changeRow
@@ -927,8 +969,8 @@ type runRow struct {
 //nolint:gochecknoglobals // fixed list, read only
 var changeKinds = []snapshot.ChangeKind{snapshot.Added, snapshot.Removed, snapshot.Changed}
 
-func changesOf(d Data, only string) changesBody {
-	b := changesBody{Note: d.Scan.Note, HistoryNote: d.HistoryNote}
+func changesOf(d Data, only, picked string) changesBody {
+	b := changesBody{Note: d.Scan.Note, HistoryNote: d.HistoryNote, Compared: picked != "", ClearHref: changesHref("", picked), Picks: picksOf(d.Snapshots, picked)}
 	if !d.Scan.Since.IsZero() {
 		b.SinceDate, b.SinceTime = d.Scan.Since.UTC().Format("2006-01-02"), d.Scan.Since.UTC().Format("15:04 UTC")
 	}
@@ -956,18 +998,41 @@ func changesOf(d Data, only string) changesBody {
 		}
 		b.Rows = append(b.Rows, r)
 	}
-	b.Boxes = changeBoxes(counts, only)
+	b.Boxes = changeBoxes(counts, only, picked)
 	b.Runs, b.TotalRuns = runsOf(d.History)
 	return b
 }
 
-// changeBoxes is the summary counts, each a link that filters to its kind.
-func changeBoxes(counts map[snapshot.ChangeKind]int, only string) []changeBox {
-	out := make([]changeBox, 0, len(changeKinds))
-	for _, k := range changeKinds {
-		out = append(out, changeBox{Label: string(k), N: counts[k], Href: "/changes?" + keyChange + "=" + string(k), On: string(k) == only})
+// picksOf is the snapshots to compare against, the picked one selected.
+func picksOf(snaps []snapshot.Info, picked string) []pick {
+	out := make([]pick, 0, len(snaps))
+	for _, sn := range snaps {
+		// To the second: scans minutes apart would read the same otherwise.
+		out = append(out, pick{ID: sn.ID, When: sn.Taken.UTC().Format("2006-01-02 15:04:05 UTC"), Selected: sn.ID == picked})
 	}
 	return out
+}
+
+// changeBoxes is the summary counts, each a link that filters to its kind.
+func changeBoxes(counts map[snapshot.ChangeKind]int, only, picked string) []changeBox {
+	out := make([]changeBox, 0, len(changeKinds))
+	for _, k := range changeKinds {
+		out = append(out, changeBox{Label: string(k), N: counts[k], Href: changesHref(string(k), picked), On: string(k) == only})
+	}
+	return out
+}
+
+// changesHref is the Changes page filtered to one kind and compared with a
+// picked snapshot, either of them left out when empty.
+func changesHref(only, picked string) string {
+	q := url.Values{}
+	if only != "" {
+		q.Set(keyChange, only)
+	}
+	if picked != "" {
+		q.Set(keySince, picked)
+	}
+	return link("/changes", q, nil)
 }
 
 func changeRowOf(d Data, c snapshot.Change) changeRow {
@@ -1042,17 +1107,63 @@ type settingsBody struct {
 	Scanned  string
 	LLM      llmBody
 	BaseURL  string
-	Repos    []string
 	Version  string
 	StateDir string
 }
 
 func settingsOf(d Data) settingsBody {
 	home := d.Scan.Home.Text().String()
-	b := settingsBody{Where: whereOf(d), Scanned: d.Scanned.UTC().Format("2006-01-02 15:04 UTC"),
-		LLM: llmOf(d), BaseURL: d.LLM.BaseURL.String(), Version: d.Version, StateDir: tilde(d.StateDir.String(), home)}
+	return settingsBody{Where: whereOf(d), Scanned: d.Scanned.UTC().Format("2006-01-02 15:04 UTC"),
+		LLM: llmOf(d, nil), BaseURL: d.LLM.BaseURL.String(), Version: d.Version, StateDir: tilde(d.StateDir.String(), home)}
+}
+
+// scanBody is the Scan page: the last scan in numbers, a running scan's
+// steps, the extra repos, and the way to the scan history.
+type scanBody struct {
+	When                    string
+	Findings, Projects, New int
+	TotalRuns               string
+	Running                 bool
+	Steps                   []stepView
+	Repos                   []string
+	Browse                  *browseView // the folder browser, when it's open
+}
+
+// stepView is one of a running scan's steps: done, the one it's on (with
+// its count), or still to come.
+type stepView struct {
+	Name, Class, Count string
+}
+
+func scanOf(d Data, st ScanState) scanBody {
+	home := d.Scan.Home.Text().String()
+	b := scanBody{When: d.Scanned.UTC().Format("2006-01-02 15:04 UTC"), Findings: len(d.Scan.Findings), Projects: len(d.Scan.Projects),
+		New: len(newFindings(d)), TotalRuns: plural(d.History.Total, "scan"), Running: st.Running}
 	for _, r := range d.Repos {
 		b.Repos = append(b.Repos, tilde(r.String(), home))
 	}
+	if st.Running {
+		b.Steps = stepsOf(st)
+	}
 	return b
+}
+
+// stepsOf marks each step done, now or to come, by where the scan is.
+func stepsOf(st ScanState) []stepView {
+	at := slices.Index(st.Steps, st.Step)
+	out := make([]stepView, 0, len(st.Steps))
+	for i, name := range st.Steps {
+		v := stepView{Name: name}
+		switch {
+		case i < at:
+			v.Class = "done"
+		case i == at:
+			v.Class = "now"
+			if st.StepTotal > 0 {
+				v.Count = strconv.Itoa(st.StepDone) + "/" + strconv.Itoa(st.StepTotal)
+			}
+		}
+		out = append(out, v)
+	}
+	return out
 }

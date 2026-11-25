@@ -52,27 +52,105 @@
     });
   };
 
+  // dropMsg takes a notice's msg out of the address bar once it shows, so
+  // a reload or a copied link doesn't show it again.
+  var dropMsg = function () {
+    var u = new URL(location.href);
+    if (!u.searchParams.has("msg")) return;
+    u.searchParams.delete("msg");
+    history.replaceState(null, "", u.pathname + u.search);
+  };
+  dropMsg();
+
+  // A swap that takes a moment shows a skeleton of a page instead of the
+  // old one sitting still. Quick ones never show it.
+  var skelTimer = 0;
+  var skeleton = function () {
+    var main = document.querySelector("main.main");
+    if (!main || main.querySelector(".skeleton")) return;
+    var sk = document.createElement("div");
+    sk.className = "skeleton";
+    sk.setAttribute("aria-hidden", "true");
+    var add = function (parent, cls) { var e = document.createElement("div"); e.className = cls; parent.appendChild(e); return e; };
+    add(sk, "sk sk-title");
+    add(sk, "sk sk-sub");
+    var cards = add(sk, "sk-cards");
+    for (var i = 0; i < 3; i++) add(cards, "sk sk-card");
+    var rows = add(sk, "sk-rows");
+    for (var j = 0; j < 7; j++) add(rows, "sk sk-row");
+    main.prepend(sk);
+    main.classList.add("loading");
+  };
+  var loading = function () {
+    clearTimeout(skelTimer);
+    skelTimer = setTimeout(skeleton, 150);
+  };
+  var loaded = function () {
+    clearTimeout(skelTimer);
+    var main = document.querySelector("main.main");
+    if (!main) return;
+    main.classList.remove("loading");
+    var sk = main.querySelector(".skeleton");
+    if (sk) sk.remove();
+  };
+
+  // swapDoc puts a fetched page in place of this one.
+  var swapDoc = function (doc, url, push, toTop) {
+    loaded();
+    var now = document.querySelector("main.main");
+    var next = doc.querySelector("main.main");
+    if (!now || !next) { location.href = url; return; }
+    var focusID = document.activeElement && document.activeElement.id;
+    now.replaceChildren.apply(now, Array.prototype.map.call(next.childNodes, function (n) { return document.importNode(n, true); }));
+    document.title = doc.title;
+    syncSide(doc);
+    initPage();
+    if (push) history.pushState(null, "", url); else history.replaceState(null, "", url);
+    if (focusID) {
+      var el = document.getElementById(focusID);
+      if (el) { el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); }
+    }
+    // A link to a part of a page (like #scan-history) lands on it.
+    var hash = url.indexOf("#") >= 0 ? url.slice(url.indexOf("#") + 1) : "";
+    var target = hash && document.getElementById(hash);
+    if (target) target.scrollIntoView({ block: "start" });
+    else if (toTop) window.scrollTo(0, 0);
+    dropMsg();
+  };
+
   var navigate = function (url, push, toTop) {
     busy(true);
-    fetchDoc(url).then(function (doc) {
-      var now = document.querySelector("main.main");
-      var next = doc.querySelector("main.main");
-      if (!now || !next) { location.href = url; return; }
-      var focusID = document.activeElement && document.activeElement.id;
-      now.replaceChildren.apply(now, Array.prototype.map.call(next.childNodes, function (n) { return document.importNode(n, true); }));
-      document.title = doc.title;
-      syncSide(doc);
-      initPage();
-      if (push) history.pushState(null, "", url); else history.replaceState(null, "", url);
-      if (focusID) {
-        var el = document.getElementById(focusID);
-        if (el) { el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); }
-      }
-      if (toTop) window.scrollTo(0, 0);
-    }).catch(function (err) {
+    loading();
+    fetchDoc(url).then(function (doc) { swapDoc(doc, url, push, toTop); }).catch(function (err) {
       if (err && err.name === "AbortError") return;
       location.href = url;
     });
+  };
+
+  // postInPlace sends a POST form (rescan, add or remove a repo) and swaps
+  // in the page it lands on. Its button says what's happening meanwhile.
+  // If the fetch fails, the form posts the usual way.
+  var postInPlace = function (form) {
+    var btn = form.querySelector('button[type="submit"]');
+    var label = btn && btn.querySelector("span");
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add("busy");
+      if (label && form.getAttribute("data-busy")) label.textContent = form.getAttribute("data-busy");
+    }
+    if (inflight) inflight.abort();
+    inflight = new AbortController();
+    loading();
+    fetch(form.getAttribute("action"), { method: "POST", body: new URLSearchParams(new FormData(form)), credentials: "same-origin", signal: inflight.signal })
+      .then(function (r) {
+        if (!r.ok) return Promise.reject(r.status);
+        var u = new URL(r.url);
+        return r.text().then(function (html) { swapDoc(new DOMParser().parseFromString(html, "text/html"), u.pathname + u.search, true, false); });
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") return;
+        form.submit();
+      });
   };
 
   // inApp is a URL the dashboard serves as a page: same origin, not a file.
@@ -113,12 +191,18 @@
     if (!inApp(u)) return;
     e.preventDefault();
     closeFacets();
-    navigate(u.pathname + u.search, true, !!a.closest(".pager") || u.pathname !== location.pathname);
+    navigate(u.pathname + u.search + u.hash, true, !!a.closest(".pager") || u.pathname !== location.pathname);
   });
 
   document.addEventListener("submit", function (e) {
     var form = e.target;
-    if (!canSwap || (form.method || "get").toLowerCase() !== "get") return;
+    var method = (form.method || "get").toLowerCase();
+    if (canSwap && method === "post" && inApp(new URL(form.getAttribute("action") || location.pathname, location.href))) {
+      e.preventDefault();
+      postInPlace(form);
+      return;
+    }
+    if (!canSwap || method !== "get") return;
     if (!inApp(new URL(formURL(form), location.href))) return;
     e.preventDefault();
     submitInPlace(form);
@@ -223,9 +307,114 @@
     });
   }
 
+  // Toasts: a short note in the top right after an action or a scan. X
+  // dismisses one, and each fades on its own after a while.
+  var dismiss = function (t) {
+    t.classList.add("out");
+    setTimeout(function () { t.remove(); }, 250);
+  };
+  var showToast = function (text, bad) {
+    var box = document.querySelector(".toasts");
+    if (!box) { box = document.createElement("div"); box.className = "toasts"; document.body.appendChild(box); }
+    var t = document.createElement("div");
+    t.className = "toast" + (bad ? " bad" : "");
+    t.setAttribute("role", "status");
+    var ns = "http://www.w3.org/2000/svg";
+    var icon = document.createElementNS(ns, "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    var path = document.createElementNS(ns, "path");
+    path.setAttribute("d", bad ? "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8v4.5M12 16h.01" : "M5 12.5l4.5 4.5L19 7.5");
+    icon.appendChild(path);
+    var span = document.createElement("span");
+    span.className = "toast-text";
+    span.textContent = text;
+    var x = document.createElement("button");
+    x.type = "button";
+    x.className = "toast-x";
+    x.setAttribute("aria-label", "Dismiss");
+    var xi = document.createElementNS(ns, "svg");
+    xi.setAttribute("viewBox", "0 0 24 24");
+    xi.setAttribute("aria-hidden", "true");
+    var xp = document.createElementNS(ns, "path");
+    xp.setAttribute("d", "M6 6l12 12M18 6L6 18");
+    xi.appendChild(xp);
+    x.appendChild(xi);
+    t.appendChild(icon); t.appendChild(span); t.appendChild(x);
+    box.appendChild(t);
+    setTimeout(function () { dismiss(t); }, 6000);
+  };
+  document.addEventListener("click", function (e) {
+    var x = e.target.closest && e.target.closest(".toast-x");
+    if (x) dismiss(x.closest(".toast"));
+  });
+
+  // A running rescan: any page that says one is running asks every second
+  // or so until it's done, then says so and shows the new results in place.
+  var watching = false;
+  var watchScan = function () {
+    if (watching || !canSwap || !document.querySelector('[data-scan="running"]')) return;
+    watching = true;
+    var poll = function () {
+      fetch("/rescan/status", { credentials: "same-origin", cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (st) {
+          if (st.running) { showSteps(st); setTimeout(poll, 700); return; }
+          watching = false;
+          showToast(st.failed ? "Scan failed" : "Scan complete", st.failed);
+          navigate(location.pathname + location.search, false, false);
+        })
+        .catch(function () { setTimeout(poll, 3000); });
+    };
+    setTimeout(poll, 700);
+  };
+
+  // showSteps marks the Scan page's steps done, now or to come, from a
+  // status answer, with the current step's count.
+  var showSteps = function (st) {
+    var list = document.querySelectorAll("[data-progress] [data-step]");
+    var at = (st.steps || []).indexOf(st.step);
+    list.forEach(function (li, i) {
+      li.className = "step" + (i < at ? " done" : i === at ? " now" : "");
+      var count = li.querySelector(".step-count");
+      if (i === at && st.stepTotal > 0) {
+        if (!count) { count = document.createElement("span"); count.className = "step-count"; li.appendChild(count); }
+        count.textContent = st.stepDone + "/" + st.stepTotal;
+      } else if (count) {
+        count.remove();
+      }
+    });
+  };
+
+  // The Scan page counts the seconds while a scan runs.
+  var elapsedFrom = 0;
+  setInterval(function () {
+    var el = document.querySelector("[data-elapsed]");
+    if (!el) { elapsedFrom = 0; return; }
+    if (!elapsedFrom) elapsedFrom = Date.now();
+    el.textContent = Math.round((Date.now() - elapsedFrom) / 1000) + "s";
+  }, 500);
+
+  // Closing a dialog that a URL opened (the folder browser) takes it out of
+  // the URL, so a reload doesn't open it again.
+  document.addEventListener("close", function (e) {
+    var d = e.target;
+    var key = d.getAttribute && d.getAttribute("data-strip");
+    if (!key) return;
+    var u = new URL(location.href);
+    u.searchParams.delete(key);
+    history.replaceState(null, "", u.pathname + u.search);
+  }, true);
+
   // "All" checks or unchecks every artifact on the LLM review page. It runs
-  // on load and after every swap, once per checkbox.
+  // on load and after every swap, once per checkbox. So do the page's own
+  // toasts and the scan watch.
   var initPage = function () {
+  document.querySelectorAll(".toast:not([data-ready])").forEach(function (t) {
+    t.setAttribute("data-ready", "");
+    setTimeout(function () { dismiss(t); }, 6000);
+  });
+  watchScan();
   document.querySelectorAll("[data-check-all]:not([data-ready])").forEach(function (all) {
     all.setAttribute("data-ready", "");
     var form = all.closest("form");

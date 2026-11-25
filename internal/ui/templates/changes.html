@@ -1,14 +1,21 @@
 {{template "top" .}}
 {{with .Body}}
 <header class="head">
-<div><h1>Changes</h1><p class="sub">{{if .SinceDate}}<span class="faint">Previous scan</span> <span class="when">{{.SinceDate}}</span> <span class="when">{{.SinceTime}}</span>{{else if .Note}}{{.Note}}{{else}}This is the first scan, so there's nothing to compare against yet{{end}}</p></div>
+<div><h1>Changes</h1><p class="sub">{{if .SinceDate}}<span class="faint">{{if .Compared}}Compared with{{else}}Previous scan{{end}}</span> <span class="when">{{.SinceDate}}</span> <span class="when">{{.SinceTime}}</span>{{else if .Note}}{{.Note}}{{else}}This is the first scan, so there's nothing to compare against yet{{end}}</p></div>
+<div class="head-side">
+{{if .Picks}}<form class="picker" method="get" action="/changes">
+<label for="since">Compare with</label>
+<select name="since" data-autosubmit id="since"><option value="">Previous scan</option>{{range .Picks}}<option value="{{.ID}}"{{if .Selected}} selected{{end}}>{{.When}}</option>{{end}}</select>
+<noscript><button type="submit" class="btn small">Go</button></noscript>
+</form>{{end}}
+</div>
 </header>
 {{if .SinceDate}}
 <nav class="card change-stats" aria-label="Filter changes">
 {{range .Boxes}}<a class="stat{{if .On}} on{{end}}" href="{{.Href}}"{{if .On}} aria-current="true"{{end}}><span class="stat-n">{{.N}}</span><span class="faint">{{.Label}}</span></a>{{end}}
 </nav>
 <section class="block">
-<div class="block-head"><h2>Changes</h2>{{if .Filtered}}<a class="clear" href="/changes">Clear all</a>{{end}}</div>
+<div class="block-head"><h2>Changes</h2>{{if .Filtered}}<a class="clear" href="{{.ClearHref}}">Clear all</a>{{end}}</div>
 <div class="card table">
 {{range .Rows}}<div class="crow">
 <span class="ctag ct-{{.TagKey}}">{{.Tag}}</span>
@@ -20,7 +27,7 @@
 {{range .Modals}}{{template "modal" .}}{{end}}
 </section>
 {{end}}
-<section class="block">
+<section class="block" id="scan-history">
 <div class="block-head"><h2><svg class="h-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l3 2"></path></svg>Scan history</h2><span class="faint">{{.TotalRuns}}</span></div>
 <div class="card table">
 {{if .Runs}}<div class="thead hist"><span>When</span><span>New findings</span><span>What changed</span></div>

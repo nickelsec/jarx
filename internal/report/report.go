@@ -97,6 +97,10 @@ type Printer struct {
 	// stderr is a terminal, the only place the progress line draws.
 	ErrStyle Style
 	Live     bool
+	// Watch, when set, hears every progress step and count, drawn or not.
+	// The dashboard shows a rescan's progress with it. It's only ever told
+	// jarx's own step names and numbers.
+	Watch func(step string, done, total int)
 
 	scrub *redact.Scrubber
 }

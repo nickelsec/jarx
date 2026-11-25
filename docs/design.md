@@ -405,6 +405,8 @@ went away", not "line 12 changed".
 
 - Snapshots go through `jarxdir` as `snapshots/<UTC time>-<random>.json`,
   and each save drops all but the newest 20.
+- `snapshot.List` names the saved snapshots by ID (their file name) and
+  time, and `snapshot.Load` reads one by an ID from that list.
 - Each scan also adds a line to `runs.json`, the run log the dashboard's
   scan history reads: when it ran, how many findings, how many were new,
   and how many items were added, removed or changed. It holds times and
@@ -1155,7 +1157,7 @@ critical and high one always shown.
 
 ### Layout
 
-- **Sidebar:** the logo, then Overview, Changes and LLM review. A thin
+- **Sidebar:** the logo, then Overview, Scan, Changes and LLM review. A thin
   line, then Projects: user config first with a small person icon, then
   the projects worst first by folder name, with the full path on hover and
   the finding count on the right. A project that's gone shows a STALE tag
@@ -1177,9 +1179,20 @@ critical and high one always shown.
   listed (from git or found on disk), its counts by severity, and its
   findings with the same table and filters. Still to come: the other tabs
   (Loads, Credentials and reach, MCP, Permissions, Egress, Sessions).
-- **Changes:** the date and time of the previous scan, then three boxes
-  for added, removed and changed that filter the list below them (with
-  Clear all). One list of changes, each tagged ADDED, REMOVED or CHANGED.
+- **Scan:** the one place to scan again. While no scan runs, the last
+  scan's time and its findings, projects and new findings. While one runs,
+  the scan's five steps from the progress line, each ticked off as it
+  finishes, the current one with its count, and the seconds so far. Then
+  Rescan, a link to the scan history on Changes with how many scans there
+  have been, and the extra repos: a path box with Browse and Add, and the
+  saved folders under it, each with a Remove that asks first. Browse opens
+  a folder browser that jarx serves itself, since a browser never tells a
+  page the real path of a folder you pick. It lists folder names only,
+  never files, hides dot-folders, starts at the home folder and stays
+  inside the fake home with `--home`.
+- **Changes:** the date and time of the previous scan, or of an older
+  snapshot picked in Compare with, then three boxes for added, removed and
+  changed that filter the list below them (with Clear all). One list of changes, each tagged ADDED, REMOVED or CHANGED.
   A finding that's still there shows as the finding, and View finding
   opens its modal right there. Then the scan history: every scan with its
   time, how many findings were new, and what changed, plus how many scans
@@ -1189,9 +1202,13 @@ critical and high one always shown.
   kind, project and state. Still to come: sending from the page, Rerun
   failed and Skip checked.
 - **Settings:** the LLM settings (base URL, model, key env var and
-  whether it's set, parallel requests), extra repos, and about (what was
-  scanned and when, the version and the state dir). Changing them from
-  the page is still to come.
+  whether it's set, parallel requests) and about (what was scanned and
+  when, the version and the state dir). Changing the LLM settings from the
+  page is still to come.
+
+Notices are toasts in the top right, in the caps font with a tick or a
+warning icon, with an X to dismiss. They fade after a few seconds. "Scan
+complete" shows on whatever page is open when a rescan ends.
 
 Still to come on the overview: exposure paths (an agent, the way in, and
 the credential it reaches) and an "at a glance" column.
@@ -1272,16 +1289,44 @@ Every filter, page link and form is a plain URL, so the pages work as
 links and forms without JavaScript. Two embedded scripts add the rest:
 
 - `theme.js` sets the theme before the page paints, so it never flashes.
-- `app.js` makes the dashboard feel like one page. A link or GET form
-  inside the dashboard fetches the new page and swaps the main part in
-  place, keeps the sidebar's current item in step, and updates the URL,
-  so back and forward still work. It also does live search, the facet
-  menus, opening and closing the finding modal (and opening one by itself
-  from a link), Copy path, the theme toggle, and "All" on the LLM review
-  checklist.
+- `app.js` makes the dashboard feel like one page. A link or form inside
+  the dashboard fetches the new page and swaps the main part in place,
+  keeps the sidebar's current item in step, and updates the URL, so back
+  and forward still work. A swap that takes more than 150ms shows a
+  skeleton of a page meanwhile. It also does live search, the facet menus,
+  the modals (finding, folder browser, confirm), Copy path, the toasts,
+  the theme toggle, "All" on the LLM review checklist, and watching a
+  rescan: a page that says one is running asks `/rescan/status` every
+  700ms, updates the Scan page's steps, and swaps in the new results when
+  it ends.
 
-The finding modal needs `app.js` to open. With scripts off, a row does
-nothing.
+The modals need `app.js` to open. With scripts off, a finding row and
+Remove do nothing, and a running rescan only shows once the page is
+reloaded.
+
+### Actions
+
+The pages read through a `ui.App` and act through it. `cli` implements it
+over the scan setup, so the `ui` package never touches disk.
+
+- **Rescan** is a POST that starts a scan in the background and goes back
+  to the page it came from. One runs at a time. The scan's progress line
+  goes to a printer that draws nothing, with a watcher that hands each
+  step and count to `/rescan/status`, a small JSON answer.
+- **Repos:** POSTs to add or remove one, checked the way `jarx setup repo
+  add` checks: a full path or one starting with `~`, a folder, inside the
+  fake home under `--home`, not saved already. Removing names the repo by
+  its place in the list, so no path goes back and forth. Both write only
+  jarx's own `config.json`.
+- **Compare with** diffs the newest snapshot against an older one picked
+  by ID. An ID only loads if it's in the list of saved snapshots, so it
+  can't name another file. Snapshots don't change once saved, so each
+  comparison is worked out once and kept until the next scan.
+- Every write goes through the guard's cookie and cross-origin check, form
+  bodies stop at 16 KiB, and a form only ever goes back to a page on the
+  dashboard: anything with a scheme, a host, `//`, a backslash or
+  `/static/` goes to the overview instead. A notice is picked by a fixed
+  key (`msg=repo-added`), so nothing from the URL is ever shown as text.
 
 `jarx ui` scans the way `jarx scan` does when it starts, with the same
 progress line, and saves the snapshot and the run log, so "changed" means

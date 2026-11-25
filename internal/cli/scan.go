@@ -69,6 +69,12 @@ const (
 	stepFindings = "checking findings"
 )
 
+// scanSteps is a scan's steps in order: the progress line lines them up,
+// and the dashboard lists them while a rescan runs.
+//
+//nolint:gochecknoglobals // fixed list, read only
+var scanSteps = []string{stepHistory, stepConfig, stepWalk, stepProbe, stepFindings}
+
 // scanFlags are jarx scan's flags.
 type scanFlags struct {
 	home                         string
@@ -184,7 +190,7 @@ type scanned struct {
 // It prints nothing else and saves nothing.
 func scanOnce(p *report.Printer, ss scanSetup, f scanFlags) (scanned, error) {
 	env, files, scrub := ss.env, ss.files, ss.scrub
-	g := p.StartProgress(stepHistory, stepConfig, stepWalk, stepProbe, stepFindings)
+	g := p.StartProgress(scanSteps...)
 	defer g.Stop()
 
 	adapters := []agent.Adapter{claude.Adapter{}, codex.Adapter{}}

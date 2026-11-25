@@ -120,7 +120,7 @@ func TestUIHelpAndUsage(t *testing.T) {
 func TestUIDataIsTheScan(t *testing.T) {
 	demo := demoCopy(t)
 	runIn("", "setup", "llm", "--home", demo, "--url", "https://llm.example.com/v1", "--model", "m-1", "--key-env", "JARX_LLM_KEY")
-	p, _ := testPrinter()
+	p := testPrinter()
 	ss, ok := openScan(p, scanFlags{home: demo}, streams{})
 	if !ok {
 		t.Fatal("openScan failed")
@@ -162,10 +162,10 @@ func assertUIHistory(t *testing.T, d ui.Data) {
 }
 
 // testPrinter writes nowhere, for code that needs a printer to run.
-func testPrinter() (*report.Printer, *redact.Scrubber) {
+func testPrinter() *report.Printer {
 	plain, err := redact.New(nil, nil)
 	if err != nil {
 		panic(err)
 	}
-	return report.New(io.Discard, io.Discard, plain), plain
+	return report.New(io.Discard, io.Discard, plain)
 }

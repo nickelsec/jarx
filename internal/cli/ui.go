@@ -51,7 +51,7 @@ func runUI(p *report.Printer, plain *redact.Scrubber, args []string, st streams)
 		return exitError
 	}
 	defer func() { _ = ss.files.Close() }()
-	d, err := uiData(p, ss, st)
+	app, err := newUIApp(p, ss, st)
 	if err != nil {
 		p.Error(err)
 		return exitError
@@ -64,7 +64,7 @@ func runUI(p *report.Printer, plain *redact.Scrubber, args []string, st streams)
 	}
 	port := l.Addr().(*net.TCPAddr).Port //nolint:forcetypeassert // ui.Listen listens on TCP
 	token := ui.NewToken()
-	server := ui.NewServer(ui.Protect(ui.Pages(func() ui.Data { return d }), token, port))
+	server := ui.NewServer(ui.Protect(ui.Pages(app), token, port))
 
 	return serveUI(p, plain, st, l, server, "http://127.0.0.1:"+strconv.Itoa(port)+"/?t="+token)
 }
@@ -119,6 +119,7 @@ func uiData(p *report.Printer, ss scanSetup, st streams) (ui.Data, error) {
 		StateDir: scrubbed(s, ss.env.StateDir),
 	}
 	d.History, d.HistoryNote = runLog(ss.env)
+	d.Snapshots = olderSnapshots(ss.env)
 	for _, r := range ss.cfg.Repos {
 		d.Repos = append(d.Repos, scrubbed(s, r))
 	}

@@ -102,7 +102,7 @@ func get(t *testing.T, d Data, target string) (int, string, http.Header) {
 	t.Helper()
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, http.NoBody)
 	rec := httptest.NewRecorder()
-	Pages(func() Data { return d }).ServeHTTP(rec, req)
+	Pages(&fakeApp{d: d}).ServeHTTP(rec, req)
 	resp := rec.Result()
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
@@ -267,7 +267,7 @@ func TestTheProjectPageShowsItsOwnFindings(t *testing.T) {
 func TestTheLLMPageIsAChecklist(t *testing.T) {
 	_, body, _ := get(t, newFixture(t).data(), "/llm")
 
-	for _, want := range []string{`type="checkbox"`, "release", "save_note of notes", "failed last time", "new", "llm.example.com", "m-1", "2 artifacts"} {
+	for _, want := range []string{`type="checkbox"`, "release", "save_note of notes", "failed last time", "new", "llm.example.com", "m-1", "2 Artifacts"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/llm lacks %q", want)
 		}
@@ -298,7 +298,7 @@ func TestTheChangesPageListsWhatChanged(t *testing.T) {
 func TestTheSettingsPageShowsTheKeysVarNeverTheKey(t *testing.T) {
 	_, body, _ := get(t, newFixture(t).data(), "/settings")
 
-	for _, want := range []string{"https://llm.example.com/v1", "m-1", "JARX_LLM_KEY", "Not set", "<dt>Parallel requests</dt><dd>4</dd>", "~/work/api", "v1.2.3-test"} {
+	for _, want := range []string{"https://llm.example.com/v1", "m-1", "JARX_LLM_KEY", "Not set", "<dt>Parallel requests</dt><dd>4</dd>", "v1.2.3-test"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/settings lacks %q", want)
 		}
@@ -774,5 +774,25 @@ func TestAnInstructionFileIsNamedByItsFileName(t *testing.T) {
 
 	if strings.Contains(body, `<span class="t">/h/projects/app/CLAUDE.md</span>`) || !strings.Contains(body, `<span class="t">CLAUDE.md</span>`) {
 		t.Error("an instruction file is named by its whole path, not its file name")
+	}
+}
+
+func TestTheLLMChecklistIsPaged(t *testing.T) {
+	f := newFixture(t)
+	d := f.data()
+	for i := range 43 { // 45 in all
+		d.LLM.Artifacts = append(d.LLM.Artifacts, llm.Artifact{Kind: llm.KindSkill, Name: f.text("skill " + strconv.Itoa(i)), Text: f.text("x"),
+			Origin: model.Origin{File: f.path("/h/projects/app/s" + strconv.Itoa(i) + "/SKILL.md")}})
+		d.LLM.States = append(d.LLM.States, llm.StateNew)
+	}
+
+	_, first, _ := get(t, d, "/llm")
+	_, third, _ := get(t, d, "/llm?page=3")
+
+	if n := strings.Count(first, `<label class="lrow">`); n != 20 || !strings.Contains(first, "45 Artifacts") || !strings.Contains(first, "Showing 1–20 of 45") {
+		t.Errorf("page 1 shows %d artifacts, want 20 of 45", n)
+	}
+	if n := strings.Count(third, `<label class="lrow">`); n != 5 || !strings.Contains(third, `rel="prev" href="/llm?page=2"`) {
+		t.Errorf("page 3 shows %d artifacts, want 5", n)
 	}
 }

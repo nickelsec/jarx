@@ -28,6 +28,7 @@ type Progress struct {
 	drawn                  int // the widest line drawn so far, for Stop to blank
 	stopped                bool
 	quit, idle             chan struct{}
+	watch                  func(step string, done, total int) // the Printer's Watch
 }
 
 // Progress layout, in columns, and how often the spinner turns.
@@ -49,6 +50,7 @@ const (
 // returns a Progress that draws nothing.
 func (p *Printer) StartProgress(steps ...string) *Progress {
 	g := newProgress(p.Err.w, p.ErrStyle, steps, time.Now)
+	g.watch = p.Watch
 	if !p.Live {
 		g.stopped = true
 		return g
@@ -81,8 +83,10 @@ func (g *Progress) Set(done, running int) {
 		return
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	g.done, g.run = done, running
+	step, total := g.step, g.total
+	g.mu.Unlock()
+	g.tell(step, done, total)
 }
 
 // Waiting says how many of the running ones are waiting, like out a rate
@@ -117,6 +121,14 @@ func (g *Progress) Stop() {
 	}
 }
 
+// tell passes a step and count to the watcher, outside the lock so the
+// watcher can take its own.
+func (g *Progress) tell(step string, done, total int) {
+	if g.watch != nil {
+		g.watch(step, done, total)
+	}
+}
+
 // spin redraws the line until Stop.
 func (g *Progress) spin() {
 	defer close(g.idle)
@@ -140,9 +152,10 @@ func (g *Progress) set(name string, total int, bar bool) {
 		return
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	g.step, g.total, g.bar, g.done, g.run, g.wait = name, total, bar, 0, 0, 0
 	g.drawLocked()
+	g.mu.Unlock()
+	g.tell(name, 0, total)
 }
 
 func (g *Progress) turn() { g.frame++ }
