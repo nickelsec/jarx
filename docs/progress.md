@@ -649,5 +649,6 @@ in an env var you name; jarx never stores it.
   running and waiting
   - Not covered yet: no slowing down for the whole run after a 429 (each
     request waits on its own), and `x-ratelimit-*` headers aren't read
+    (ce6d7a5)
 
 **Run it:** `jarx setup llm`, then `jarx scan --llm --home testdata/demo`.
