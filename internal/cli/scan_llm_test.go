@@ -11,15 +11,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/nickelsec/jarx/internal/llm"
 )
 
 // reviewer is an OpenAI-compatible endpoint for scan --llm. It finds one
 // thing in every skill, quoting the skill's own text, finds nothing in the
 // rest, and keeps every request body.
 type reviewer struct {
-	mu     sync.Mutex
-	status int // 0 means 200
-	bodies []string
+	mu      sync.Mutex
+	status  int // 0 means 200
+	bodies  []string
+	headers []http.Header
 }
 
 func (f *reviewer) serve(t *testing.T) string {
@@ -28,6 +31,7 @@ func (f *reviewer) serve(t *testing.T) string {
 		b, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
 		f.bodies = append(f.bodies, string(b))
+		f.headers = append(f.headers, r.Header.Clone())
 		status := f.status
 		f.mu.Unlock()
 		if status != 0 {
@@ -244,4 +248,26 @@ func TestScanUsageListsLLM(t *testing.T) {
 func readDemoEnv() (string, error) {
 	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "demo", ".jarx-env"))
 	return string(b), err
+}
+
+func TestScanLLMNamesJarxAndSendsOneSession(t *testing.T) {
+	// OpenCode Go refuses chat requests without a session header, and wants
+	// the client's own user agent.
+	f := &reviewer{}
+	demo := llmDemo(t, f.serve(t))
+
+	withKey().ask("y\n", "scan", "--llm", "--home", demo)
+
+	if len(f.headers) == 0 {
+		t.Fatal("no requests")
+	}
+	session := f.headers[0].Get(llm.SessionHeader)
+	for i, h := range f.headers {
+		if got := h.Get("User-Agent"); got != "jarx/v1.2.3-test" {
+			t.Errorf("request %d User-Agent = %q, want jarx/v1.2.3-test", i, got)
+		}
+		if got := h.Get(llm.SessionHeader); got == "" || got != session {
+			t.Errorf("request %d session = %q, want one session %q for the run", i, got, session)
+		}
+	}
 }

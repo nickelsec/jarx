@@ -755,10 +755,22 @@ prints what comes back.
   the whole review with that error, since every request after it would
   fail the same way. Any other trouble with one artifact, like an HTTP 500,
   is a `JARX-LLM-003` for it, and the review goes on.
+- **Headers.** Every request names jarx in `User-Agent` (`jarx/<version>`)
+  and carries a random session ID in `x-opencode-session`. OpenCode Go asks
+  clients for their own user agent instead of a generic HTTP library's, and
+  for a stable session ID per conversation for routing and prompt caching,
+  and answers a chat request without one with `400 MissingSessionID`. A
+  review run is one session, retries included, so its requests can share
+  the cached system prompt. The connection test gets its own. The ID is
+  random and says nothing about the user or the scan, so it goes to every
+  endpoint, which also covers a proxy in front of OpenCode Go.
 - **Time limits.** A chat completion's headers only come once the model
   has answered, so netguard's usual 10s for headers and 20s per request
   would cut most reviews off. `netguard.NewLLM` is the same client with
   120s for both, and only `llm` uses it.
+
+Source: https://opencode.ai/docs/console/go ("Where can I use it?", read
+2026-11-25)
 
 ## Guarantees enforced by structure
 
@@ -1042,6 +1054,34 @@ saved
 - A question is only ever asked when both input and output are terminals.
   Otherwise the command asks nothing and says what to run instead, or
   refuses and says why.
+
+### Progress
+
+While a scan works, one line on stderr says which step it's on, and it's
+erased before the report prints:
+
+```
+⠹ probing MCP servers       3 of 17 · 4 running   12s
+⠹ reviewing  [████████░░░░░░░░░░░░]   6 of 14 artifacts   38s
+```
+
+- It only draws when stderr is a terminal, so piped output, a redirected
+  report and the tests never see it, and the report itself doesn't change.
+- A spinner, the step, then a count when jarx knows the total, then the
+  time so far, dim, from 1s on. The steps are reading session history,
+  reading agent config, walking projects, probing MCP servers and checking
+  findings; `--llm`'s review is a bar, and setup's connection test a
+  spinner.
+- Nothing moves as it updates: step names are padded to the longest one,
+  so counts start in one column, and a count is padded to its total's
+  width, so `3 of 17` and `12 of 17` take the same room. The bar is 20
+  cells, 10 under 60 columns.
+- It's cut one column short of the width, so it never wraps, and redrawn
+  with `\r`, with spaces over anything longer before it.
+- Only jarx's own step names and counts: never a path or a file name.
+- The spinner is `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` and the bar `█░` where the terminal shows
+  UTF-8, else `|/-\` and `#-`. The spinner and bar are cyan, and the time
+  is dim.
 
 ### `--all`
 

@@ -60,6 +60,15 @@ flags:
 
 func scanHelp(s *report.Stream) { s.Printf(scanUsage) }
 
+// The scan's steps, as the progress line names them.
+const (
+	stepHistory  = "reading session history"
+	stepConfig   = "reading agent config"
+	stepWalk     = "walking projects"
+	stepProbe    = "probing MCP servers"
+	stepFindings = "checking findings"
+)
+
 // scanFlags are jarx scan's flags.
 type scanFlags struct {
 	home                         string
@@ -138,15 +147,25 @@ func runScan(p *report.Printer, plain *redact.Scrubber, args []string, st stream
 	}
 	defer func() { _ = ss.files.Close() }()
 	env, files, scrub := ss.env, ss.files, ss.scrub
+	g := p.StartProgress(stepHistory, stepConfig, stepWalk, stepProbe, stepFindings)
+	defer g.Stop()
 
 	adapters := []agent.Adapter{claude.Adapter{}, codex.Adapter{}}
 	c := agent.Context{Env: env, Files: files, Scrub: scrub}
-	res, cursor, hist := discoverAll(c, append(slices.Clone(adapters), discover.Saved(configPath(env), ss.cfg.Repos)), f.paths, f.noHistory)
+	res, cursor, hist := discoverAll(c, append(slices.Clone(adapters), discover.Saved(configPath(env), ss.cfg.Repos)), f.paths, f.noHistory, g)
 	self, _ := os.Executable() // runs the demo server under --home; probe never uses it elsewhere
 	probe.Run(context.Background(), c, res.Projects, probe.Options{
 		Disabled: f.noProbe, Client: netguard.New(), Self: self,
+		OnProgress: func(done, running, total int) {
+			if done == 0 && running == 0 && total > 0 {
+				g.Count(stepProbe, total)
+			}
+			g.Set(done, running)
+		},
 	})
+	g.Step(stepFindings)
 	findings, err := analyze(scrub, env, res, lastSnapshot(env, files, scrub))
+	g.Stop() // before anything else prints
 	if err != nil {
 		p.Error(err)
 		return exitError
@@ -207,9 +226,22 @@ func readHistory(c agent.Context, off bool) (history.Cursor, history.Result) {
 
 // discoverAll reads history, then finds the projects: the sources' own and
 // the dirs the agents ran in. Each project gets its sessions.
-func discoverAll(c agent.Context, sources []agent.Adapter, extra []string, noHistory bool) (discover.Result, history.Cursor, history.Result) {
+func discoverAll(c agent.Context, sources []agent.Adapter, extra []string, noHistory bool, g *report.Progress) (discover.Result, history.Cursor, history.Result) {
+	if !noHistory {
+		g.Step(stepHistory)
+	}
 	cursor, hist := readHistory(c, noHistory)
-	res := discover.Run(c, append(sources, historySource(c.Env, hist.Sessions)), extra)
+	g.Step(stepConfig)
+	res := discover.RunWith(c, append(sources, historySource(c.Env, hist.Sessions)), extra, func(done, total int) {
+		switch done {
+		case 0:
+			g.Count(stepWalk, total)
+		case total:
+			g.Step(stepConfig) // the adapters read settings and instructions next
+		default:
+			g.Set(done, 0)
+		}
+	})
 	res.Findings = append(res.Findings, hist.Findings...)
 	discover.AttachSessions(c.Env.GOOS, res.Projects, hist.Sessions)
 	return res, cursor, hist

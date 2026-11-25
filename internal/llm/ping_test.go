@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -107,7 +108,7 @@ func TestPingSendsOneFixedChatRequestWithTheKeyInTheHeader(t *testing.T) {
 	f := &fakeEndpoint{status: http.StatusOK, reply: okReply}
 	base := f.serve(t)
 
-	if _, err := Ping(context.Background(), netguard.New(), base, "m-1", testKey(t)); err != nil {
+	if _, err := Ping(context.Background(), netguard.New(), Endpoint{BaseURL: base, Model: "m-1", Key: testKey(t)}); err != nil {
 		t.Fatalf("Ping() error = %v", err)
 	}
 
@@ -149,7 +150,7 @@ func TestPingTrimsATrailingSlashOnTheBaseURL(t *testing.T) {
 	f := &fakeEndpoint{status: http.StatusOK, reply: okReply}
 	base := f.serve(t)
 
-	if _, err := Ping(context.Background(), netguard.New(), base+"/", "m-1", testKey(t)); err != nil {
+	if _, err := Ping(context.Background(), netguard.New(), Endpoint{BaseURL: base + "/", Model: "m-1", Key: testKey(t)}); err != nil {
 		t.Fatalf("Ping() error = %v", err)
 	}
 	if got := f.got[0].URL.Path; got != "/v1/chat/completions" {
@@ -175,7 +176,7 @@ func TestPingFailuresSayWhatKindWithoutQuotingAnything(t *testing.T) {
 			f := &fakeEndpoint{status: tc.status, reply: tc.reply}
 			base := f.serve(t)
 
-			_, err := Ping(context.Background(), netguard.New(), base, "m-1", testKey(t))
+			_, err := Ping(context.Background(), netguard.New(), Endpoint{BaseURL: base, Model: "m-1", Key: testKey(t)})
 
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("Ping() error = %v, want %v", err, tc.want)
@@ -191,7 +192,7 @@ func TestPingStatusErrorNamesTheCode(t *testing.T) {
 	f := &fakeEndpoint{status: http.StatusNotFound, reply: "{}"}
 	base := f.serve(t)
 
-	_, err := Ping(context.Background(), netguard.New(), base, "m-1", testKey(t))
+	_, err := Ping(context.Background(), netguard.New(), Endpoint{BaseURL: base, Model: "m-1", Key: testKey(t)})
 
 	if err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("Ping() error = %v, want it to name 404", err)
@@ -204,7 +205,7 @@ func TestPingUnreachableDoesNotQuoteTheURL(t *testing.T) {
 	base := srv.URL + "/v1/" + canaryKey
 	srv.Close()
 
-	_, err := Ping(context.Background(), netguard.New(), base, "m-1", testKey(t))
+	_, err := Ping(context.Background(), netguard.New(), Endpoint{BaseURL: base, Model: "m-1", Key: testKey(t)})
 
 	if !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("Ping() error = %v, want ErrUnreachable", err)
@@ -218,9 +219,45 @@ func TestPingRefusesAURLCheckURLRefuses(t *testing.T) {
 	f := &fakeEndpoint{status: http.StatusOK, reply: okReply}
 	f.serve(t)
 
-	_, err := Ping(context.Background(), netguard.New(), "http://llm.example.com/v1", "m-1", testKey(t))
+	_, err := Ping(context.Background(), netguard.New(), Endpoint{BaseURL: "http://llm.example.com/v1", Model: "m-1", Key: testKey(t)})
 
 	if !errors.Is(err, netguard.ErrInsecure) || len(f.got) != 0 {
 		t.Errorf("Ping() error = %v with %d requests, want ErrInsecure and none sent", err, len(f.got))
+	}
+}
+
+// uuidRe is a random UUID, the session ID's shape.
+var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func TestRequestsSayJarxIsAsking(t *testing.T) {
+	// OpenCode Go wants clients to name themselves, not send a generic
+	// HTTP library's user agent.
+	for _, tc := range []struct{ set, want string }{{"jarx/v9.9.9", "jarx/v9.9.9"}, {"", "jarx"}} {
+		f := &fakeEndpoint{status: http.StatusOK, reply: okReply}
+		base := f.serve(t)
+
+		if _, err := Ping(context.Background(), netguard.New(), Endpoint{BaseURL: base, Model: "m-1", Key: testKey(t), UserAgent: tc.set}); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.got[0].Header.Get("User-Agent"); got != tc.want {
+			t.Errorf("User-Agent with %q set = %q, want %q", tc.set, got, tc.want)
+		}
+	}
+}
+
+func TestPingSendsASessionID(t *testing.T) {
+	f := &fakeEndpoint{status: http.StatusOK, reply: okReply}
+	base := f.serve(t)
+	ep := Endpoint{BaseURL: base, Model: "m-1", Key: testKey(t)}
+
+	for range 2 {
+		if _, err := Ping(context.Background(), netguard.New(), ep); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, second := f.got[0].Header.Get(SessionHeader), f.got[1].Header.Get(SessionHeader)
+	if !uuidRe.MatchString(first) || !uuidRe.MatchString(second) || first == second {
+		t.Errorf("sessions = %q, %q; want a random UUID per test", first, second)
 	}
 }

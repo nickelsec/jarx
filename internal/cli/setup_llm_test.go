@@ -26,6 +26,7 @@ type opts struct {
 	interactive bool
 	interrupt   func() (<-chan os.Signal, func())
 	keys        map[string]string
+	live        bool // stderr is a terminal, so the progress line draws
 }
 
 // terminal is a terminal with these env vars set.
@@ -56,7 +57,7 @@ func (o opts) run(args ...string) result {
 	keys := o.keys
 	lookup := func(name string) (string, bool) { v, ok := keys[name]; return v, ok }
 	var stdout, stderr bytes.Buffer
-	code := runWith(args, streams{in: o.in, out: &stdout, err: &stderr, interactive: o.interactive, interrupt: o.interrupt, lookupKey: lookup}, "v1.2.3-test")
+	code := runWith(args, streams{in: o.in, out: &stdout, err: &stderr, interactive: o.interactive, interrupt: o.interrupt, lookupKey: lookup, errLive: o.live}, "v1.2.3-test")
 	out, banner := strings.CutPrefix(stdout.String(), bannerText)
 	return result{code: code, stdout: out, stderr: stderr.String(), banner: banner}
 }

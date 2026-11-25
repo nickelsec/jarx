@@ -14,9 +14,10 @@ import (
 
 // Endpoint is where the review goes and with which key.
 type Endpoint struct {
-	BaseURL string
-	Model   string
-	Key     Key
+	BaseURL   string
+	Model     string
+	Key       Key
+	UserAgent string // like jarx/v1.2.3; "" sends plain jarx
 }
 
 // promptVersion goes into the cache key, so a changed prompt reviews
@@ -65,45 +66,82 @@ func content(a Artifact) string {
 // the review with that error; any other trouble with one artifact is an
 // info finding for it, and the review goes on.
 func Review(ctx context.Context, c *netguard.Client, ep Endpoint, s *redact.Scrubber, arts []Artifact, cache *Cache) (Result, error) {
-	var res Result
-	for _, a := range arts {
-		msg := content(a)
-		key := cacheKey(ep, msg)
-		if items, ok := cache.get(key); ok {
-			res.Cached++
-			res.Findings = append(res.Findings, findings(s, a, items)...)
-			continue
-		}
-		items, err := ask(ctx, c, ep, msg)
-		if errors.Is(err, ErrKeyRejected) || errors.Is(err, ErrUnreachable) || errors.Is(err, netguard.ErrInsecure) || errors.Is(err, netguard.ErrBlocked) {
-			return res, err
-		}
-		res.Sent++
-		if err != nil {
-			res.Failed++
-			res.Findings = append(res.Findings, failed(s, a, err))
-			continue
-		}
-		kept := make([]Item, 0, len(items))
-		for _, it := range items {
-			if !quoted(a.Text.String(), it.Quote) {
-				res.Dropped++
-				continue
-			}
-			kept = append(kept, scrubItem(s, it))
-		}
-		cache.put(key, kept)
-		res.Findings = append(res.Findings, findings(s, a, kept)...)
+	return ReviewWith(ctx, c, ep, s, arts, cache, nil)
+}
+
+// ReviewWith is Review, and tells onDone how many artifacts are done out of
+// the total, cached ones too, from 0 to all. onDone may be nil.
+func ReviewWith(ctx context.Context, c *netguard.Client, ep Endpoint, s *redact.Scrubber, arts []Artifact, cache *Cache, onDone func(done, total int)) (Result, error) {
+	if onDone == nil {
+		onDone = func(int, int) {}
 	}
-	return res, nil
+	onDone(0, len(arts))
+	r := reviewer{ctx: ctx, c: c, ep: ep, s: s, cache: cache, session: newSession()}
+	for i, a := range arts {
+		if err := r.one(a); err != nil {
+			return r.res, err
+		}
+		onDone(i+1, len(arts))
+	}
+	return r.res, nil
+}
+
+// reviewer is one review run. Its session ID is the run's, so the endpoint
+// can reuse its cache across the run's requests.
+type reviewer struct {
+	ctx     context.Context //nolint:containedctx // one run's context, for its requests
+	c       *netguard.Client
+	ep      Endpoint
+	s       *redact.Scrubber
+	cache   *Cache
+	session string
+	res     Result
+}
+
+// one reviews one artifact, from the cache when it's there. An error means
+// the whole review stops.
+func (r *reviewer) one(a Artifact) error {
+	msg := content(a)
+	key := cacheKey(r.ep, msg)
+	if items, ok := r.cache.get(key); ok {
+		r.res.Cached++
+		r.res.Findings = append(r.res.Findings, findings(r.s, a, items)...)
+		return nil
+	}
+	items, err := ask(r.ctx, r.c, r.ep, r.session, msg)
+	if stopsReview(err) {
+		return err
+	}
+	r.res.Sent++
+	if err != nil {
+		r.res.Failed++
+		r.res.Findings = append(r.res.Findings, failed(r.s, a, err))
+		return nil
+	}
+	kept := make([]Item, 0, len(items))
+	for _, it := range items {
+		if !quoted(a.Text.String(), it.Quote) {
+			r.res.Dropped++
+			continue
+		}
+		kept = append(kept, scrubItem(r.s, it))
+	}
+	r.cache.put(key, kept)
+	r.res.Findings = append(r.res.Findings, findings(r.s, a, kept)...)
+	return nil
+}
+
+// stopsReview is an error every request after it would hit too.
+func stopsReview(err error) bool {
+	return errors.Is(err, ErrKeyRejected) || errors.Is(err, ErrUnreachable) || errors.Is(err, netguard.ErrInsecure) || errors.Is(err, netguard.ErrBlocked)
 }
 
 // ask sends one artifact and checks the reply, retrying once with what was
 // wrong with it.
-func ask(ctx context.Context, c *netguard.Client, ep Endpoint, msg string) ([]Item, error) {
+func ask(ctx context.Context, c *netguard.Client, ep Endpoint, session, msg string) ([]Item, error) {
 	msgs := make([]chatMessage, 0, 4) //nolint:mnd // the prompt, the artifact, then a retry's two
 	msgs = append(msgs, chatMessage{Role: roleSystem, Content: systemPrompt}, chatMessage{Role: roleUser, Content: msg})
-	reply, _, err := complete(ctx, c, ep.BaseURL, ep.Model, ep.Key, msgs)
+	reply, _, err := complete(ctx, c, ep, session, msgs)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +150,7 @@ func ask(ctx context.Context, c *netguard.Client, ep Endpoint, msg string) ([]It
 		return items, nil
 	}
 	msgs = append(msgs, chatMessage{Role: roleAssistant, Content: reply}, chatMessage{Role: roleUser, Content: fmt.Sprintf(retryNote, perr.Error())})
-	reply, _, err = complete(ctx, c, ep.BaseURL, ep.Model, ep.Key, msgs)
+	reply, _, err = complete(ctx, c, ep, session, msgs)
 	if err != nil {
 		return nil, err
 	}

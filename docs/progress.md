@@ -614,5 +614,24 @@ in an env var you name; jarx never stores it.
   in a file, and setup reads it the same way
   - Not covered yet: the dashboard button (phase 7), and a review of
     servers' prompts and resources (cf1cc61)
+- [x] fix: OpenCode Go answered `400 MissingSessionID`. Its docs ask
+  clients for their own user agent and a stable `x-opencode-session` per
+  conversation. Every LLM request now sends `User-Agent: jarx/<version>`
+  and a random session ID, one per review run (retries included) and one
+  per connection test. The ID says nothing about the user or the scan, so
+  it goes to every endpoint, which also covers a proxy in front of Go
+  - Not covered yet: checked against a fake endpoint only, not OpenCode Go
+    itself, and MCP probes still send Go's default user agent
+- [x] progress line: while a scan works, one line on stderr names the step
+  (session history, agent config, walking projects, probing MCP servers,
+  checking findings) with a count and the time so far, and it's erased
+  before the report. The `--llm` review is a bar and setup's connection
+  test a spinner. Step names are padded to the longest and counts to their
+  total, so nothing moves as it updates. It only draws when stderr is a
+  terminal and only shows jarx's own words. `report.Progress` draws it,
+  with `discover.RunWith`, `probe.Options.OnProgress` and `llm.ReviewWith`
+  reporting counts. A new Progress part in the Terminal output section
+  - Not covered yet: a count while history is read and while the adapters
+    read settings, and checking it by eye in every terminal the PRD lists
 
 **Run it:** `jarx setup llm`, then `jarx scan --llm --home testdata/demo`.

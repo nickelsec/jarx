@@ -23,6 +23,9 @@ import (
 	"github.com/nickelsec/jarx/internal/report"
 )
 
+// stepPing is the connection test on the progress line.
+const stepPing = "testing the connection"
+
 // defaultKeyEnv is the var name setup offers. A name only jarx uses is less
 // likely to already sit in a shell profile, where the agents can read it.
 const defaultKeyEnv = "JARX_LLM_KEY"
@@ -92,7 +95,7 @@ func newAsker(p *report.Printer, scrub *redact.Scrubber, st streams) (*asker, fu
 		notify = catchInterrupt
 	}
 	sig, stop := notify()
-	a := &asker{p: p, s: scrub, r: bufio.NewReader(st.in), sig: sig, lines: make(chan readLine), done: make(chan struct{}), lookup: st.lookupKey}
+	a := &asker{p: p, s: scrub, r: bufio.NewReader(st.in), sig: sig, lines: make(chan readLine), done: make(chan struct{}), lookup: st.lookupKey, userAgent: st.userAgent}
 	go a.read()
 	return a, func() {
 		close(a.done)
@@ -312,7 +315,8 @@ type asker struct {
 	lines chan readLine    // unbuffered, so nothing is read ahead of a question
 	done  chan struct{}    // closed when setup returns
 
-	lookup keyLookup // the terminal's env, for the key
+	lookup    keyLookup // the terminal's env, for the key
+	userAgent string    // what jarx calls itself to the endpoint
 
 	interrupted bool // ctrl+c, not the end of input, stopped it
 	saved       bool
@@ -581,9 +585,12 @@ func (a *asker) offerTest(c jarxdir.LLM, key llm.Key) int {
 func (a *asker) ping(c jarxdir.LLM, key llm.Key) (time.Duration, error) {
 	var took time.Duration
 	var err error
+	g := a.p.StartProgress(stepPing)
+	g.Step(stepPing)
 	a.whileCatching(pingWait, func(ctx context.Context) {
-		took, err = llm.Ping(ctx, netguard.NewLLM(), c.BaseURL, c.Model, key)
+		took, err = llm.Ping(ctx, netguard.NewLLM(), llm.Endpoint{BaseURL: c.BaseURL, Model: c.Model, Key: key, UserAgent: a.userAgent})
 	})
+	g.Stop()
 	return took, err //nolint:wrapcheck // llm errors already say what failed
 }
 

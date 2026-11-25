@@ -22,10 +22,12 @@ import (
 // scripted is an OpenAI-compatible endpoint that answers each request with
 // the next reply in its script, and keeps every request body.
 type scripted struct {
-	mu      sync.Mutex
-	replies []string // the assistant's text; "" past the end means no findings
-	status  int      // 0 means 200
-	bodies  []string
+	mu       sync.Mutex
+	replies  []string // the assistant's text; "" past the end means no findings
+	status   int      // 0 means 200
+	bodies   []string
+	sessions []string // each request's session header
+	agents   []string // each request's user agent
 }
 
 func (f *scripted) serve(t *testing.T) string {
@@ -34,6 +36,8 @@ func (f *scripted) serve(t *testing.T) string {
 		b, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
 		f.bodies = append(f.bodies, string(b))
+		f.sessions = append(f.sessions, r.Header.Get(SessionHeader))
+		f.agents = append(f.agents, r.Header.Get("User-Agent"))
 		reply := `{"findings":[]}`
 		if n := len(f.bodies) - 1; n < len(f.replies) {
 			reply = f.replies[n]
@@ -416,5 +420,69 @@ func TestNoCanaryEverReachesTheEndpoint(t *testing.T) {
 				t.Errorf("finding %s holds a canary", fd.RuleID)
 			}
 		}
+	}
+}
+
+func TestReviewUsesOneSessionPerRun(t *testing.T) {
+	// One review run is one conversation for OpenCode Go's routing and
+	// prompt cache: every request in it, retries too, shares one session.
+	f := &scripted{replies: []string{"not json", upload}}
+	ep := endpoint(t, f.serve(t))
+	ep.UserAgent = "jarx/v9.9.9"
+	arts := Collect(scrubber(t), []model.Project{project(scrubber(t))})
+
+	for range 2 {
+		if _, err := Review(context.Background(), netguard.NewLLM(), ep, scrubber(t), arts, NewCache()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	perRun := len(arts) + 1 // one retry in the first run
+	first, second := f.sessions[:perRun], f.sessions[perRun:]
+	assertOneSession(t, first)
+	assertOneSession(t, second)
+	if first[0] == second[0] {
+		t.Errorf("both runs used session %q, want a new one per run", first[0])
+	}
+	for i, a := range f.agents {
+		if a != "jarx/v9.9.9" {
+			t.Errorf("request %d User-Agent = %q, want jarx/v9.9.9", i, a)
+		}
+	}
+}
+
+// assertOneSession checks a run's requests all carry the same random
+// session ID.
+func assertOneSession(t *testing.T, sessions []string) {
+	t.Helper()
+	for i, s := range sessions {
+		if !uuidRe.MatchString(s) || s != sessions[0] {
+			t.Errorf("request %d session = %q, want %q for the whole run", i, s, sessions[0])
+		}
+	}
+}
+
+func TestReviewWithSaysHowManyAreDone(t *testing.T) {
+	f := &scripted{}
+	arts := Collect(scrubber(t), []model.Project{project(scrubber(t))})
+	var got []int
+
+	_, err := ReviewWith(context.Background(), netguard.NewLLM(), endpoint(t, f.serve(t)), scrubber(t), arts, NewCache(), func(done, total int) {
+		if total != len(arts) {
+			t.Errorf("total = %d, want %d", total, len(arts))
+		}
+		got = append(got, done)
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := make([]int, 0, len(arts)+1)
+	want = append(want, 0)
+	for i := range arts {
+		want = append(want, i+1)
+	}
+	if len(got) != len(want) || got[0] != 0 || got[len(got)-1] != len(arts) {
+		t.Errorf("done counts = %v, want %v", got, want)
 	}
 }

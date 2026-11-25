@@ -16,6 +16,9 @@ import (
 	"github.com/nickelsec/jarx/internal/report"
 )
 
+// stepReview is the review's step on the progress line.
+const stepReview = "reviewing"
+
 // errNoLLM means scan --llm refused before scanning; the reason is printed.
 var errNoLLM = errors.New("llm review can't run")
 
@@ -43,7 +46,7 @@ func prepareLLM(p *report.Printer, s *redact.Scrubber, cfg jarxdir.Config, st st
 		p.Err.Printf("  powershell  %s\n  bash, zsh   %s\n", scrubbed(s, ps), scrubbed(s, sh))
 		return nil, errNoLLM
 	}
-	return &llmRun{p: p, s: s, st: st, ep: llm.Endpoint{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, Key: key}, keyEnv: name}, nil
+	return &llmRun{p: p, s: s, st: st, ep: llm.Endpoint{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, Key: key, UserAgent: st.userAgent}, keyEnv: name}, nil
 }
 
 // kindWords are each artifact kind's words, in the order the preview lists
@@ -95,11 +98,7 @@ func (r *llmRun) run(env platform.Env, projects []model.Project) ([]finding.Find
 		r.p.Blank()
 		return nil, exitOK, false
 	}
-	var res llm.Result
-	var err error
-	a.whileCatching(0, func(ctx context.Context) {
-		res, err = llm.Review(ctx, netguard.NewLLM(), r.ep, r.s, arts, cache)
-	})
+	res, err := r.send(a, arts, cache)
 	saveErr := cache.Save(env)
 	if a.interrupted {
 		r.p.Blank()
@@ -108,6 +107,20 @@ func (r *llmRun) run(env platform.Env, projects []model.Project) ([]finding.Find
 	}
 	code := r.report(res, err, saveErr)
 	return res.Findings, code, false
+}
+
+// send runs the review with its bar on the progress line, stopping on
+// ctrl+c.
+func (r *llmRun) send(a *asker, arts []llm.Artifact, cache *llm.Cache) (llm.Result, error) {
+	var res llm.Result
+	var err error
+	g := r.p.StartProgress(stepReview)
+	g.Bar(stepReview, len(arts), "artifacts")
+	a.whileCatching(0, func(ctx context.Context) {
+		res, err = llm.ReviewWith(ctx, netguard.NewLLM(), r.ep, r.s, arts, cache, func(done, _ int) { g.Set(done, 0) })
+	})
+	g.Stop()
+	return res, err //nolint:wrapcheck // llm errors already say what failed
 }
 
 func (r *llmRun) text(v string) redact.Text { return scrubbed(r.s, v) }

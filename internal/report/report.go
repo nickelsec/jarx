@@ -93,6 +93,10 @@ type Printer struct {
 	// Style is how the scan report looks. Its zero value is what piped
 	// output gets.
 	Style Style
+	// ErrStyle is stderr's, where the progress line goes, and Live says
+	// stderr is a terminal, the only place the progress line draws.
+	ErrStyle Style
+	Live     bool
 
 	scrub *redact.Scrubber
 }

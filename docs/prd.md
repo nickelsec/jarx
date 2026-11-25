@@ -1287,6 +1287,9 @@ terminals.
   turns off when output is piped, with `NO_COLOR`, and with `TERM=dumb`.
   Piped output is plain ASCII.
 - Every run starts with a banner and the version next to it.
+- While a scan works, one line on stderr says which step it's on, with a
+  count and the time so far, and it's erased before the report prints. It
+  only shows on a terminal, and never shows a path.
 
 ### Demo home
 
@@ -1353,8 +1356,8 @@ This is the full list. Anything not here is a bug.
 |---|---|---|---|
 | `jarx scan` with probing (default) | MCP `server/discover` or `initialize` and list calls to remote servers that would connect anyway, with their configured static creds if any | the server's configured `https://` URL | `--no-probe` |
 | `jarx scan` with probing (default) | jarx starts stdio servers. **The servers themselves** may use the network (for example `npx` downloading a package), just like when the agent starts them | whatever the server does | `--no-probe` |
-| `jarx scan --llm` or dashboard button | LLM review requests, redacted | the base URL the user set up | don't pass `--llm` |
-| `jarx setup llm`, after you answer yes to the test | one short chat request with fixed text and no scan content, with the key | the base URL just saved | answer no (the default) |
+| `jarx scan --llm` or dashboard button | LLM review requests, redacted, with jarx's user agent and a random session ID for the run | the base URL the user set up | don't pass `--llm` |
+| `jarx setup llm`, after you answer yes to the test | one short chat request with fixed text and no scan content, with the key, jarx's user agent and a random session ID | the base URL just saved | answer no (the default) |
 | `jarx ui` | listens for the browser | `127.0.0.1` only, inbound | not running `jarx ui` |
 
 Rules for every outbound call jarx makes itself:

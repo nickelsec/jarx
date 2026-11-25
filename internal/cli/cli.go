@@ -49,6 +49,8 @@ type streams struct {
 	interactive bool
 	interrupt   func() (<-chan os.Signal, func())
 	lookupKey   keyLookup // the terminal's env, where the LLM key is; nil means no key
+	userAgent   string    // jarx/<version>, what jarx calls itself to the LLM endpoint
+	errLive     bool      // stderr is a terminal, so the progress line can draw there
 }
 
 // keyLookup reads one env var from the terminal jarx runs in. It's how the
@@ -68,7 +70,8 @@ func catchInterrupt() (<-chan os.Signal, func()) {
 // code. ldflagsVersion is the version set at build time, or "".
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, ldflagsVersion string) int {
 	interactive := platform.DetectTerm(stdout).TTY && platform.IsTerminal(stdin)
-	return runWith(args, streams{in: stdin, out: stdout, err: stderr, interactive: interactive, lookupKey: platform.LookupReal}, ldflagsVersion)
+	errLive := platform.DetectTerm(stderr).TTY
+	return runWith(args, streams{in: stdin, out: stdout, err: stderr, interactive: interactive, lookupKey: platform.LookupReal, errLive: errLive}, ldflagsVersion)
 }
 
 func runWith(args []string, st streams, ldflagsVersion string) int {
@@ -82,8 +85,12 @@ func runWith(args []string, st streams, ldflagsVersion string) int {
 	p := report.New(st.out, st.err, plain)
 	t := platform.DetectTerm(st.out)
 	p.Style = report.Style{Width: t.Width, Color: t.Color, Unicode: t.Unicode}
+	et := platform.DetectTerm(st.err)
+	p.ErrStyle = report.Style{Width: et.Width, Color: et.Color, Unicode: et.Unicode}
+	p.Live = st.errLive
 	info, _ := debug.ReadBuildInfo() // nil when not available
 	version := versionFrom(ldflagsVersion, info)
+	st.userAgent = "jarx/" + version
 	// Every run starts with the banner, which has the version.
 	p.Banner(scrubbed(plain, version))
 
