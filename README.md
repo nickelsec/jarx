@@ -55,7 +55,7 @@ makes no network calls; CI checks that on every push.
 ## Run it for real
 
 ```
-go install github.com/nickelsec/jarx/cmd/jarx@latest
+go install github.com/nickelsec/jarx/cmd/jarx@v0.1.0
 jarx scan
 jarx ui
 ```
