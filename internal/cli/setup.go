@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
+	"github.com/nickelsec/jarx/internal/ui"
 )
 
 const setupUsage = `usage: jarx setup [--home <dir>]
@@ -119,16 +119,15 @@ func showSetup(p *report.Printer, s *redact.Scrubber, env platform.Env, files *f
 }
 
 func addRepo(out *report.Stream, s *redact.Scrubber, env platform.Env, files *fsys.FS, cfg jarxdir.Config, path string) error {
-	info, err := files.Stat(path)
-	switch {
-	case errors.Is(err, fsys.ErrOutsideHome):
+	switch err := checkRepo(files, path); {
+	case errors.Is(err, ui.ErrRepoOutside):
 		return fmt.Errorf("%s is outside the fake home", path)
-	case errors.Is(err, fs.ErrNotExist):
+	case errors.Is(err, ui.ErrRepoMissing):
 		return fmt.Errorf("%s doesn't exist", path)
+	case errors.Is(err, ui.ErrRepoNotDir):
+		return fmt.Errorf("%s isn't a directory", path)
 	case err != nil:
 		return fmt.Errorf("can't check %s", path)
-	case !info.IsDir():
-		return fmt.Errorf("%s isn't a directory", path)
 	}
 	if slices.ContainsFunc(cfg.Repos, func(r string) bool { return samePath(r, path, env.GOOS) }) {
 		out.Printf("already saved %s\n", scrubbed(s, path))

@@ -1,0 +1,479 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/nickelsec/jarx/internal/fsys"
+	"github.com/nickelsec/jarx/internal/jarxdir"
+	"github.com/nickelsec/jarx/internal/llm"
+	"github.com/nickelsec/jarx/internal/netguard"
+	"github.com/nickelsec/jarx/internal/platform"
+	"github.com/nickelsec/jarx/internal/redact"
+	"github.com/nickelsec/jarx/internal/report"
+	"github.com/nickelsec/jarx/internal/snapshot"
+	"github.com/nickelsec/jarx/internal/ui"
+)
+
+// uiApp is what the dashboard shows and does: the last scan, a rescan, the
+// saved repos, and comparing with an older snapshot. The only things it
+// writes are jarx's own: the snapshot, the run log and config.json.
+type uiApp struct {
+	mu       sync.RWMutex // guards d, ss.cfg, state and since
+	d        ui.Data
+	ss       scanSetup
+	st       streams
+	state    ui.ScanState
+	since    map[string]comparison // worked out once per snapshot, until the next scan
+	quiet    *report.Printer       // a rescan's progress goes nowhere: the terminal only shows the link
+	scanning sync.Mutex            // held while a rescan runs
+}
+
+// comparison is the current scan diffed against an older snapshot.
+type comparison struct {
+	taken   time.Time
+	changes []snapshot.Change
+}
+
+// browseLimit is how many folders the folder browser lists.
+const browseLimit = 300
+
+// newUIApp runs the first scan, with its progress line in the terminal.
+func newUIApp(p *report.Printer, ss scanSetup, st streams) (*uiApp, error) {
+	d, err := uiData(p, ss, st)
+	if err != nil {
+		return nil, err
+	}
+	a := &uiApp{d: d, ss: ss, st: st, quiet: report.New(io.Discard, io.Discard, ss.scrub)}
+	a.quiet.Watch = a.watch
+	return a, nil
+}
+
+func (a *uiApp) Data() ui.Data {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.d
+}
+
+// Rescan starts a scan in the background with the saved repos as they are
+// now. The pages keep showing the last scan and say one is running, and
+// ScanState says when it's done. One runs at a time.
+func (a *uiApp) Rescan() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.state.Running {
+		return ui.ErrBusy
+	}
+	a.state = ui.ScanState{Running: true, Done: a.state.Done, Steps: scanSteps}
+	go a.rescan(a.ss)
+	return nil
+}
+
+// ScanState says whether a rescan is running and how the last one went.
+func (a *uiApp) ScanState() ui.ScanState {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.state
+}
+
+// AddRepo saves a folder typed in Settings. It has to be a full path or
+// start with ~, and be a folder jarx can see.
+func (a *uiApp) AddRepo(typed string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	path, err := fullPath(a.ss.env, typed)
+	if err != nil {
+		return err
+	}
+	if err := checkRepo(a.ss.files, path); err != nil {
+		return err
+	}
+	if slices.ContainsFunc(a.ss.cfg.Repos, func(r string) bool { return samePath(r, path, a.ss.env.GOOS) }) {
+		return ui.ErrRepoSaved
+	}
+	cfg := a.ss.cfg
+	cfg.Repos = append(slices.Clone(cfg.Repos), path)
+	return a.saveRepos(cfg)
+}
+
+// RemoveRepo drops the saved repo at index i, as Settings lists them.
+func (a *uiApp) RemoveRepo(i int) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if i < 0 || i >= len(a.ss.cfg.Repos) {
+		return ui.ErrRepoNotSaved
+	}
+	cfg := a.ss.cfg
+	cfg.Repos = slices.Delete(slices.Clone(cfg.Repos), i, i+1)
+	return a.saveRepos(cfg)
+}
+
+// ChangesSince diffs the newest snapshot, which is the scan on show,
+// against the older one with this ID. Snapshots don't change once saved,
+// so each comparison is worked out once and kept until the next scan.
+func (a *uiApp) ChangesSince(id string) (time.Time, []snapshot.Change, error) {
+	a.mu.RLock()
+	c, ok := a.since[id]
+	a.mu.RUnlock()
+	if ok {
+		return c.taken, c.changes, nil
+	}
+	c, err := compare(a.ss.env, a.ss.scrub, id)
+	if err != nil {
+		return time.Time{}, nil, err
+	}
+	a.mu.Lock()
+	if a.since == nil {
+		a.since = map[string]comparison{}
+	}
+	a.since[id] = c
+	a.mu.Unlock()
+	return c.taken, c.changes, nil
+}
+
+// Folders lists the folders in dir for the folder browser: folder names
+// only, never files, and no dot-folders. With --home it stays inside the
+// fake home.
+func (a *uiApp) Folders(dir string) (ui.Folder, error) {
+	env, files := a.ss.env, a.ss.files
+	path, err := fullPath(env, dir)
+	if err != nil {
+		return ui.Folder{}, err
+	}
+	if err := checkRepo(files, path); err != nil {
+		return ui.Folder{}, err
+	}
+	entries, err := files.ReadDir(path)
+	if err != nil {
+		return ui.Folder{}, ui.ErrRepoMissing
+	}
+	f := ui.Folder{Path: a.shown(path)}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if len(f.Subs) == browseLimit {
+			f.More = true
+			break
+		}
+		f.Subs = append(f.Subs, ui.FolderEntry{Name: e.Name(), Path: a.shown(filepath.Join(path, e.Name()))})
+	}
+	slices.SortFunc(f.Subs, func(x, y ui.FolderEntry) int {
+		return strings.Compare(strings.ToLower(x.Name), strings.ToLower(y.Name))
+	})
+	if parent := filepath.Dir(path); parent != path && checkRepo(files, parent) == nil {
+		f.Parent = a.shown(parent)
+	}
+	return f, nil
+}
+
+// SaveLLM checks the LLM settings as typed, the way jarx setup llm does,
+// and saves them. The checklist and cached findings follow the new
+// settings at once; nothing is sent.
+func (a *uiApp) SaveLLM(f ui.LLMForm) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s := a.ss.scrub
+	base, err := checkBaseURL(s, f.BaseURL)
+	if err != nil {
+		return llmFieldErr(err, ui.ErrLLMURL)
+	}
+	model, err := checkModel(s, f.Model)
+	if err != nil {
+		return llmFieldErr(err, ui.ErrLLMModel)
+	}
+	keyEnv, err := checkVarName(s, f.KeyEnv)
+	if err != nil {
+		return llmFieldErr(err, ui.ErrLLMVar)
+	}
+	parallel, err := checkParallel(f.Parallel)
+	if err != nil {
+		return ui.ErrLLMParallel
+	}
+	cfg := a.ss.cfg
+	cfg.LLM = &jarxdir.LLM{BaseURL: base, Model: model, KeyEnv: keyEnv, Parallel: parallel}
+	return a.saveLLM(cfg)
+}
+
+// llmFieldErr is a field's error for the page: a key, or the field's own.
+func llmFieldErr(err, field error) error {
+	if errors.Is(err, errLooksLikeKey) {
+		return ui.ErrLooksLikeKey
+	}
+	return field
+}
+
+// LLMOff turns the LLM review off. The key's env var is untouched.
+func (a *uiApp) LLMOff() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	cfg := a.ss.cfg
+	cfg.LLM = nil
+	return a.saveLLM(cfg)
+}
+
+// TestLLM sends the one fixed request jarx setup llm's test sends.
+func (a *uiApp) TestLLM() error {
+	a.mu.RLock()
+	ep, _, err := a.endpoint()
+	a.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), llmTestWait)
+	defer cancel()
+	_, err = llm.Ping(ctx, netguard.NewLLM(), ep)
+	return llmErr(err)
+}
+
+// Review starts sending the artifacts with these keys in the background.
+// The page shows it going, and when it ends the checklist and findings
+// follow what came back.
+func (a *uiApp) Review(keys []string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if r := a.state.Review; r != nil && r.Running {
+		return ui.ErrBusy
+	}
+	ep, parallel, err := a.endpoint()
+	if err != nil {
+		return err
+	}
+	var arts []llm.Artifact
+	skips := llm.LoadSkips(a.ss.env)
+	for _, art := range a.d.LLM.Artifacts {
+		// A skipped one isn't sent, even when it's checked.
+		if k := llm.KeyOf(art); slices.Contains(keys, k) && !skips.Has(k) {
+			arts = append(arts, art)
+		}
+	}
+	if len(arts) == 0 {
+		return ui.ErrNothingToSend
+	}
+	finished := 0
+	if a.state.Review != nil {
+		finished = a.state.Review.Finished
+	}
+	a.state.Review = &ui.ReviewState{Running: true, Total: len(arts), Finished: finished}
+	go a.review(ep, parallel, arts)
+	return nil
+}
+
+// Skip skips the artifacts with these keys, or unskips them, in the skip
+// list jarx scan --llm reads too.
+func (a *uiApp) Skip(keys []string, skip bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	sk := llm.LoadSkips(a.ss.env)
+	sk.Set(keys, skip)
+	if err := sk.Save(a.ss.env); err != nil {
+		return err //nolint:wrapcheck // the skip list's errors say what failed
+	}
+	withLLM(&a.d, a.ss, a.st)
+	return nil
+}
+
+// llmTestWait is how long Test connection waits for the endpoint.
+const llmTestWait = 30 * time.Second
+
+// endpoint is the LLM review's endpoint with the key from the terminal
+// that started jarx ui, and how many to send at once. The caller holds mu.
+func (a *uiApp) endpoint() (llm.Endpoint, int, error) {
+	c := a.ss.cfg.LLM
+	if c == nil {
+		return llm.Endpoint{}, 0, ui.ErrLLMOff
+	}
+	key, ok := llm.KeyFrom(a.st.lookupKey, c.KeyEnv)
+	if !ok {
+		return llm.Endpoint{}, 0, ui.ErrKeyNotSet
+	}
+	return llm.Endpoint{BaseURL: c.BaseURL, Model: c.Model, Key: key, UserAgent: a.st.userAgent}, parallelOf(*c), nil
+}
+
+// llmErr is an LLM error as the page names it.
+func llmErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, llm.ErrKeyRejected):
+		return ui.ErrKeyRejected
+	case errors.Is(err, llm.ErrUnreachable), errors.Is(err, netguard.ErrBlocked), errors.Is(err, netguard.ErrInsecure):
+		return ui.ErrUnreachable
+	}
+	return err
+}
+
+// stoppedNote is the notice for a review that ended early, or "".
+func stoppedNote(err error) string {
+	switch e := llmErr(err); {
+	case e == nil:
+		return ""
+	case errors.Is(e, ui.ErrKeyRejected):
+		return "review-rejected"
+	case errors.Is(e, ui.ErrUnreachable):
+		return "review-unreach"
+	}
+	return "review-stopped"
+}
+
+// watch hears a rescan's progress: which step and how far along.
+func (a *uiApp) watch(step string, done, total int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.state.Running {
+		a.state.Step, a.state.StepDone, a.state.StepTotal = step, done, total
+	}
+}
+
+// saveLLM writes cfg and puts the LLM review as it now stands on the
+// page. The caller holds mu.
+func (a *uiApp) saveLLM(cfg jarxdir.Config) error {
+	if err := save(a.ss.env, cfg); err != nil {
+		return err
+	}
+	a.ss.cfg = cfg
+	withLLM(&a.d, a.ss, a.st)
+	return nil
+}
+
+// review sends arts in the background, then saves the cache and puts what
+// came back on the page.
+func (a *uiApp) review(ep llm.Endpoint, parallel int, arts []llm.Artifact) {
+	cache := llm.LoadCache(a.ss.env)
+	_, err := llm.ReviewWith(context.Background(), netguard.NewLLM(), ep, a.ss.scrub, arts, cache, llm.Options{
+		Parallel: parallel,
+		OnStatus: func(st llm.Status) {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			if r := a.state.Review; r != nil {
+				r.Done, r.Waiting = st.Done, st.Waiting
+			}
+		},
+	})
+	_ = cache.Save(a.ss.env) // a cache that can't be saved only means more is sent next time
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	r := a.state.Review
+	a.state.Review = &ui.ReviewState{Done: r.Done, Total: r.Total, Finished: r.Finished + 1, Stopped: stoppedNote(err)}
+	withLLM(&a.d, a.ss, a.st)
+}
+
+// rescan runs one scan in the background and swaps the result in.
+func (a *uiApp) rescan(ss scanSetup) {
+	a.scanning.Lock()
+	defer a.scanning.Unlock()
+	d, err := uiData(a.quiet, ss, a.st)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err == nil {
+		d.Repos = a.d.Repos // the list as it is now, if one was added or removed meanwhile
+		a.d, a.since = d, nil
+	}
+	a.state = ui.ScanState{Done: a.state.Done + 1, Failed: err != nil}
+}
+
+// shown is a path as the folder browser shows and sends it back: from ~
+// inside the home dir, masked like every path on the page.
+func (a *uiApp) shown(path string) string {
+	home := a.ss.env.Home
+	if rel, err := filepath.Rel(home, path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if rel == "." {
+			path = "~"
+		} else {
+			path = "~/" + filepath.ToSlash(rel)
+		}
+	}
+	return scrubbed(a.ss.scrub, path).String()
+}
+
+// compare diffs the newest snapshot against the older one with this ID.
+func compare(env platform.Env, scrub *redact.Scrubber, id string) (comparison, error) {
+	d, err := jarxdir.Open(env)
+	if err != nil {
+		return comparison{}, fmt.Errorf("state dir: %w", err)
+	}
+	defer func() { _ = d.Close() }()
+	older, err := snapshot.Load(d, scrub, id)
+	if err != nil {
+		return comparison{}, err //nolint:wrapcheck // ErrNoSnapshot is checked by the pages
+	}
+	cur, note, err := snapshot.Latest(d, scrub)
+	if err != nil || note != "" {
+		return comparison{}, errors.Join(err, errors.New("couldn't read the newest snapshot")) //nolint:err113 // a one-off
+	}
+	return comparison{taken: older.Taken, changes: snapshot.Diff(scrub, older, cur)}, nil
+}
+
+// saveRepos writes cfg and shows its repos. The caller holds mu.
+func (a *uiApp) saveRepos(cfg jarxdir.Config) error {
+	if err := save(a.ss.env, cfg); err != nil {
+		return err
+	}
+	a.ss.cfg = cfg
+	a.d.Repos = a.d.Repos[:0:0]
+	for _, r := range cfg.Repos {
+		a.d.Repos = append(a.d.Repos, scrubbed(a.ss.scrub, r))
+	}
+	return nil
+}
+
+// olderSnapshots is the saved snapshots but the newest, which is this
+// scan's own, for Changes to compare against.
+func olderSnapshots(env platform.Env) []snapshot.Info {
+	d, err := jarxdir.Open(env)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = d.Close() }()
+	list, err := snapshot.List(d)
+	if err != nil || len(list) < 2 { // this scan and at least one before it
+		return nil
+	}
+	return list[1:]
+}
+
+// fullPath turns a folder typed in Settings into an absolute path. ~ is
+// the home dir (the fake one with --home). Anything else has to be
+// absolute already: the dashboard has no working dir to be relative to.
+func fullPath(env platform.Env, typed string) (string, error) {
+	typed = strings.TrimSpace(typed)
+	switch {
+	case typed == "~":
+		typed = env.Home
+	case strings.HasPrefix(typed, "~/"), strings.HasPrefix(typed, `~\`):
+		typed = filepath.Join(env.Home, typed[2:])
+	}
+	if typed == "" || !filepath.IsAbs(typed) {
+		return "", ui.ErrRepoRelative
+	}
+	return filepath.Clean(typed), nil
+}
+
+// checkRepo says whether path is a folder jarx can see, the same check for
+// jarx setup repo add and the dashboard.
+func checkRepo(files *fsys.FS, path string) error {
+	info, err := files.Stat(path)
+	switch {
+	case errors.Is(err, fsys.ErrOutsideHome):
+		return ui.ErrRepoOutside
+	case errors.Is(err, fs.ErrNotExist):
+		return ui.ErrRepoMissing
+	case err != nil:
+		return errRepoCheck
+	case !info.IsDir():
+		return ui.ErrRepoNotDir
+	}
+	return nil
+}
+
+// errRepoCheck is a folder jarx couldn't look at, for a reason other than
+// it not being there.
+var errRepoCheck = errors.New("can't check it")

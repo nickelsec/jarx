@@ -147,14 +147,16 @@ jobs:
             fi
           done
           # The demo has secrets, so the scan makes its fingerprint key, it
-          # saves one snapshot, and it remembers how far it read the demo's
-          # session history. Nothing else, anywhere in the checkout.
+          # saves one snapshot, logs the scan in the run log, and remembers
+          # how far it read the demo's session history. Nothing else,
+          # anywhere in the checkout.
           wrote=$(comm -13 <(echo "$before") <(files))
-          if [ "$(grep -c . <<<"$wrote")" != 3 ] \
+          if [ "$(grep -c . <<<"$wrote")" != 4 ] \
             || ! grep -qx '!! testdata/demo/.jarx-state/fingerprint.key' <<<"$wrote" \
             || ! grep -qx '!! testdata/demo/.jarx-state/history-cursor.json' <<<"$wrote" \
+            || ! grep -qx '!! testdata/demo/.jarx-state/runs.json' <<<"$wrote" \
             || ! grep -qxE '!! testdata/demo/.jarx-state/snapshots/[0-9TZ.]+-[0-9a-f]+[.]json' <<<"$wrote"; then
-            echo "the demo scan should write its fingerprint key, history cursor and one snapshot, but wrote:"
+            echo "the demo scan should write its fingerprint key, history cursor, run log and one snapshot, but wrote:"
             echo "$wrote"
             exit 1
           fi

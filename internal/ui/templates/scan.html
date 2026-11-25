@@ -1,0 +1,60 @@
+{{template "top" .}}
+{{with .Body}}
+<header class="head">
+<div><h1>Scan</h1><p class="sub">Scan again, and choose the extra folders every scan covers.</p></div>
+</header>
+<section class="card scan-card">
+{{if .Running}}<div class="scan-run" data-progress>
+<div class="block-head"><h2>Scanning</h2><span class="faint" data-elapsed></span></div>
+<ol class="steps">{{range .Steps}}<li class="step{{if .Class}} {{.Class}}{{end}}" data-step="{{.Name}}"><span class="step-mark" aria-hidden="true"></span><span class="step-name">{{.Name}}</span>{{if .Count}}<span class="step-count">{{.Count}}</span>{{end}}</li>{{end}}</ol>
+</div>{{else}}<div class="scan-last">
+<div class="block-head"><h2>Last scan</h2><span class="when">{{.When}}</span></div>
+<div class="scan-stats">
+<div class="stat"><span class="stat-n">{{.Findings}}</span><span class="faint">findings</span></div>
+<div class="stat"><span class="stat-n">{{.Projects}}</span><span class="faint">projects</span></div>
+<div class="stat"><span class="stat-n">{{.New}}</span><span class="faint">new</span></div>
+</div>
+</div>{{end}}
+<div class="scan-go">
+{{template "rescan" $}}
+<a class="history-link" href="/changes#scan-history"><span>{{.TotalRuns}}</span><span class="faint">Scan history</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></a>
+</div>
+</section>
+<section class="card pad">
+<div class="block-head"><h2>Extra repos</h2><span class="faint">projects every scan includes</span></div>
+<form class="repo-add" method="post" action="/scan/repos">
+<input type="hidden" name="action" value="add">
+<label class="sr" for="repo-path">Folder to add</label>
+<input id="repo-path" type="text" name="path" placeholder="~/work/api" autocomplete="off" spellcheck="false" required>
+<a class="btn" href="/scan?browse=~"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><span>Browse</span></a>
+<button type="submit" class="btn primary">Add</button>
+</form>
+{{if .Repos}}<ul class="repos">{{range $i, $r := .Repos}}<li><span class="mono cut">{{$r}}</span><button type="button" class="btn small ghost" data-open="rm-{{$i}}" aria-haspopup="dialog">Remove</button>
+<dialog class="modal confirm" id="rm-{{$i}}" aria-labelledby="rm-{{$i}}-t" tabindex="-1">
+<div class="modal-box">
+<header class="modal-head"><h3 id="rm-{{$i}}-t">Remove this folder?</h3><p class="browse-path mono">{{$r}}</p></header>
+<footer class="modal-foot"><form method="dialog"><button type="submit" class="btn">Cancel</button></form><form class="inline" method="post" action="/scan/repos"><input type="hidden" name="action" value="remove"><input type="hidden" name="i" value="{{$i}}"><button type="submit" class="btn danger">Remove</button></form></footer>
+</div>
+</dialog></li>{{end}}</ul>{{else}}<p class="sub">None yet.</p>{{end}}
+{{with .Browse}}<dialog class="modal browse" id="browse" aria-labelledby="browse-t" tabindex="-1" data-autoopen data-strip="browse">
+<div class="modal-box">
+<header class="modal-head">
+<h3 id="browse-t">Pick a folder</h3>
+<form method="dialog"><button type="submit" class="modal-x" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></form>
+{{if not .Failed}}<p class="browse-path mono">{{.Folder.Path}}</p>{{end}}
+</header>
+<div class="modal-body browse-body">
+{{if .Failed}}<p class="empty">Can't open that folder.</p><a class="folder up" href="{{.ParentHref}}">Go to your home folder</a>{{else}}
+<nav class="folders" aria-label="Folders">
+{{if .ParentHref}}<a class="folder up" href="{{.ParentHref}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>Up one folder</a>{{end}}
+{{range .Subs}}<a class="folder" href="{{.Href}}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>{{.Name}}</a>{{else}}<p class="empty">No folders in here.</p>{{end}}
+{{if .Folder.More}}<p class="faint more-note">Only the first folders show. Type the path if yours isn't here.</p>{{end}}
+</nav>{{end}}
+</div>
+{{if not .Failed}}<footer class="modal-foot">
+<form method="post" action="/scan/repos" class="inline"><input type="hidden" name="action" value="add"><input type="hidden" name="path" value="{{.Folder.Path}}"><button type="submit" class="btn primary">Use this folder</button></form>
+</footer>{{end}}
+</div>
+</dialog>{{end}}
+{{end}}
+{{template "bottom" .}}

@@ -97,7 +97,7 @@ func (b *builder) add(it Item) {
 func Build(s *redact.Scrubber, taken time.Time, in Input) Snapshot {
 	b := &builder{s: s, seen: map[string]bool{}}
 	for _, f := range in.Findings {
-		b.add(Item{Kind: KindFinding, Key: b.join(f.RuleID, where(f.Origin), f.Evidence.String()), Value: b.join(f.Severity.String())})
+		b.add(Item{Kind: KindFinding, Key: b.join(FindingKey(f)), Value: b.join(f.Severity.String())})
 	}
 	for _, u := range in.Unknown {
 		b.add(Item{Kind: KindUnknown, Key: b.join(string(u.Origin.Agent), u.Key.String(), "in", u.Origin.File.Text().String()), Value: u.Near})
@@ -192,6 +192,19 @@ func (b *builder) permissions(dir redact.Text, perm model.Permissions) {
 	for _, d := range perm.AdditionalDirectories {
 		b.add(Item{Project: dir, Kind: KindRule, Key: b.join(agent, "additionalDirectories", d.Value.String(), "in", d.Origin.File.Text().String()), InEffect: d.Origin.InEffect, Why: d.Origin.Why})
 	}
+}
+
+// FindingKey is how a snapshot names a finding: its rule, where it is and
+// its evidence, all masked already. The dashboard uses it to tell which
+// findings are new since the last scan.
+func FindingKey(f finding.Finding) string {
+	parts := make([]string, 0, 3) //nolint:mnd // rule, place, evidence
+	for _, p := range []string{f.RuleID, where(f.Origin), f.Evidence.String()} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func where(o model.Origin) string {

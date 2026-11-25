@@ -49,7 +49,7 @@ func PolicyHelperSet() finding.Rule {
 		Severity: finding.Info,
 		Title:    "managed settings come from a policy helper",
 		Detail:   "managed settings come from a policy helper jarx doesn't run",
-		Fix:      "the managed settings shown may not be the ones in force; run /status in Claude Code to see them",
+		Fix:      "the managed settings shown here may not be the ones in force. Run /status in Claude Code to see the real ones.",
 	}
 }
 

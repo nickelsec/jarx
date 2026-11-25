@@ -387,3 +387,21 @@ func TestEnvVarCredentialsAreKeptByName(t *testing.T) {
 		t.Errorf("credential items = %d, want one per env var", n)
 	}
 }
+
+func TestFindingKeyIsTheKeyTheSnapshotUses(t *testing.T) {
+	f := newFixture(t)
+	in := f.input(instructionBody)
+
+	snap := Build(f.s, time.Now(), in)
+
+	want := FindingKey(in.Findings[0])
+	for _, it := range snap.Items {
+		if it.Kind == KindFinding {
+			if it.Key.String() != want {
+				t.Errorf("snapshot key %q, FindingKey %q, want the same", it.Key, want)
+			}
+			return
+		}
+	}
+	t.Fatal("no finding in the snapshot")
+}

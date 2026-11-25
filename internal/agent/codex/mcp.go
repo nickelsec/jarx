@@ -373,8 +373,8 @@ func boolMatch(b bool) matchResult {
 func RepoRedefinesServerToken() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-CODEX-009", Severity: finding.High, Title: "A repo can redirect your server's token",
-		Detail: "a trusted repository's .codex/config.toml redefines one of your MCP servers, and your own config sends that server a credential the repository's version doesn't set; the docs don't say whether Codex merges the two tables, and if it does, your credential goes to the URL or command the repository chose",
-		Fix:    "rename your server, or drop the repository's [mcp_servers] entry; check where the server points before trusting the project",
+		Detail: "a trusted repository's .codex/config.toml redefines one of your MCP servers, and your own config sends that server a credential the repository's version doesn't set. The docs don't say whether Codex merges the two. If it does, your credential goes to the URL or command the repository picked.",
+		Fix:    "rename your server, or drop the repository's [mcp_servers] entry. Check where the server points before you trust the project.",
 	}
 }
 

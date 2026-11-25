@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -267,6 +269,19 @@ func failed(s *redact.Scrubber, a Artifact, err error) finding.Finding {
 	return RuleFailed().New(a.Origin, ev)
 }
 
+// FromCache is the findings the cache already holds for arts, the same as
+// a review would give for them, without sending anything. An artifact the
+// cache doesn't know, or that failed last time, gives none.
+func FromCache(ep Endpoint, s *redact.Scrubber, arts []Artifact, cache *Cache) []finding.Finding {
+	var out []finding.Finding
+	for _, a := range arts {
+		if items, ok := cache.get(cacheKey(ep, content(a))); ok {
+			out = append(out, findings(s, a, items)...)
+		}
+	}
+	return out
+}
+
 // Preview is what a review would send, for the question before it does.
 type Preview struct {
 	Send   int // Failed plus New
@@ -301,7 +316,51 @@ func Plan(ep Endpoint, arts []Artifact, cache *Cache) Preview {
 		}
 		p.Send++
 		p.ByKind[a.Kind]++
-		p.Tokens += (len(systemPrompt) + len(msg) + bytesPerToken - 1) / bytesPerToken
+		p.Tokens += tokens(msg)
 	}
 	return p
+}
+
+// Estimate is about how many tokens sending a costs, the prompt with it.
+func Estimate(a Artifact) int { return tokens(content(a)) }
+
+func tokens(msg string) int {
+	return (len(systemPrompt) + len(msg) + bytesPerToken - 1) / bytesPerToken
+}
+
+// State is where one artifact stands before a review.
+type State string
+
+// Artifact states, for the dashboard's checklist.
+const (
+	StateCached  State = "cached"           // answered last time, not sent again
+	StateFailed  State = "failed last time" // sent again
+	StateNew     State = "new"              // never sent to this model, or changed since
+	StateSkipped State = "skipped"          // the user chose not to send it, until it changes
+)
+
+// States says, for each artifact in order, whether the cache answers it,
+// it failed last time, or it's new.
+func States(ep Endpoint, arts []Artifact, cache *Cache) []State {
+	out := make([]State, len(arts))
+	for i, a := range arts {
+		key := cacheKey(ep, content(a))
+		switch {
+		case func() bool { _, ok := cache.get(key); return ok }():
+			out[i] = StateCached
+		case cache.failedBefore(key):
+			out[i] = StateFailed
+		default:
+			out[i] = StateNew
+		}
+	}
+	return out
+}
+
+// KeyOf is a hash of an artifact's content alone: its kind, name and text.
+// It doesn't change with the endpoint or model, so a choice made about the
+// artifact, like skipping it, lasts until the artifact itself changes.
+func KeyOf(a Artifact) string {
+	sum := sha256.Sum256([]byte(content(a)))
+	return hex.EncodeToString(sum[:])
 }

@@ -335,3 +335,61 @@ func assertPlan(t *testing.T, got, want Preview) {
 			got.Send, got.Failed, got.Cached, got.New, want.Send, want.Failed, want.Cached, want.New)
 	}
 }
+
+func TestStatesSaysWhereEachArtifactStands(t *testing.T) {
+	f := &flex{answer: func(_ int, a sentArtifact) (int, string, string, time.Duration) {
+		if strings.Contains(a.Text, "number 0") {
+			return http.StatusOK, "", "not json", 0
+		}
+		return http.StatusOK, "", noFindings, 0
+	}}
+	ep := endpoint(t, f.serve(t))
+	arts := lintSkills(t, 2)
+	cache := NewCache()
+	if _, err := ReviewWith(context.Background(), netguard.NewLLM(), ep, scrubber(t), arts, cache, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	all := slices.Concat(arts, []Artifact{skillArtifact(t, lintSkill)})
+
+	got := States(ep, all, cache)
+
+	want := []State{StateFailed, StateCached, StateNew}
+	if !slices.Equal(got, want) {
+		t.Errorf("States() = %v, want %v", got, want)
+	}
+}
+
+func TestKeyOfIsStableAndDiffersPerArtifact(t *testing.T) {
+	arts := lintSkills(t, 2)
+
+	if KeyOf(arts[0]) != KeyOf(lintSkills(t, 1)[0]) || KeyOf(arts[0]) == KeyOf(arts[1]) || len(KeyOf(arts[0])) != 64 {
+		t.Errorf("KeyOf = %q, %q; want a stable hash per artifact's content", KeyOf(arts[0]), KeyOf(arts[1]))
+	}
+}
+
+func TestFromCacheGivesTheCachedFindingsWithoutSending(t *testing.T) {
+	f := &flex{answer: func(_ int, a sentArtifact) (int, string, string, time.Duration) {
+		if strings.Contains(a.Text, "curl") {
+			return http.StatusOK, "", upload, 0
+		}
+		return http.StatusOK, "", noFindings, 0
+	}}
+	ep := endpoint(t, f.serve(t))
+	arts := []Artifact{skillArtifact(t, lintSkill), skillArtifact(t, "lint the code.")}
+	cache := NewCache()
+	res, err := ReviewWith(context.Background(), netguard.NewLLM(), ep, scrubber(t), arts, cache, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := f.requests
+	never := slices.Concat(arts, []Artifact{skillArtifact(t, "never reviewed")})
+
+	got := FromCache(ep, scrubber(t), never, cache)
+
+	if f.requests != sent {
+		t.Errorf("FromCache sent %d requests, want none", f.requests-sent)
+	}
+	if len(got) != 1 || len(res.Findings) != 1 || got[0].RuleID != res.Findings[0].RuleID || got[0].Evidence.String() != res.Findings[0].Evidence.String() {
+		t.Errorf("FromCache = %+v, want the review's one finding %+v", got, res.Findings)
+	}
+}

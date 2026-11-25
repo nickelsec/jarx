@@ -102,6 +102,54 @@ func prune(d *jarxdir.Dir) error {
 	return nil
 }
 
+// ErrNoSnapshot is a snapshot ID that isn't one of the saved snapshots.
+var ErrNoSnapshot = errors.New("no such snapshot")
+
+// Info is a saved snapshot: its ID, which is its file name without the
+// extension, and when it was taken.
+type Info struct {
+	ID    string
+	Taken time.Time
+}
+
+// List is the saved snapshots, newest first. The time comes from the file
+// name, so listing reads no snapshot. A name it can't read a time from is
+// left out.
+func List(d *jarxdir.Dir) ([]Info, error) {
+	all, err := names(d)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Info, 0, len(all))
+	for _, name := range slices.Backward(all) {
+		id := strings.TrimSuffix(name, ext)
+		stamp, _, _ := strings.Cut(id, "-")
+		taken, err := time.Parse(nameTime, stamp)
+		if err != nil {
+			continue
+		}
+		out = append(out, Info{ID: id, Taken: taken})
+	}
+	return out, nil
+}
+
+// Load reads the snapshot with this ID. Only an ID that List gives loads,
+// so an ID can't name any other file.
+func Load(d *jarxdir.Dir, s *redact.Scrubber, id string) (Snapshot, error) {
+	all, err := names(d)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if id == "" || !slices.Contains(all, id+ext) {
+		return Snapshot{}, ErrNoSnapshot
+	}
+	snap, note := read(d, s, id+ext, "the snapshot")
+	if note != "" {
+		return Snapshot{}, errors.New(note) //nolint:err113 // the note is the reason, shown as is
+	}
+	return snap, nil
+}
+
 // Latest reads the newest snapshot. With none saved it returns a zero
 // Snapshot. One it can't use, broken or from a newer jarx, is a zero
 // Snapshot and a note saying why, never an error: the scan goes on without
@@ -111,20 +159,27 @@ func Latest(d *jarxdir.Dir, s *redact.Scrubber) (Snapshot, string, error) {
 	if err != nil || len(all) == 0 {
 		return Snapshot{}, "", err
 	}
-	data, err := d.ReadFile(Dir + "/" + all[len(all)-1])
+	snap, note := read(d, s, all[len(all)-1], "the last snapshot")
+	return snap, note, nil
+}
+
+// read reads one snapshot file. One it can't use is a zero Snapshot and a
+// note saying why, naming it as what.
+func read(d *jarxdir.Dir, s *redact.Scrubber, name, what string) (Snapshot, string) {
+	data, err := d.ReadFile(Dir + "/" + name)
 	if err != nil {
-		return Snapshot{}, "couldn't read the last snapshot", nil //nolint:nilerr // a bad snapshot is a note, not a failed scan
+		return Snapshot{}, "couldn't read " + what
 	}
 	var f file
 	if json.Unmarshal(data, &f) != nil {
-		return Snapshot{}, "couldn't read the last snapshot: it isn't valid", nil //nolint:nilerr // a note, as above
+		return Snapshot{}, "couldn't read " + what + ": it isn't valid"
 	}
 	if f.Version > Version {
-		return Snapshot{}, "the last snapshot is from a newer jarx, so there's nothing to compare against", nil
+		return Snapshot{}, what + " is from a newer jarx, so there's nothing to compare against"
 	}
 	taken, err := time.Parse(fileFormat, f.Taken)
 	if err != nil {
-		return Snapshot{}, "couldn't read the last snapshot: its time isn't valid", nil //nolint:nilerr // a note, as above
+		return Snapshot{}, "couldn't read " + what + ": its time isn't valid"
 	}
 	text := func(v string) redact.Text {
 		t, _ := s.Scrub(v)
@@ -137,5 +192,5 @@ func Latest(d *jarxdir.Dir, s *redact.Scrubber) (Snapshot, string, error) {
 			Why: text(it.Why), Hash: it.Hash, Value: text(it.Value),
 		})
 	}
-	return snap, "", nil
+	return snap, ""
 }

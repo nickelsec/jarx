@@ -10,7 +10,7 @@ import "github.com/nickelsec/jarx/internal/finding"
 func RepoServerTakesName() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-CLAUDE-006", Severity: finding.High, Title: "A repo MCP server takes your server's name",
-		Detail: "a repository's .mcp.json defines a server with the name of one of your user servers; once it's approved, Claude uses it instead of yours, and your mcp__<name>__ permission rules and hooks apply to it",
+		Detail: "a repository's .mcp.json defines a server with the same name as one of yours. Once you approve it, Claude uses it instead of yours, and your mcp__<name>__ permission rules and hooks apply to it.",
 		Fix:    "reject it with disabledMcpjsonServers, or rename your own server",
 	}
 }
@@ -20,7 +20,7 @@ func RepoServerTakesName() finding.Rule {
 func SameNameOtherEndpoint() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-CLAUDE-007", Severity: finding.Info, Title: "An MCP server name points two places",
-		Detail: "the same server name is defined in two scopes with different URLs or commands; Claude uses the higher scope's, which may not be the one you sign in to",
+		Detail: "the same server name is defined in two scopes with different URLs or commands. Claude uses the one from the higher scope, which may not be the one you sign in to.",
 		Fix:    "keep one definition and remove the others with claude mcp remove <name> --scope <scope>",
 	}
 }

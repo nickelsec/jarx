@@ -49,3 +49,19 @@ func TestLLMPreviewLeavesOutWhatIsZero(t *testing.T) {
 		t.Errorf("got\n%s\nwant a line\n%s", out, want)
 	}
 }
+
+func TestLLMPreviewSaysWhatWasSkipped(t *testing.T) {
+	p, s, out, _ := setup(t)
+
+	p.LLMPreview(LLMPreviewView{Send: 1, Tokens: 900, New: 1, Skipped: 2, Parallel: 1, Kinds: []Count{{N: 1, One: "hook", Many: "hooks"}}, Host: text(s, "h"), Model: text(s, "m"), KeyEnv: text(s, "K")})
+
+	want := "llm review\n" +
+		"+- 1 artifact   1 hook\n" +
+		"+- ~900 tokens  sent 1 at a time\n" +
+		"+- skipped      2 not sent, you skipped them\n" +
+		"+- to           h - m - key from K\n" +
+		`\- secrets masked before sending - history never sent` + "\n"
+	if out.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", out, want)
+	}
+}

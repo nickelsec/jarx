@@ -1,0 +1,55 @@
+{{template "top" .}}
+{{with .Body}}
+<header class="head">
+<div><h1>LLM review</h1><p class="sub">Choose what goes to your model.</p></div>
+{{if .On}}<a class="btn ghost" href="/settings">{{.Host}} · {{.Model}}</a>{{end}}
+</header>
+{{if .On}}
+<div class="tiles">
+<div class="tile"><span class="tile-label">To send</span><span class="tile-n">{{.Send}}</span></div>
+<div class="tile"><span class="tile-label">Cached</span><span class="tile-n">{{.Cached}}</span></div>
+<div class="tile"><span class="tile-label">Failed last time</span><span class="tile-n f-text-high">{{.Failed}}</span></div>
+<div class="tile"><span class="tile-label">New</span><span class="tile-n">{{.New}}</span></div>
+<div class="tile"><span class="tile-label">Skipped</span><span class="tile-n">{{.Skipped}}</span></div>
+</div>
+{{if and .Review .Review.Running}}<span hidden data-review="running"></span>
+<div class="card review-progress" data-review-progress>
+<div class="block-head"><h2>Reviewing</h2><span class="faint" data-review-count>{{.Review.Done}} of {{.Review.Total}}</span><span class="faint" data-review-wait>{{if .Review.Waiting}}{{.Review.Waiting}} waiting on a rate limit{{end}}</span></div>
+<progress max="{{.Review.Total}}" value="{{.Review.Done}}" data-review-bar></progress>
+</div>{{end}}
+<div class="card table">
+<form id="review" method="post" action="/llm/review" aria-label="Artifacts" data-arts="{{.Arts}}">
+<div class="llm-bar">
+<label class="check-all"><input type="checkbox" data-check-all>All</label>
+<span class="faint">{{.Total}} Artifacts</span><span class="faint" data-picked></span>
+<span class="spacer"></span>
+{{if .Failed}}<button type="button" class="btn" data-rerun>Rerun failed</button>{{end}}
+<button type="submit" form="review" formaction="/llm/skip" name="action" value="skip" class="btn ghost">Skip checked</button>
+{{if .Skipped}}<button type="submit" form="review" formaction="/llm/skip" name="action" value="unskip" class="btn ghost">Unskip checked</button>{{end}}
+{{if and .Review .Review.Running}}<button type="button" class="btn primary busy" disabled>Reviewing…</button>{{else}}<button type="button" class="btn primary" data-open="review-confirm" aria-haspopup="dialog">Review checked</button>{{end}}
+</div>
+<div class="thead llm"><span></span><span>Kind</span><span>Artifact</span><span>Project</span><span>State</span></div>
+{{range .Rows}}<label class="lrow">
+<input type="checkbox" name="a" value="{{.Key}}" data-tokens="{{.Tokens}}"{{if .Checked}} checked{{end}} aria-label="Send {{.Name}}">
+<span class="dim">{{.Kind}}</span>
+<span class="ftitle"><span class="t">{{.Name}}</span><span class="ev mono">{{.File}}</span></span>
+<span class="mono dim cut">{{.Project}}</span>
+<span class="state st-{{.StateKey}}">{{.State}}</span>
+</label>{{else}}<p class="empty">Nothing to review: no instruction files, skills, hooks or listed tools were found.</p>{{end}}
+</form>
+{{if .Total}}{{template "pager" .Pager}}{{end}}
+</div>
+<dialog class="modal confirm" id="review-confirm" aria-labelledby="review-confirm-t" tabindex="-1">
+<div class="modal-box">
+<header class="modal-head"><h3 id="review-confirm-t">Send to {{.Host}}?</h3><p class="confirm-text"><span data-send-count>0</span> <span data-send-noun>artifacts</span>, about <span data-send-tokens>0</span> tokens, to {{.Model}}.</p></header>
+<footer class="modal-foot"><form method="dialog"><button type="submit" class="btn">Cancel</button></form><button type="submit" form="review" class="btn primary">Send</button></footer>
+</div>
+</dialog>
+{{else}}
+<section class="card pad">
+<h2>The LLM review is off</h2>
+<p class="sub">Turn it on in <a href="/settings">Settings</a> with your endpoint, model and the env var that holds the key.</p>
+</section>
+{{end}}
+{{end}}
+{{template "bottom" .}}

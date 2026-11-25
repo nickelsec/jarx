@@ -1,0 +1,26 @@
+{{template "top" .}}
+{{with .Body}}
+<header class="head">
+<div><h1>Overview</h1><p class="sub">What your coding agents can see and reach</p></div>
+</header>
+{{with .Summary}}
+<section class="card summary" data-summary aria-label="Summary">
+<div class="sum-main">
+<div class="sum-total"><span class="big">{{.Total}}</span><span class="dim">findings</span></div>
+<svg class="sevbar" viewBox="0 0 1000 8" preserveAspectRatio="none" aria-hidden="true"><rect class="track" width="1000" height="8"></rect>{{range .Segs}}<rect class="{{.Class}}" x="{{.X}}" width="{{.W}}" height="8"></rect>{{end}}</svg>
+<ul class="legend">{{range .Legend}}<li class="{{if not .N}}zero{{end}}"><i class="sq f-{{.Key}}"></i>{{.N}} {{.Label}}</li>{{end}}{{if .New}}<li class="legend-new"><a href="/?new=1">{{.NewLabel}}</a></li>{{end}}</ul>
+</div>
+<div class="sum-side">
+<a class="stat" href="/changes"><span class="stat-n">{{.Changed}} changed</span><span class="faint">{{if .Since}}since {{.Since}}{{else}}first scan{{end}}</span></a>
+<div class="stat"><span class="stat-n">{{.Projects}} projects</span><span class="faint">scanned</span></div>
+<div class="stat"><span class="stat-n">{{.Servers}} MCP servers</span><span class="faint">defined</span></div>
+</div>
+</section>
+{{end}}
+<section class="block">
+<div class="block-head"><h2>Findings</h2></div>
+{{template "toolbar" .Toolbar}}
+{{template "findings" .}}
+</section>
+{{end}}
+{{template "bottom" .}}

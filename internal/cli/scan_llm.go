@@ -68,10 +68,15 @@ var kindWords = []struct {
 // review's findings and the exit code; stop means ctrl+c, so the scan
 // stops with that code instead of printing the rest.
 func (r *llmRun) run(env platform.Env, projects []model.Project) ([]finding.Finding, int, bool) {
-	arts := llm.Collect(r.s, projects)
+	// What was skipped in the dashboard isn't sent, until it changes.
+	arts, skipped := llm.Unskipped(llm.Collect(r.s, projects), llm.LoadSkips(env))
 	cache := llm.LoadCache(env)
 	plan := llm.Plan(r.ep, arts, cache)
 	switch {
+	case len(arts) == 0 && skipped > 0:
+		r.p.Say(r.text("llm review: nothing to review, " + plural(skipped, "artifact is", "artifacts are") + " skipped"))
+		r.p.Blank()
+		return nil, exitOK, false
 	case len(arts) == 0:
 		r.p.Say(r.text("llm review: nothing to review"))
 		r.p.Blank()
@@ -83,7 +88,7 @@ func (r *llmRun) run(env platform.Env, projects []model.Project) ([]finding.Find
 		res, _ := llm.Review(context.Background(), netguard.NewLLM(), r.ep, r.s, arts, cache)
 		return res.Findings, exitOK, false
 	}
-	r.preview(plan)
+	r.preview(plan, skipped)
 	r.p.Blank()
 	r.p.YesNo(r.text("send "+plural(plan.Send, "artifact", "artifacts")+" to "+plan.Host+"?"), false, nil)
 	a, done := newAsker(r.p, r.s, r.st)
@@ -132,9 +137,9 @@ func (r *llmRun) send(a *asker, arts []llm.Artifact, cache *llm.Cache) (llm.Resu
 
 func (r *llmRun) text(v string) redact.Text { return scrubbed(r.s, v) }
 
-func (r *llmRun) preview(plan llm.Preview) {
+func (r *llmRun) preview(plan llm.Preview, skipped int) {
 	v := report.LLMPreviewView{
-		Send: plan.Send, Tokens: plan.Tokens, Cached: plan.Cached, Failed: plan.Failed, New: plan.New, Parallel: r.parallel,
+		Send: plan.Send, Tokens: plan.Tokens, Cached: plan.Cached, Failed: plan.Failed, New: plan.New, Skipped: skipped, Parallel: r.parallel,
 		Host: r.text(plan.Host), Model: r.text(r.ep.Model), KeyEnv: r.text(r.keyEnv),
 	}
 	for _, k := range kindWords {

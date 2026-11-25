@@ -23,7 +23,7 @@ func TooLarge() finding.Rule {
 	return finding.Rule{
 		ID: "JARX-HISTORY-002", Severity: finding.Info, Title: "A history file is too large to read",
 		Detail: "jarx skips history files over 200 MB, so this one wasn't checked for leaks or modes",
-		Fix:    "nothing to do; delete old sessions if you want it checked",
+		Fix:    "nothing to do. Delete old sessions if you want it checked.",
 	}
 }
 

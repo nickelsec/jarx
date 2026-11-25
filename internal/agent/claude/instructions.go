@@ -64,7 +64,7 @@ func ImportsCredential() finding.Rule {
 		Severity: finding.High,
 		Title:    "an @import pulls in a credential file",
 		Detail:   "an instruction file pulls a credential file into Claude's context",
-		Fix:      "remove the @import or symlink; Claude would load the secret as instructions",
+		Fix:      "remove the @import or the symlink. Otherwise Claude loads the secret as if it were instructions.",
 	}
 }
 

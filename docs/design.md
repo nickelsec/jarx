@@ -405,6 +405,14 @@ went away", not "line 12 changed".
 
 - Snapshots go through `jarxdir` as `snapshots/<UTC time>-<random>.json`,
   and each save drops all but the newest 20.
+- `snapshot.List` names the saved snapshots by ID (their file name) and
+  time, and `snapshot.Load` reads one by an ID from that list.
+- Each scan also adds a line to `runs.json`, the run log the dashboard's
+  scan history reads: when it ran, how many findings, how many were new,
+  and how many items were added, removed or changed. It holds times and
+  numbers only, never text from a scan. It keeps the newest 200 lines and
+  counts every scan. A log that's broken or from a newer jarx shows a
+  note, and the next scan starts it over.
 - Reading one back puts every string through the scrubber again. That's
   safe because scrubbing is idempotent: a match that overlaps a mask the
   scrubber writes is left alone. A mask only counts when it's one of the
@@ -683,6 +691,30 @@ and `Origin`). Every request also goes through a Host allowlist
 (`127.0.0.1:<port>`, `localhost:<port>`) to stop DNS rebinding. A strict CSP
 blocks inline script, and `frame-ancestors 'none'` stops framing.
 
+How `internal/ui`'s guard does it, in the order every request meets it:
+
+1. Every answer, refusals and redirects too, carries the CSP
+   (`default-src 'none'`, and `'self'` only for script, style, fonts,
+   images, fetches and forms, no `unsafe-inline` or `unsafe-eval`),
+   `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `no-store` and
+   same-origin opener and resource policies. It never sends a CORS
+   header.
+2. A Host that isn't `127.0.0.1:<port>` or `localhost:<port>` gets a 403.
+   `[::1]` isn't on the list, since the server only listens on IPv4
+   loopback.
+3. A `t` in the query is checked in constant time and works once. Its
+   cookie holds a separate random session value, never the token, so the
+   link can't be replayed from the history or a shared screen. A wrong or
+   used token is a 403 and sets nothing.
+4. Anything without the session cookie is a 403 that says to open the
+   printed link.
+5. Anything but GET, HEAD and OPTIONS also has to pass Go's
+   `http.CrossOriginProtection`.
+
+The server listens on `127.0.0.1` with port 0, so the OS picks a free
+port, and has a 5s header timeout and a 64 KiB header cap. Ctrl+C shuts it
+down and waits up to 5s for answers in flight.
+
 Sources: https://www.calhoun.io/csrf-protection-via-headers-in-go-125,
 https://developer.mozilla.org/en-US/docs/Web/Security/Attacks/CSRF
 
@@ -764,7 +796,14 @@ prints what comes back.
 - **The preview** says how many artifacts would go and roughly how many
   tokens, how many at a time, and, after an earlier run, how many are
   cached and not sent, how many failed last time and are sent again, and
-  how many are new or changed.
+  how many are new or changed. When some were skipped in the dashboard, a
+  `skipped` line says how many.
+- **Skips.** `llm-skips.json` in the state dir is the artifacts skipped in
+  the dashboard, by `llm.KeyOf`: a hash of the artifact's kind, name and
+  text, not of the endpoint or model. A skip lasts until the artifact
+  changes. A skipped artifact is never sent, by the dashboard or by `jarx
+  scan --llm`, and what an earlier review found in it doesn't show. The
+  file holds hashes and times only. A broken one skips nothing.
 - **When it stops.** A rejected key or an endpoint jarx can't reach stops
   the whole review with that error, since every request after it would
   fail the same way. The requests already out finish, and nothing new
@@ -1116,6 +1155,218 @@ width, `tree` and `spacedTree` for blocks, and `branch` for title and
 detail lines. Tests pin the layout with an exact expected view of the
 demo scan at 80 columns, so a layout change shows up as a test change.
 
+## Dashboard look
+
+Agreed before any `ui` code from a clickable mockup, then reworked over
+several rounds of feedback on the real pages. The dashboard shows the same
+data as the CLI, grouped the same way: findings worst first, and every
+critical and high one always shown.
+
+### Layout
+
+- **Sidebar:** the logo, then Overview, Scan, Changes, LLM review and
+  Inventory. A thin
+  line, then Projects: user config first with a small person icon, then
+  the projects worst first by folder name, with the full path on hover and
+  the finding count on the right. A project that's gone shows a STALE tag
+  instead. The first 6 show, and VIEW ALL N opens the rest (SHOW LESS
+  folds them back). The list scrolls on its own, so Settings never moves.
+  Settings sits at the bottom with the light and dark toggle beside it.
+- **Overview:** a summary card that counts and never filters: the total,
+  a thin bar split by severity with a legend, an "N new issues" pill that
+  shows just the new ones, and on the right what changed since the last
+  scan, how many projects were scanned and how many MCP servers are
+  defined. Then the findings table.
+- **Findings table:** severity, the finding's title with its evidence cut
+  to 72 characters, the project, the file and the rule. A row opens a
+  modal with the vulnerable line (with Copy path), then the issue and the
+  recommendation in one box, and a footer with the project path, agent
+  and scope, and Open project. The modal closes on X, Escape or a click
+  outside it.
+- **Project page:** the path, each agent's trust, how its files were
+  listed (from git or found on disk), its counts by severity, and its
+  findings with the same table and filters. Its other tabs (Loads,
+  Credentials and reach, MCP, Permissions, Egress, Sessions) moved to a
+  later phase.
+- **Scan:** the one place to scan again. While no scan runs, the last
+  scan's time and its findings, projects and new findings. While one runs,
+  the scan's five steps from the progress line, each ticked off as it
+  finishes, the current one with its count, and the seconds so far. Then
+  Rescan, a link to the scan history on Changes with how many scans there
+  have been, and the extra repos: a path box with Browse and Add, and the
+  saved folders under it, each with a Remove that asks first. Browse opens
+  a folder browser that jarx serves itself, since a browser never tells a
+  page the real path of a folder you pick. It lists folder names only,
+  never files, hides dot-folders, starts at the home folder and stays
+  inside the fake home with `--home`.
+- **Changes:** the date and time of the previous scan, or of an older
+  snapshot picked in Compare with, then three boxes for added, removed and
+  changed that filter the list below them (with Clear all). One list of changes, each tagged ADDED, REMOVED or CHANGED.
+  A finding that's still there shows as the finding, and View finding
+  opens its modal right there. Then the scan history: every scan with its
+  time, how many findings were new, and what changed, plus how many scans
+  there were in all.
+- **LLM review:** the host and model, five counts (to send, cached,
+  failed last time, new, skipped), then a paged checklist of every
+  artifact with its kind, project and state. New and failed ones start
+  checked. What you check is kept as you page, and All means every
+  artifact that isn't skipped. Review checked asks first, saying how many
+  artifacts, about how many tokens and where they go, then sends in the
+  background with a progress bar and a toast when it ends. Rerun failed
+  checks just the ones that failed last time and asks. Skip checked and
+  Unskip checked change the skip list; a skipped one shows as SKIPPED.
+  Findings from earlier reviews show from the
+  cache everywhere findings show, with nothing sent.
+- **Inventory:** a summary of what the agents can see and use. A card
+  per agent (version, how it's installed, whether it's on PATH, its config
+  folder), then the totals the terminal's scanned block counts, from the
+  same counter (`report.Totals`), so the two never disagree. Then every
+  project with its trust, how its files were listed and its counts of
+  instructions, skills, MCP servers and findings, and every MCP server
+  once: its agent, where it's defined, what it runs (a remote one by host
+  only, since a URL's path or query can hold a token), whether the agent
+  starts it, what the probe found, and how many tools it lists. Only
+  "trusted" shows as a green pill; untrusted and unknown are plain.
+- **Settings:** the LLM review's base URL, model, key env var (and
+  whether it's set in the terminal that started `jarx ui`) and parallel
+  requests, with Save (or Turn on), Test connection and Turn off, which
+  asks first. They're checked the way `jarx setup llm` checks them. Then
+  about (what was scanned and when, the version and the state dir).
+
+Notices are toasts in the top right, in the caps font with a tick or a
+warning icon, with an X to dismiss. They fade after a few seconds. "Scan
+complete" shows on whatever page is open when a rescan ends.
+
+Moved to a later phase: exposure paths on the overview (an agent, the
+way in, and the credential it reaches), an "at a glance" column, the
+project page's other tabs, and opening the browser for you.
+
+### Filters
+
+Above the table: a search box that filters as you type (`/` jumps to it),
+then one dropdown each for Severity, Project, Agent and Category. Each is a
+checkbox list with Clear and Apply, and its button names what's picked,
+like "Severity: High, Medium". Then a New only toggle, and Clear all when
+anything is on. Filters live in the URL, so back, reload and shared links
+work.
+
+Under the table: `Showing 1–20 of 45`, rows per page (20, 30 or 50), and
+page links with an ellipsis for skipped pages. A page past the end shows
+the last one.
+
+### Color
+
+Dark by default, with a light theme behind the toggle, remembered in the
+browser. Both are neutral grays in the spirit of ChatGPT's and Notion's,
+and severity is the only color on the page, muted, and always next to its
+word.
+
+| Token | Dark | Light | Use |
+|---|---|---|---|
+| `side` | `#0a0a0a` | `#f9f9f9` | sidebar |
+| `bg` | `#0f0f0f` | `#ffffff` | page |
+| `surface` | `#151515` | `#ffffff` | cards |
+| `raised` | `#1a1a1a` | `#f7f7f7` | nested panels, table hover |
+| `hover` | `#202020` | `#efefef` | nav and button hover, active nav |
+| `border` | `#222222` | `#e8e8e8` | dividers |
+| `border-2` | `#2e2e2e` | `#d6d6d6` | inputs, outlined buttons |
+| `text` | `#ececec` | `#0d0d0d` | body |
+| `text-2` | `#a3a3a3` | `#5b5b5b` | secondary |
+| `text-3` | `#8a8a8a` | `#6b6b6b` | labels, hints |
+| `primary` | `#ececec` on `#0f0f0f` | `#0d0d0d` on `#ffffff` | the one primary button per view |
+| `crit` | `#f0a3ab`, solid `#8e3441` for the CRIT pill | `#a82e3d` | critical |
+| `high` | `#e6a493` | `#9a3c27` | high |
+| `med` | `#d8bc88` | `#77561a` | medium |
+| `info` | `#9cbccb` | `#2c5f72` | info, new |
+| `ok` | `#a6c6b0` | `#2d6a44` | trusted, removed |
+
+Severity text sits on a 14 to 16% tint of its color. Every text pair
+passes 4.5:1 in both themes. Scrollbars are thin and dark, with no arrows.
+
+### Type
+
+Two families, both under the SIL Open Font License and embedded, since
+nothing loads from a CDN:
+
+- **Geist Mono** in capitals with wide letter spacing for headings,
+  labels, tags and pills (OVERVIEW, PROJECTS, HIGH, ADDED, CLAUDE
+  TRUSTED), and as-is for code, paths and rule IDs. Paths keep their case
+  even in a caps heading, since they're case sensitive on some systems.
+- **Inter** (its optical size axis gives titles a display cut) for
+  anything read as a sentence: finding titles, descriptions, menus,
+  buttons and filters, at 13.5px.
+
+Short texts and single words start with a capital. Rule text in the modal
+reads as sentences, ending with a period.
+
+### Logo
+
+`docs/logo.png` traced into rectangles: a 9 KB SVG instead of an 856 KB
+PNG, with no background and about 3px between the jar and the lettering.
+Light mode inverts it. The favicon is the jar alone on a dark tile, so it
+shows on light and dark browser tabs. Both are embedded.
+
+### How it's built
+
+One CSS file with these tokens as custom properties and no inline `style`
+attributes, since the CSP allows styles only from that file. Severity
+bars are inline SVG colored by class for the same reason. A test checks
+every page for inline styles, inline scripts and `on*=` handlers.
+
+Every filter, page link and form is a plain URL, so the pages work as
+links and forms without JavaScript. Two embedded scripts add the rest:
+
+- `theme.js` sets the theme before the page paints, so it never flashes.
+- `app.js` makes the dashboard feel like one page. A link or form inside
+  the dashboard fetches the new page and swaps the main part in place,
+  keeps the sidebar's current item in step, and updates the URL, so back
+  and forward still work. A swap that takes more than 150ms shows a
+  skeleton of a page meanwhile. It also does live search, the facet menus,
+  the modals (finding, folder browser, confirm), Copy path, the toasts,
+  the theme toggle, "All" on the LLM review checklist, and watching a
+  rescan: a page that says one is running asks `/rescan/status` every
+  700ms, updates the Scan page's steps, and swaps in the new results when
+  it ends.
+
+The modals need `app.js` to open. With scripts off, a finding row and
+Remove do nothing, and a running rescan only shows once the page is
+reloaded.
+
+### Actions
+
+The pages read through a `ui.App` and act through it. `cli` implements it
+over the scan setup, so the `ui` package never touches disk.
+
+- **Rescan** is a POST that starts a scan in the background and goes back
+  to the page it came from. One runs at a time. The scan's progress line
+  goes to a printer that draws nothing, with a watcher that hands each
+  step and count to `/rescan/status`, a small JSON answer.
+- **Repos:** POSTs to add or remove one, checked the way `jarx setup repo
+  add` checks: a full path or one starting with `~`, a folder, inside the
+  fake home under `--home`, not saved already. Removing names the repo by
+  its place in the list, so no path goes back and forth. Both write only
+  jarx's own `config.json`.
+- **Compare with** diffs the newest snapshot against an older one picked
+  by ID. An ID only loads if it's in the list of saved snapshots, so it
+  can't name another file. Snapshots don't change once saved, so each
+  comparison is worked out once and kept until the next scan.
+- **LLM:** a POST saves the settings, tests the connection, or turns the
+  review off. Another starts a review of the checked keys in the
+  background, one at a time, with the key read from the terminal that
+  started `jarx ui` only when it runs. A skipped artifact is left out even
+  when checked. `/rescan/status` carries the review's progress too, and
+  why it stopped when it did. A third skips or unskips.
+- Every write goes through the guard's cookie and cross-origin check, form
+  bodies stop at 16 KiB, and a form only ever goes back to a page on the
+  dashboard: anything with a scheme, a host, `//`, a backslash or
+  `/static/` goes to the overview instead. A notice is picked by a fixed
+  key (`msg=repo-added`), so nothing from the URL is ever shown as text.
+
+`jarx ui` scans the way `jarx scan` does when it starts, with the same
+progress line, and saves the snapshot and the run log, so "changed" means
+the same in both. It serves that scan. Every text in it is masked
+already, and `html/template` escapes it.
+
 ## Package layout
 
 | Package | Job | PRD section |
@@ -1124,7 +1375,7 @@ demo scan at 80 columns, so a layout change shows up as a test change.
 | `internal/cli` | subcommands with stdlib `flag` | CLI |
 | `internal/platform` | OS facts only: home, GOOS, injected env, PATH, jarx's state dir, system roots (`/etc`, `/Library/Application Support`, `%ProgramData%`, `%ProgramFiles%`), and terminal facts for the report (a terminal or not, width, ANSI, UTF-8). Registry reads land here in phase 3 (macOS plists aren't read, see Limits in the PRD). Agent paths belong to the adapters, which join them onto these roots. | Scope, cross-platform rule |
 | `internal/fsys` | the only file reader, with no write methods. Confined to the fake home under `--home`. A 10 MiB `ReadFile` cap, where every refused file is recorded so it becomes a "skipped, too large" finding and is never dropped silently. A skip list for bulk dirs (`node_modules`, `.git`, `vendor`, build output) that still keeps agent files inside them (`.claude/`, `.codex/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`, `.mcp.json` and the like). Symlinks are listed but never descended into. Refuses network paths (and symlinks to them), anything that isn't a regular file, and content reads of credential locations (see "What an @import can point at"). | Walking a repo |
-| `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
+| `internal/jarxdir` | the only file writer: `os.Root` on jarx's state dir, atomic writes, for config, cursor, cache, snapshots, run log and fingerprint key. Also `config.json` (versioned, with the saved repos), which it reads without creating the state dir | What jarx writes to disk |
 | `internal/redact` | `Text` type, scrubber that always masks pattern matches (with a likely placeholder flag for low entropy), `Secret` for values known to be secret, masks like `REDACTED:<type>:<12 hex fingerprint>`, HMAC fingerprint with a per-install key created lazily in the state dir. A `Text` keeps the kind and fingerprint of what it masked, never the value. | Promise 4, Secrets |
 | `internal/model` | agent-neutral inventory, `Origin`, `Path`, `Setting[T]` (one layer per scope, highest first, with each layer marked in effect or not and why; adapters decide, the model only holds the result), `Project`, `Unknown`. Grows per phase. | Architecture |
 | `internal/finding` | Finding, severity, rules as plain values with IDs like `JARX-MCP-001`, a `Registry` built by `scan` from every analyzer's rules (no global registry), worst-first sort, and `JARX-SCAN-001` for files fsys skipped as too large | Detection rules |
@@ -1145,7 +1396,7 @@ demo scan at 80 columns, so a layout change shows up as a test change.
 | `internal/probe` | which servers, env expansion rules, concurrency, status | MCP probing, Server status |
 | `internal/analyze/capability` | three-layer view per tool | Capability view |
 | `internal/analyze/egress` | the "where your agent talks to" panel | Where your agent talks to |
-| `internal/snapshot` | versioned schema, retention, diff | Snapshots and diff |
+| `internal/snapshot` | versioned schema, retention, diff, and the scan run log | Snapshots and diff |
 | `internal/analyze/drift` | hash diffs, rerun poison on changed tools | Snapshots, Drift |
 | `internal/history` | cursor, jsonl, zstd and read-only sqlite readers (observed formats) | Session history |
 | `testdata/gendemo` | writes the demo home's binary history fixtures (a `.zst` rollout, Codex's SQLite files) with `go run ./testdata/gendemo`. Go ignores `testdata`, so it's never in the build, and it sits outside the demo home so jarx doesn't scan it | Session history |

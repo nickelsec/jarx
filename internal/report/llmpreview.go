@@ -21,6 +21,7 @@ type LLMPreviewView struct {
 	Cached   int     // answered last time, not sent
 	Failed   int     // failed last time, sent again
 	New      int     // never sent, or changed since
+	Skipped  int     // skipped in the dashboard, not sent
 	Parallel int     // sent this many at a time
 	Host     redact.Text
 	Model    redact.Text
@@ -56,6 +57,9 @@ func (p *Printer) LLMPreview(v LLMPreviewView) {
 			last = append(last, strconv.Itoa(v.New)+" new")
 		}
 		nodes = append(nodes, node{line{{text: own(pad(lastRun, width))}, {text: own(strings.Join(last, p.sep()))}}})
+	}
+	if v.Skipped > 0 {
+		nodes = append(nodes, node{line{{text: own(pad("skipped", width))}, {text: own(strconv.Itoa(v.Skipped) + " not sent, you skipped them")}}})
 	}
 	p.tree(append(nodes,
 		node{line{

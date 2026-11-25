@@ -544,16 +544,108 @@ masked leak.
 
 ## Phase 7: Dashboard
 
-- [ ] talk through how the UI should look (before any `ui` code)
-- [ ] `ui` server and security middleware with tests
-- [ ] pages
-- [ ] snapshot picker and write actions (repo add and remove, rescan)
-- [ ] the LLM review button and LLM settings, with how many to send at
-  once (phase 8 came first)
-- [ ] choose which artifacts the LLM review sends, rerun only the ones that
-  failed, and show a skipped one as "not reviewed, you skipped it". A skip
+- [x] talk through how the UI should look (before any `ui` code). Agreed
+  from a clickable mockup and written up as Dashboard look in design.md:
+  a projects-first sidebar, an overview of severity tiles, exposure paths
+  and the findings table, project pages with tabs, an LLM review page with
+  a checklist, and settings. Dark only and matte, gray for buttons and
+  pickers, color only for severity. Space Grotesk for titles and Inter for
+  text, embedded. Quick filters plus a Filters panel with Clear all. The
+  logo traced to an SVG
+  - Not covered yet: the fonts and logo files themselves come with the
+    pages item, where the CSS uses them (6245ca6)
+- [x] `ui` server and security middleware with tests. `ui.Listen` binds
+  `127.0.0.1` on a random port, and `ui.Protect` puts every request
+  through the guard: security headers and a strict CSP on every answer and
+  never CORS, the Host allowlist, a one-time token traded for an
+  `HttpOnly`, `SameSite=Strict` session cookie with a 303, and Go's
+  cross-origin check on writes. `jarx ui [--home]` prints the link whole,
+  serves a placeholder page until the pages item, and shuts down on
+  ctrl+c. Tests break each protection on purpose: host, token reuse,
+  cross-origin writes and framing all fail when removed
+  - Not covered yet: the pages (next item), and opening the browser for
+    you (jarx prints the link instead) (e77e01b)
+- [x] pages: Overview, a project page, Changes, LLM review and Settings,
+  reworked over several feedback rounds (Dashboard look in design.md has
+  the result). The overview has a summary card that counts without
+  filtering, a findings table with live search, a dropdown per facet
+  (severity, project, agent, area), New only, Clear all and paging, and a
+  modal per finding with the vulnerable line, Copy path, the issue and
+  the recommendation. Changes has filter boxes, one tagged list where
+  View finding opens the modal in place, and the scan history. Each scan
+  now logs its counts to `runs.json` in the state dir
+  (`snapshot.AppendRun` and `Runs`, the newest 200, every scan counted).
+  Dark and light themes, Inter and Geist Mono embedded (OFL), the traced
+  logo and favicon, one CSS file, and two small scripts: one sets the
+  theme before paint, the other swaps pages in place so nothing reloads.
+  `jarx ui` scans like `jarx scan`, saves the snapshot and the run log,
+  and serves the result. `snapshot.FindingKey` tags new findings, and
+  `llm.States` and `llm.KeyOf` give each artifact its state and a content
+  hash. Rule texts got rewritten as plain sentences. `docs/logo.png` is
+  the source art
+  - Not covered yet: exposure paths and the "at a glance" column on the
+    overview, the project page's other tabs (loads, credentials and reach,
+    MCP, permissions, egress, sessions), sending and skipping from the LLM
+    review page (items 5 and 6), settings changes from the page (items 4
+    and 5), and opening a finding's modal without JavaScript. The script
+    is checked by driving headless Edge, not by `go test` (6d21a98)
+- [x] snapshot picker and write actions (repo add and remove, rescan): a
+  Scan page in the menu after Overview, the only place to scan again. A
+  rescan runs in the background (`ui.App`, `uiApp` in `cli`), one at a
+  time, and every page shows it running. Its steps come from the progress
+  line through a new `report.Printer.Watch`, and `/rescan/status` answers
+  the page that waits. The Scan page lists the steps as they tick off,
+  then a "Scan complete" toast shows wherever you are and the page
+  refreshes in place. Extra repos moved there from Settings: type a path
+  or pick one in a folder browser jarx serves (names only, no dot-folders,
+  inside the fake home with `--home`), and Remove asks first. The checks
+  are shared with `jarx setup repo add`. Changes has Compare with, a
+  picker of the saved snapshots (`snapshot.List` and `Load`, only listed
+  IDs load), cached per snapshot until the next scan. Also toasts instead
+  of a notice line, a skeleton while a slow page loads, styled dropdowns,
+  and the LLM review checklist paged (generic `paginate`). Writes are
+  POSTs behind the cookie and cross-origin check, with a 16 KiB body cap
+  and a redirect that only goes back to a dashboard page
+  - Not covered yet: the modals and the live progress need JavaScript; the
+    browser check only saw the first step because the demo scan finishes
+    in half a second (the step reporting is tested in Go); and adding a
+    repo doesn't start a scan by itself (b3df71e)
+- [x] the LLM review button and LLM settings, with how many to send at
+  once (phase 8 came first): Settings edits the base URL, model, key env
+  var and parallel requests with `jarx setup llm`'s own checks, tests the
+  connection and turns the review off (asking first). Review checked asks
+  first (how many, about how many tokens, where) and sends in the
+  background like a rescan, with a progress bar and a toast when it ends,
+  or why it stopped. Findings from earlier reviews show from the cache
+  everywhere, with nothing sent (`llm.FromCache`), and `llm.Estimate`
+  gives each artifact's rough token cost
+  - Not covered yet: Review checked needs JavaScript to ask first; the key
+    is only ever read from the terminal that started `jarx ui`, so setting
+    it means restarting from a terminal where it's set
+- [x] choose which artifacts the LLM review sends, rerun only the ones that
+  failed, and show a skipped one as SKIPPED. A skip
   is remembered by the artifact's content hash in jarx's state dir, so a
-  changed file comes back
+  changed file comes back: `llm-skips.json` with `llm.LoadSkips` and
+  `Unskipped`. The checklist keeps what you check as you page, All means
+  every artifact that isn't skipped, Rerun failed checks just the failed
+  ones, and Skip checked and Unskip checked change the list. A skipped one
+  is never sent and its old findings don't show. `jarx scan --llm` leaves
+  skipped ones out too, and its preview gains a `skipped` line
+  - Not covered yet: the picks across pages live in the browser's session
+    storage, so they start over in a new tab
+- [x] inventory: a page after LLM review with each agent's version and
+  install, the totals the terminal's scanned block counts (from the same
+  counter, `report.Totals`), every project with its trust and counts, and
+  every MCP server with where it's defined, what it runs, whether it
+  starts, what the probe found and its tools. Only "trusted" shows as
+  trusted, here and on the project page. The findings filter's Area is
+  called Category now
+  - Not covered yet: whether an MCP server is "official", since there's no
+    documented list to check against
+- [x] moved to a later phase: exposure paths and the "at a glance" column
+  on the overview, the project page's other tabs (loads, credentials and
+  reach, MCP, permissions, egress, sessions), and opening the browser for
+  you. The dashboard does what this phase set out to do without them
 
 **Run it:** `jarx ui --home testdata/demo`.
 

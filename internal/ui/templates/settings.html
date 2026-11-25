@@ -1,0 +1,38 @@
+{{template "top" .}}
+{{with .Body}}
+<header class="head">
+<div><h1>Settings</h1></div>
+</header>
+<section class="card pad">
+<div class="block-head"><h2>LLM review</h2>{{if .LLM.On}}<span class="pill">on</span>{{else}}<span class="pill plain">off</span>{{end}}</div>
+<form class="llm-form" method="post" action="/settings/llm">
+<input type="hidden" name="action" value="save">
+<div class="fields">
+<label class="field"><span class="field-label">Base URL</span><input type="text" name="url" value="{{.BaseURL}}" placeholder="https://api.example.com/v1" autocomplete="off" spellcheck="false" required></label>
+<label class="field"><span class="field-label">Model</span><input type="text" name="model" value="{{.LLM.Model}}" placeholder="model name" autocomplete="off" spellcheck="false" required></label>
+<label class="field"><span class="field-label">Key env var</span><input type="text" name="keyenv" value="{{.LLM.KeyEnv}}" placeholder="JARX_LLM_KEY" autocomplete="off" spellcheck="false" required>{{if .LLM.On}}<span class="field-hint{{if not .LLM.KeySet}} f-text-med{{end}}">{{if .LLM.KeySet}}Set in the terminal that started jarx ui{{else}}Not set in the terminal that started jarx ui{{end}}</span>{{end}}</label>
+<label class="field"><span class="field-label">Parallel requests</span><input type="text" name="parallel" value="{{if .LLM.Parallel}}{{.LLM.Parallel}}{{end}}" placeholder="4" inputmode="numeric" autocomplete="off"></label>
+</div>
+<button type="submit" class="btn primary">{{if .LLM.On}}Save{{else}}Turn on{{end}}</button>
+</form>
+{{if .LLM.On}}<div class="llm-actions">
+<form class="inline" method="post" action="/settings/llm"><input type="hidden" name="action" value="test"><button type="submit" class="btn">Test connection</button></form>
+<button type="button" class="btn ghost" data-open="llm-off" aria-haspopup="dialog">Turn off</button>
+<dialog class="modal confirm" id="llm-off" aria-labelledby="llm-off-t" tabindex="-1">
+<div class="modal-box">
+<header class="modal-head"><h3 id="llm-off-t">Turn off the LLM review?</h3><p class="confirm-text">This removes the endpoint, model and key env var name. The env var itself stays as it is.</p></header>
+<footer class="modal-foot"><form method="dialog"><button type="submit" class="btn">Cancel</button></form><form class="inline" method="post" action="/settings/llm"><input type="hidden" name="action" value="off"><button type="submit" class="btn danger">Turn off</button></form></footer>
+</div>
+</dialog>
+</div>{{end}}
+</section>
+<section class="card pad">
+<h2>About</h2>
+<dl class="kv">
+<dt>Scanned</dt><dd>{{.Where}} · {{.Scanned}}</dd>
+<dt>Version</dt><dd class="mono">{{.Version}}</dd>
+<dt>State dir</dt><dd class="mono">{{.StateDir}}</dd>
+</dl>
+</section>
+{{end}}
+{{template "bottom" .}}

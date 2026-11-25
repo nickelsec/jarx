@@ -10,14 +10,17 @@ import (
 	"runtime"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/nickelsec/jarx/internal/catalog"
 	"github.com/nickelsec/jarx/internal/fsys"
+	"github.com/nickelsec/jarx/internal/jarxdir"
 	"github.com/nickelsec/jarx/internal/platform"
 	"github.com/nickelsec/jarx/internal/redact"
 	"github.com/nickelsec/jarx/internal/report"
+	"github.com/nickelsec/jarx/internal/snapshot"
 )
 
 // result is what one Run call produced.
@@ -103,9 +106,8 @@ func TestNoArgsPrintsUsageToStderr(t *testing.T) {
 }
 
 func TestUnknownCommandIsAUsageError(t *testing.T) {
-	// "version" is no longer a subcommand, and "ui" doesn't exist until
-	// phase 7.
-	for _, cmd := range []string{"frobnicate", "version", "ui"} {
+	// "version" is no longer a subcommand.
+	for _, cmd := range []string{"frobnicate", "version"} {
 		t.Run(cmd, func(t *testing.T) {
 			got := run(cmd)
 
@@ -405,8 +407,8 @@ func TestScanShowsTheHomeExists(t *testing.T) {
 
 func TestScanWritesOnlyItsSnapshot(t *testing.T) {
 	t.Setenv("COLUMNS", "400") // long temp paths, read in full
-	// The PRD: every scan saves a masked snapshot. With no secrets found,
-	// that's all a scan writes.
+	// The PRD: every scan saves a masked snapshot, and logs its counts for
+	// the dashboard's history. With no secrets found, that's all it writes.
 	home := fakeHome(t, "")
 
 	got := run("scan", "--all", "--home", home)
@@ -422,8 +424,36 @@ func TestScanWritesOnlyItsSnapshot(t *testing.T) {
 		}
 		return err
 	})
-	if err != nil || len(written) != 1 || !regexp.MustCompile(`^\.jarx-state/snapshots/[^/]+\.json$`).MatchString(written[0]) {
-		t.Errorf("scan wrote %q (%v), want one snapshot and nothing else", written, err)
+	slices.Sort(written)
+	if err != nil || len(written) != 2 || written[0] != ".jarx-state/runs.json" || !regexp.MustCompile(`^\.jarx-state/snapshots/[^/]+\.json$`).MatchString(written[1]) {
+		t.Errorf("scan wrote %q (%v), want one snapshot, the run log and nothing else", written, err)
+	}
+}
+
+func TestEachScanIsLoggedWithItsCounts(t *testing.T) {
+	demo := demoCopy(t)
+
+	run("scan", "--home", demo)
+	second := run("scan", "--home", demo)
+
+	env, err := platform.FromHome(demo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := jarxdir.Open(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	log, note := snapshot.Runs(d)
+	if note != "" || log.Total != 2 || len(log.Runs) != 2 {
+		t.Fatalf("run log = %+v, %q; want two runs", log, note)
+	}
+	if !log.Runs[1].First || log.Runs[0].First {
+		t.Error("only the first scan should be marked first")
+	}
+	if n := log.Runs[0].Findings; n == 0 || !strings.Contains(second.stdout, strconv.Itoa(n)+" findings") {
+		t.Errorf("the run log says %d findings, want the scan's", n)
 	}
 }
 
